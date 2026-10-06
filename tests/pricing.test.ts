@@ -14,7 +14,7 @@ import { draftSchema, type ClientOrder } from '../src/domain/types.js';
 import { orderPreview } from '../src/telegram/preview.js';
 import { draft, prepared } from './helpers.js';
 
-const hospitalityForm = { schemaVersion: 1, id: 'hospitality-list', name: 'Hospitality list', priceTier: 'hospitality', rows: [{ code: 'DEMO-A', label: 'Amber', productId: 101, netPrice: 15 }] };
+const hospitalityForm = { schemaVersion: 1, id: 'hospitality-list', name: 'Hospitality list', priceTier: 'hospitality', columns: [{ id: 'order', heading: 'Order', value: 'quantity' }], rows: [{ code: 'DEMO-A', label: 'Amber', cells: { order: { productId: 101, netPrice: 15 } } }] };
 const tiered = (clientIds = [201]) => configSchema.parse({ ...structuredClone(example), priceTiers: [{ id: 'hospitality', name: 'Hospitality', clientIds }], orderForms: [hospitalityForm] });
 const prepare = (input: Partial<ReturnType<typeof draft>>, config = tiered()) => prepareOrder(draftSchema.parse({ ...draft(), ...input }), config, new DemoConnector(), '2026-01-15');
 
@@ -43,7 +43,7 @@ describe('price tiers', () => {
     const parse = (extra: object) => configSchema.safeParse({ ...structuredClone(example), ...extra }).success;
     expect(parse({ orderForms: [hospitalityForm] })).toBe(false);
     expect(parse({ priceTiers: [{ id: 'a', name: 'A', clientIds: [1] }, { id: 'b', name: 'B', clientIds: [1] }] })).toBe(false);
-    expect(parse({ priceTiers: [{ id: 'hospitality', name: 'H', clientIds: [] }], orderForms: [{ ...hospitalityForm, rows: [{ code: '', label: 'x', productId: 1 }] }] })).toBe(false);
+    expect(parse({ priceTiers: [{ id: 'hospitality', name: 'H', clientIds: [] }], orderForms: [{ ...hospitalityForm, rows: [{ code: '', label: 'x', cells: { tester: { productId: 1 } } }] }] })).toBe(false);
     expect(tierPrices(tiered(), 'hospitality')).toEqual(new Map([[101, 15]]));
   });
   it('loads order forms listed as file paths', async () => {
@@ -58,7 +58,7 @@ describe('price tiers', () => {
 
 it('offers exactly the named products for an "A oppure B" line', async () => {
   const products = await new DemoConnector().listProducts();
-  expect(namedAlternatives('tester da chiarire: Amber hand wash 250 ml oppure Linen candle 200 g', products).map(p => p.id)).toEqual([101, 103]);
+  expect(namedAlternatives('da chiarire (A1, order): Amber hand wash 250 ml oppure Linen candle 200 g', products).map(p => p.id)).toEqual([101, 103]);
   expect(namedAlternatives('Amber hand wash 250 ml or something else', products)).toEqual([]);
   const result = await prepare({ lines: [{ query: 'Amber hand wash 250 ml oppure Linen candle 200 g', quantity: 1 }] }, tiered([]));
   expect(!result.ready && result.issues[0]?.candidates).toEqual([{ id: 101, label: 'Amber hand wash 250 ml' }, { id: 103, label: 'Linen candle 200 g' }]);

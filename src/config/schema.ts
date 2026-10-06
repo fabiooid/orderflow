@@ -17,25 +17,33 @@ const vatRuleSchema = z.object({
 
 const slug = z.string().regex(/^[a-z0-9-]+$/);
 
-/** A printed order form customers fill in by hand, mapped row by row to catalogue products. */
+/**
+ * A printed order form customers fill in by hand: printed rows crossed with the columns they write in.
+ * Each cell names the product that writing in it orders, so the form's meaning lives in data, not code.
+ */
 export const orderFormSchema = z.object({
   schemaVersion: z.literal(1),
   id: slug,
   name: z.string().min(1),
-  /** Prices printed on this form are this tier's prices. */
+  /** Prices in this form's cells are this tier's prices. */
   priceTier: slug.optional(),
   /** Printed column headings, used to tell similar forms apart. */
   headings: z.array(z.string()).default([]),
+  /** Columns customers write in: a number of pieces, or a mark (such as an X) that orders one piece. */
+  columns: z.array(z.object({ id: slug, heading: z.string().min(1), value: z.enum(['quantity', 'mark']) }).strict()).min(1),
   rows: z.array(z.object({
     /** Code printed on the row, such as an SKU; empty when the row has none. */
     code: z.string(),
     label: z.string().min(1),
-    productId: positiveId,
-    /** Product added by a mark in the tester column. */
-    testerProductId: positiveId.optional(),
-    netPrice: z.number().min(0).optional(),
+    /** Column ID → product ordered by writing in that cell. A row may leave columns out. */
+    cells: z.record(z.string(), z.object({ productId: positiveId, netPrice: z.number().min(0).optional() }).strict()),
   }).strict()).min(1),
-}).strict();
+}).strict().superRefine((form, ctx) => {
+  const columns = new Set(form.columns.map(c => c.id));
+  form.rows.forEach((row, i) => {
+    for (const id of Object.keys(row.cells)) if (!columns.has(id)) ctx.addIssue({ code: 'custom', path: ['rows', i, 'cells', id], message: 'Unknown column' });
+  });
+});
 export type OrderForm = z.infer<typeof orderFormSchema>;
 
 export const configSchema = z.object({
@@ -82,7 +90,6 @@ export const configSchema = z.object({
     if (forms.has(form.id)) ctx.addIssue({ code: 'custom', path: ['orderForms', i], message: 'Duplicate order form ID' });
     forms.add(form.id);
     if (form.priceTier && !tiers.has(form.priceTier)) ctx.addIssue({ code: 'custom', path: ['orderForms', i, 'priceTier'], message: 'Unknown price tier' });
-    if (form.priceTier && form.rows.some(r => r.netPrice === undefined)) ctx.addIssue({ code: 'custom', path: ['orderForms', i], message: 'A price-tier form needs a price on every row' });
   }
   const ids = new Set<string>();
   const intersects = (a?: string[], b?: string[]) => !a || !b || a.some(c => b.includes(c));
@@ -110,6 +117,8 @@ export function clientTier(config: Pick<AppConfig, 'priceTiers'>, clientId?: num
 /** Net prices of a tier, by product, from the order forms printed for it. */
 export function tierPrices(config: Pick<AppConfig, 'orderForms'>, tierId: string) {
   const prices = new Map<number, number>();
-  for (const form of config.orderForms) if (form.priceTier === tierId) for (const row of form.rows) if (row.netPrice !== undefined) prices.set(row.productId, row.netPrice);
+  for (const form of config.orderForms) if (form.priceTier === tierId) {
+    for (const row of form.rows) for (const cell of Object.values(row.cells)) if (cell.netPrice !== undefined) prices.set(cell.productId, cell.netPrice);
+  }
   return prices;
 }
