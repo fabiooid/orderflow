@@ -3,7 +3,7 @@ import {
   type Client as FicClient, type IssuedDocument,
 } from '@fattureincloud/fattureincloud-ts-sdk';
 import { z } from 'zod';
-import { clientSchema, preparedOrderSchema, productSchema, totalsSchema, type Client, type PreparedOrder, type SavedOrder } from '../domain/types.js';
+import { clientSchema, preparedOrderSchema, productSchema, totalsSchema, type Client, type PreparedOrder, type Product, type SavedOrder } from '../domain/types.js';
 import type { OrderConnector } from './contract.js';
 
 export type SdkPorts = {
@@ -12,10 +12,12 @@ export type SdkPorts = {
   documents: Pick<IssuedDocumentsApi, 'createIssuedDocument' | 'modifyIssuedDocument' | 'getIssuedDocument' | 'getNewIssuedDocumentTotals'>;
 };
 
+const positiveId = z.number().int().positive();
+const italianRegions = new Intl.DisplayNames(['it'], { type: 'region' });
 const countryNames = new Map<string, string>();
 const countryKey = (name: string) => name.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim();
 for (const locale of ['it', 'en']) {
-  const names = new Intl.DisplayNames([locale], { type: 'region' });
+  const names = locale === 'it' ? italianRegions : new Intl.DisplayNames([locale], { type: 'region' });
   for (let a = 65; a <= 90; a++) for (let b = 65; b <= 90; b++) {
     const code = String.fromCharCode(a, b);
     const name = names.of(code);
@@ -31,7 +33,7 @@ function countryIso(client: FicClient) {
 
 export function toFicClient(client: Client): FicClient {
   return {
-    id: client.id, type: 'company', name: client.name, country_iso: client.country, country: new Intl.DisplayNames(['it'], { type: 'region' }).of(client.country),
+    id: client.id, type: 'company', name: client.name, country_iso: client.country, country: italianRegions.of(client.country),
     address_street: client.street, address_city: client.city, address_postal_code: client.postalCode,
     address_province: client.province, email: client.email, phone: client.phone,
     vat_number: client.vatNumber, tax_code: client.taxCode, ei_code: client.sdiCode, notes: client.notes,
@@ -67,7 +69,7 @@ export function toFicOrder(input: PreparedOrder): IssuedDocument {
 function saved(document: IssuedDocument | undefined): SavedOrder {
   if (!document || document.type !== 'order') throw new Error('Expected an order response; other document types are forbidden');
   return {
-    id: z.number().int().positive().parse(document.id),
+    id: positiveId.parse(document.id),
     number: String(document.number ?? document.id),
     url: document.url ?? undefined,
   };
@@ -81,7 +83,7 @@ export class FattureInCloudConnector implements OrderConnector {
   readonly #clientWritesEnabled: boolean;
 
   constructor(companyId: number, sdk: SdkPorts, options: { writesEnabled?: boolean; clientWritesEnabled?: boolean } = {}) {
-    this.#companyId = z.number().int().positive().parse(companyId);
+    this.#companyId = positiveId.parse(companyId);
     this.#sdk = sdk;
     this.#writesEnabled = options.writesEnabled ?? false;
     this.#clientWritesEnabled = options.clientWritesEnabled ?? this.#writesEnabled;
@@ -95,32 +97,19 @@ export class FattureInCloudConnector implements OrderConnector {
     }, options);
   }
 
-  async listProducts() {
-    const products = [];
-    for (let page = 1; page <= 1000; page++) {
-      const response = await this.#sdk.products.listProducts(this.#companyId, undefined, 'detailed', undefined, page, 100);
-      const body = response.data;
-      for (const product of body.data ?? []) {
-        // Description-only catalogue entries are not orderable products. Preserve explicit zero prices.
-        if (product.net_price == null) continue;
-        if (product.use_gross_price) throw new Error('Gross-price catalogue entries require a future pricing adapter');
-        products.push(productSchema.parse({
-          id: product.id, name: product.name, code: product.code ?? '', description: product.description ?? '', netPrice: product.net_price,
-        }));
-      }
-      if (page >= (body.last_page ?? page)) return products;
-    }
-    throw new Error('Catalogue pagination limit reached');
+  listProducts(): Promise<Product[]> {
+    return this.#paginate('Catalogue', async page => (await this.#sdk.products.listProducts(this.#companyId, undefined, 'detailed', undefined, page, 100)).data, product => {
+      // Description-only catalogue entries are not orderable products. Preserve explicit zero prices.
+      if (product.net_price == null) return undefined;
+      if (product.use_gross_price) throw new Error('Gross-price catalogue entries require a future pricing adapter');
+      return productSchema.parse({
+        id: product.id, name: product.name, code: product.code ?? '', description: product.description ?? '', netPrice: product.net_price,
+      });
+    });
   }
 
-  async listClients() {
-    const clients: Client[] = [];
-    for (let page = 1; page <= 1000; page++) {
-      const { data } = await this.#sdk.clients.listClients(this.#companyId, undefined, 'detailed', undefined, page, 100);
-      clients.push(...(data.data ?? []).map(fromFicClient));
-      if (page >= (data.last_page ?? page)) return clients;
-    }
-    throw new Error('Client pagination limit reached');
+  listClients(): Promise<Client[]> {
+    return this.#paginate('Client', async page => (await this.#sdk.clients.listClients(this.#companyId, undefined, 'detailed', undefined, page, 100)).data, fromFicClient);
   }
 
   async createClient(input: Client) {
@@ -139,10 +128,7 @@ export class FattureInCloudConnector implements OrderConnector {
 
   async createOrder(input: PreparedOrder) {
     this.#assertWrites();
-    const order = preparedOrderSchema.parse(input);
-    const totals = await this.calculateTotals(order);
-    const data = toFicOrder(order);
-    data.payments_list = [{ amount: totals.gross, due_date: order.dueDate, status: 'not_paid' }];
+    const data = await this.#orderPayload(preparedOrderSchema.parse(input));
     const response = await this.#sdk.documents.createIssuedDocument(this.#companyId, { data });
     return saved(response.data.data);
   }
@@ -151,17 +137,35 @@ export class FattureInCloudConnector implements OrderConnector {
     this.#assertWrites();
     const order = preparedOrderSchema.parse(input);
     await this.getOrder(id); // Refuse to turn an invoice or other document into an order.
-    const totals = await this.calculateTotals(order);
-    const data = toFicOrder(order);
-    data.payments_list = [{ amount: totals.gross, due_date: order.dueDate, status: 'not_paid' }];
+    const data = await this.#orderPayload(order);
     const response = await this.#sdk.documents.modifyIssuedDocument(this.#companyId, id, { data });
     return saved(response.data.data);
   }
 
   async getOrder(id: number) {
-    z.number().int().positive().parse(id);
+    positiveId.parse(id);
     const response = await this.#sdk.documents.getIssuedDocument(this.#companyId, id, undefined, 'detailed');
     return saved(response.data.data);
+  }
+
+  async #orderPayload(order: PreparedOrder) {
+    const totals = await this.calculateTotals(order);
+    const data = toFicOrder(order);
+    data.payments_list = [{ amount: totals.gross, due_date: order.dueDate, status: 'not_paid' }];
+    return data;
+  }
+
+  async #paginate<T, R>(label: string, fetchPage: (page: number) => Promise<{ data?: T[] | null; last_page?: number | null }>, map: (item: T) => R | undefined) {
+    const results: R[] = [];
+    for (let page = 1; page <= 1000; page++) {
+      const body = await fetchPage(page);
+      for (const item of body.data ?? []) {
+        const mapped = map(item);
+        if (mapped !== undefined) results.push(mapped);
+      }
+      if (page >= (body.last_page ?? page)) return results;
+    }
+    throw new Error(`${label} pagination limit reached`);
   }
 
   #assertWrites() {

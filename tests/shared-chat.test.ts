@@ -56,3 +56,26 @@ it('resumes a saved callback delivery after restart without repeating the write'
   expect(save).toHaveBeenCalledTimes(1);expect(pdf).toHaveBeenCalledTimes(2);expect(await store.offset()).toBe(3);
  }finally{store.close();}
 });
+it('does not send unaddressed group chatter to the model when respondToAllMessages is off',async()=>{
+ const store=new TelegramStore(':memory:','quiet');await store.init();
+ const route=vi.fn(async()=>({action:'answer' as const,text:'Hi'}));
+ const engine=Object.assign(vi.fn(),{route});const send=vi.fn(async()=>({message_id:100}));
+ const controller=new TelegramController(config(),'bot',store,engine,send);
+ try{
+  await controller.handle(msg(1,'lunch at noon?'));expect(route).not.toHaveBeenCalled();expect(send).not.toHaveBeenCalled();
+  await controller.handle(msg(2,'@bot quali formati abbiamo?'));expect(route).toHaveBeenCalledTimes(1);expect(send).toHaveBeenCalledTimes(1);
+  expect(await store.offset()).toBe(3);
+ }finally{store.close();}
+});
+it('does not treat /review on a customer request as a completed creation',async()=>{
+ const store=new TelegramStore(':memory:','customer-review');await store.init();
+ const engine=vi.fn(async(_t:string,p:any)=>({conversation:{...p,revision:p.revision+1,status:'ready' as const},text:'Summary'}));
+ const createCustomer=vi.fn(async()=>'Created');
+ const controller=new TelegramController(config(),'bot',store,engine,async()=>({message_id:100}),createCustomer);
+ try{
+  await controller.handle(msg(1,'/cliente Example Studio'));
+  const review={...msg(2,'/review'),message:{...msg(2,'/review').message,reply_to_message:{message_id:100}}};
+  await controller.handle(review);
+  expect((await store.order('u1'))?.status).toBe('ready');expect(createCustomer).not.toHaveBeenCalled();
+ }finally{store.close();}
+});
