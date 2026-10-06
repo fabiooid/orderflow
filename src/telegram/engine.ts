@@ -1,4 +1,3 @@
-import { startsOrder } from './adapter.js';
 import { customerDetails } from './customer.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -8,7 +7,7 @@ import { Observability, MastraStorageExporter } from '@mastra/observability';
 import type { LibSQLStore } from '@mastra/libsql';
 import type { AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
-import { memoryScope, createOrderAgent } from '../assistant/agent.js';
+import { createOrderAgent } from '../assistant/agent.js';
 import type { Extractor } from '../assistant/workflow.js';
 import { createOrderWorkflow } from '../assistant/workflow.js';
 import { draftSchema, type Issue, type OrderDraft } from '../domain/types.js';
@@ -36,12 +35,6 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
   const mastra = new Mastra({ observability, storage, agents: { orderAssistant: agent }, workflows: { prepareOrder: workflow, deliveredReply }, scorers: Object.fromEntries(Object.values(scorers).map(scorer => [scorer.id, scorer])) });
   const it = config.locale === 'it';
   const handle: ConversationEngine = async (text, previous) => {
-    if (previous.kind === 'catalogue' && startsOrder(text)) previous = { ...previous, kind: undefined, draft: draftSchema.parse({}), prepared: undefined, totals: undefined, runId: undefined, status: 'new' };
-    if (previous.kind === 'catalogue') {
-      const response = await agent.generate(JSON.stringify({ task: 'Catalogue lookup only. Use searchProducts. Reply in the short line format from the reply style. Do not explain commands beyond the one order line, and do not perform or claim writes.', question: text }), { memory: memoryScope(config, previous.orderId), maxSteps: 5, requestContext: evalContext('catalogue') });
-      if (!response.text.trim()) throw new Error('Empty catalogue answer');
-      return { conversation: { ...previous, revision: previous.revision + 1, status: 'new', questions: '' }, text: response.text };
-    }
     extracted = await extract(JSON.stringify({ currentDraft: previous.draft, pendingQuestions: previous.questions, operatorMessage: text, task: previous.kind === 'customer' ? 'Collect newClient details only; no products or order required.' : 'Prepare order' }), previous.orderId);
     if (previous.kind === 'customer') {
       const details = customerDetails(extracted, config);

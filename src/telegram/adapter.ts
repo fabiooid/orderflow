@@ -41,24 +41,12 @@ export function parseCommand(text: string, botUsername: string) {
 }
 
 export type OrderLink = { orderId: string; revision: number };
-/** `open` is the group's active request; it receives plain follow-up text. */
-export function routeTextEvent(event: TextEvent, config: AppConfig, botUsername: string, links: ReadonlyMap<number, OrderLink>, open?: OrderLink) {
-  const command = parseCommand(event.text, botUsername);
-  if (command && [config.telegram.command, 'order', 'ordine'].includes(command.name)) return { kind: 'new' as const, text: command.text };
-  if (command && ['customer', 'cliente'].includes(command.name)) return { kind: 'new' as const, customer: true, text: command.text };
-  const linked = event.replyTo === undefined ? undefined : links.get(event.replyTo);
-  // Without a reply, the controller cancels the sender's latest request.
-  if (command && ['annulla', 'cancel'].includes(command.name) && !command.text) return { kind: 'cancel' as const, orderId: linked?.orderId };
-  if (linked) return { kind: 'reply' as const, ...linked, text: event.text };
-  if (open && event.replyTo === undefined && !event.text.trim().startsWith('/')) return { kind: 'reply' as const, ...open, text: event.text };
-  if (config.telegram.respondToAllMessages && startsOrder(event.text)) return { kind: 'new' as const, text: event.text.trim() };
-  const mention = `@${botUsername}`;
-  if (event.text.toLowerCase().split(/\s+/).includes(mention.toLowerCase())) return { kind: 'new' as const, catalogue: true, text: event.text.replace(new RegExp(`@${botUsername}\\b`, 'ig'), '').trim() };
-  if (config.telegram.respondToAllMessages && !event.text.trim().startsWith('/')) return { kind: 'new' as const, catalogue: true, text: event.text.trim() };
-  return { kind: 'unrouted' as const };
-}
 
-const callbackCommands = { save: '/confermaordine', customer: '/confermacliente', cancel: '/annulla' } as const;
+const callbackActions = { save: 'confirmOrder', customer: 'confirmCustomer', cancel: 'cancel' } as const;
+/** Command equivalents, recorded as the button press's incoming text. */
+const callbackLabels = { save: '/confermaordine', customer: '/confermacliente', cancel: '/annulla' } as const;
+export const callbackData = (action: keyof typeof callbackActions, link: OrderLink) => `${action}:${link.orderId}:${link.revision}`;
+
 /** Callback payload is a revision-bound capability, checked against our stored message link. */
 export function normalizeCallback(input: unknown, config: AppConfig) {
   const parsed = z.object({ update_id: z.number().int(), callback_query: z.object({
@@ -70,7 +58,9 @@ export function normalizeCallback(input: unknown, config: AppConfig) {
   if (q.from.is_bot || String(q.message.chat.id) !== config.telegram.groupId || !['group','supergroup'].includes(q.message.chat.type)) return undefined;
   const match = /^(save|customer|cancel):([a-zA-Z0-9_-]+):(\d+)$/.exec(q.data);
   if (!match) return undefined;
-  return {id:q.id, orderId:match[2]!,revision:Number(match[3]), action:match[1]!, messageId:q.message.message_id,
-    update:{update_id:parsed.data.update_id,message:{message_id:q.message.message_id,chat:q.message.chat,from:q.from,
-      reply_to_message:{message_id:q.message.message_id},text:callbackCommands[match[1] as keyof typeof callbackCommands]}}};
+  const button = match[1] as keyof typeof callbackActions;
+  const target: OrderLink = { orderId: match[2]!, revision: Number(match[3]) };
+  const event: TextEvent = { updateId: parsed.data.update_id, groupId: config.telegram.groupId, senderId: String(q.from.id),
+    messageId: q.message.message_id, replyTo: q.message.message_id, text: callbackLabels[button] };
+  return { id: q.id, messageId: q.message.message_id, target, event, action: { kind: callbackActions[button], target } as const };
 }
