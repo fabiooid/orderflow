@@ -9,10 +9,10 @@ export function liveEvalSettings(env: NodeJS.ProcessEnv = process.env): LiveEval
   if (!Number.isFinite(rate) || rate < 0 || rate > 1) throw new Error('EVALS_SAMPLE_RATE must be between 0 and 1');
   return { enabled: enabled === 'true', rate };
 }
-export function evalContext(purpose: 'extraction' | 'wording' | 'catalogue' | 'routing' | 'delivered', channel = 'telegram') {
+export function evalContext(purpose: 'extraction' | 'wording' | 'routing' | 'delivered') {
   const context = new RequestContext();
   context.set('evalPurpose', purpose);
-  context.set('evalChannel', channel);
+  context.set('evalChannel', 'telegram');
   return context;
 }
 export function liveAgentScorers(scorers: Record<string, MastraScorer>, settings: LiveEvalSettings): MastraScorers {

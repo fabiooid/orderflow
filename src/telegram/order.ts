@@ -3,7 +3,7 @@ import type { OrderConnector } from '../connector/contract.js';
 import { preparedOrderSchema, totalsSchema } from '../domain/types.js';
 import { sameClient } from '../domain/matching.js';
 import type { WriteJournal } from '../storage/write-journal.js';
-import type { Conversation } from './store.js';
+import { journalKey, type Conversation } from './store.js';
 
 export function orderCreator(config: AppConfig, connector: OrderConnector, journal: WriteJournal) {
  return async (conversation: Conversation) => {
@@ -11,11 +11,11 @@ export function orderCreator(config: AppConfig, connector: OrderConnector, journ
   const order = preparedOrderSchema.parse(conversation.prepared);
   const expected = totalsSchema.parse(conversation.totals);
   if (order.policyVersion !== config.policyVersion) throw new Error('Policy changed');
-  const key = `${config.deploymentId}:${config.companyId}:${config.telegram.groupId}:${conversation.orderId}:confirmed-order`;
+  const key = `${journalKey(config, conversation.orderId)}:confirmed-order`;
   // Stable key across revisions prevents a second order after an uncertain write.
   return journal.once(key, {order, expected}, async () => {
    const actual = await connector.calculateTotals(order);
-   if (['net','vat','gross'].some(k => Math.abs(actual[k as keyof typeof actual] - expected[k as keyof typeof expected]) > 0.005)) throw new Error('Totals changed; review required');
+   if ((['net','vat','gross'] as const).some(k => Math.abs(actual[k] - expected[k]) > 0.005)) throw new Error('Totals changed; review required');
    let client = order.client;
    if (!client.id) {
     const duplicates = (await connector.listClients()).filter(c => sameClient(c, client));

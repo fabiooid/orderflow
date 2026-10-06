@@ -1,8 +1,19 @@
 import { createClient, type Client } from '@libsql/client';
 import type { OrderDraft, PreparedOrder, Totals, SavedOrder } from '../domain/types.js';
 import type { OrderLink } from './adapter.js';
-export type Conversation = { orderId: string; startedBy?: string; startedAt?: string; kind?: 'customer' | 'catalogue'; revision: number; runId?: string; status: 'new' | 'suspended' | 'ready' | 'reviewed' | 'saving' | 'saved' | 'cancelled'; prepared?: PreparedOrder; totals?: Totals; savedOrder?: SavedOrder; draft: OrderDraft; questions: string; policy: string };
-export type ReplyPlan = { incomingText?: string; senderId?: string; receivedAt?: string; texts: string[]; pdfOrderId?: number; order?: Conversation; replyTo: number };
+import type { AppConfig } from '../config/schema.js';
+import type { ConnectorMode } from '../config/load.js';
+export type Conversation = { orderId: string; startedBy?: string; startedAt?: string; kind?: 'customer'; revision: number; runId?: string; status: 'new' | 'suspended' | 'ready' | 'reviewed' | 'saving' | 'saved' | 'cancelled'; prepared?: PreparedOrder; totals?: Totals; savedOrder?: SavedOrder; draft: OrderDraft; questions: string; policy: string };
+// Local state locations. Scopes include the mode so fictional state stays separate from account data.
+export const TELEGRAM_STATE_URL = 'file:.data/telegram.db';
+export const telegramScopePrefix = (config: AppConfig, mode: ConnectorMode) => `${config.deploymentId}:${config.telegram.groupId}:${mode}:`;
+export const telegramMemoryUrl = (config: AppConfig, mode: ConnectorMode) => `file:.data/telegram-${config.deploymentId}-${mode}.db`;
+export const pollerLockPath = (config: AppConfig) => `.data/telegram-${config.deploymentId}.lock`;
+/** Stable application-owned prefix for journaled writes; changing it would orphan stored journal entries. */
+export function journalKey(config: AppConfig, conversationId: string) {
+  return `${config.deploymentId}:${config.companyId}:${config.telegram.groupId}:${conversationId}`;
+}
+export type ReplyPlan ={ incomingText?: string; senderId?: string; receivedAt?: string; texts: string[]; pdfOrderId?: number; order?: Conversation; replyTo: number };
 
 /** Durable transport state; Mastra continues to own workflow and conversation memory. */
 export class TelegramStore {
@@ -18,32 +29,18 @@ export class TelegramStore {
   }
   async offset() { return Number((await this.db.execute({ sql: 'SELECT offset FROM tg_offsets WHERE scope=?', args: [this.scope] })).rows[0]?.offset ?? 0); }
   async advance(offset: number) { await this.db.execute({ sql: 'INSERT INTO tg_offsets VALUES (?,?) ON CONFLICT(scope) DO UPDATE SET offset=MAX(offset,excluded.offset)', args: [this.scope, offset] }); }
+  // Earlier versions stored catalogue answers as conversations; they are never requests and are skipped here.
   async order(id: string): Promise<Conversation | undefined> {
-    const row = (await this.db.execute({ sql: 'SELECT state FROM tg_orders WHERE scope=? AND id=?', args: [this.scope, id] })).rows[0];
-    return row ? JSON.parse(String(row.state)) : undefined;
-  }
-  /** Newest wins: starting a new empty request replaces older ones for plain follow-up text. */
-  async awaitingDetails(senderId: string): Promise<OrderLink | undefined> {
-    const since = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-    const row = (await this.db.execute({
-      sql: `SELECT id FROM tg_orders WHERE scope=? AND json_extract(state,'$.startedBy')=? AND json_extract(state,'$.status')='new'
-        AND json_extract(state,'$.revision')=0 AND json_extract(state,'$.kind') IS NOT 'catalogue' AND json_extract(state,'$.startedAt')>?
-        ORDER BY json_extract(state,'$.startedAt') DESC, rowid DESC LIMIT 1`,
-      args: [this.scope, senderId, since],
-    })).rows[0];
-    return row ? { orderId: String(row.id), revision: 0 } : undefined;
-  }
-  async latestRequest(senderId: string): Promise<Conversation | undefined> {
-    const row = (await this.db.execute({
-      sql: `SELECT state FROM tg_orders WHERE scope=? AND json_extract(state,'$.startedBy')=? AND json_extract(state,'$.status')!='cancelled'
-        AND json_extract(state,'$.kind') IS NOT 'catalogue' ORDER BY json_extract(state,'$.startedAt') DESC, rowid DESC LIMIT 1`,
-      args: [this.scope, senderId],
-    })).rows[0];
+    const row = (await this.db.execute({ sql: "SELECT state FROM tg_orders WHERE scope=? AND id=? AND json_extract(state,'$.kind') IS NOT 'catalogue'", args: [this.scope, id] })).rows[0];
     return row ? JSON.parse(String(row.state)) : undefined;
   }
   async activeRequest(): Promise<Conversation | undefined> {
-    const rows = (await this.db.execute({sql: "SELECT state FROM tg_orders WHERE scope=? ORDER BY rowid DESC", args:[this.scope]})).rows;
-    return rows.map(r => JSON.parse(String(r.state)) as Conversation).find(c => c.kind !== 'catalogue' && ['new','suspended','ready','saving'].includes(c.status));
+    const row = (await this.db.execute({
+      sql: `SELECT state FROM tg_orders WHERE scope=? AND json_extract(state,'$.kind') IS NOT 'catalogue'
+        AND json_extract(state,'$.status') IN ('new','suspended','ready','saving') ORDER BY rowid DESC LIMIT 1`,
+      args: [this.scope],
+    })).rows[0];
+    return row ? JSON.parse(String(row.state)) : undefined;
   }
   async link(message: number): Promise<OrderLink | undefined> {
     const row = (await this.db.execute({ sql: 'SELECT order_id,revision FROM tg_links WHERE scope=? AND message=?', args: [this.scope, message] })).rows[0];

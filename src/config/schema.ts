@@ -58,4 +58,3 @@ export const configSchema = z.object({
 });
 
 export type AppConfig = z.infer<typeof configSchema>;
-export type VatRule = AppConfig['vatRules'][number];
