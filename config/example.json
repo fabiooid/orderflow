@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "deploymentId": "fictional-demo",
+  "policyVersion": "demo-v1",
+  "companyId": 1,
+  "locale": "it",
+  "currency": "EUR",
+  "priceBasis": "net",
+  "telegram": {
+    "groupId": "-1000000000001",
+    "command": "order",
+    "access": "all-group-members"
+  },
+  "shipping": {
+    "productId": 900,
+    "discountByDefault": false
+  },
+  "clients": {
+    "requiredFields": [
+      "email",
+      "vatNumber"
+    ],
+    "sdiCountries": [],
+    "shippingNotesLabel": "Delivery destination"
+  },
+  "payments": {
+    "dueDays": 0
+  },
+  "vatRules": [
+    {
+      "id": "illustrative-domestic",
+      "priority": 10,
+      "billingCountries": [
+        "IT"
+      ],
+      "deliveryCountries": [
+        "IT"
+      ],
+      "vatId": 1,
+      "rate": 22,
+      "requireValidVat": false
+    }
+  ],
+  "model": "openai/gpt-5-mini",
+  "memory": {
+    "lastMessages": 16
+  }
+}

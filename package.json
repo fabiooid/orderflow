@@ -1,0 +1,50 @@
+{
+  "name": "orderflow",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "description": "OrderFlow \u2014 conversational business document assistant for Fatture in Cloud",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "demo": "node --import tsx scripts/demo.ts",
+    "config:check": "node --import tsx scripts/check-config.ts",
+    "dev": "mastra dev",
+    "build": "mastra build",
+    "connections:check": "node --env-file-if-exists=.env --import tsx scripts/check-connections.ts",
+    "model:check": "node --env-file-if-exists=.env --import tsx scripts/check-model.ts",
+    "telegram:start": "node --env-file-if-exists=.env --import tsx scripts/telegram.ts",
+    "telegram:recover": "node --env-file-if-exists=.env --import tsx scripts/recover-telegram.ts",
+    "telegram:pdf": "node --env-file-if-exists=.env --import tsx scripts/telegram-pdf.ts",
+    "telegram:discover": "node --env-file-if-exists=.env --import tsx scripts/discover-telegram.ts",
+    "telegram:commands": "node --env-file-if-exists=.env --import tsx scripts/register-commands.ts",
+    "telegram:traces:import": "node --env-file-if-exists=.env --import tsx scripts/import-telegram-traces.ts"
+  },
+  "dependencies": {
+    "@fattureincloud/fattureincloud-ts-sdk": "2.1.3",
+    "@libsql/client": "0.18.0",
+    "@mastra/core": "1.71.0",
+    "@mastra/evals": "1.10.5",
+    "@mastra/libsql": "1.23.3",
+    "@mastra/memory": "1.32.1",
+    "@mastra/observability": "1.18.1",
+    "decimal.js": "10.6.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.2",
+    "mastra": "1.31.3",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3",
+    "vitest": "5.0.1"
+  },
+  "overrides": {
+    "@mastra/evals": {
+      "vitest": "$vitest"
+    }
+  }
+}
