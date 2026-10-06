@@ -37,6 +37,8 @@ export class TelegramApi {
       chat_id: groupId, text, reply_parameters: { message_id: replyTo }, reply_markup: keyboard,
     });
   }
+  /** Shows "typing…" in the group for about five seconds. */
+  typing(groupId: string) { return this.call('sendChatAction', { chat_id: groupId, action: 'typing' }); }
   answerCallback(id: string) { return this.call('answerCallbackQuery', { callback_query_id: id }); }
   clearButtons(groupId: string, messageId: number) { return this.call('editMessageReplyMarkup', {chat_id: groupId, message_id: messageId, reply_markup: {inline_keyboard: []}}); }
   /** Accept only a trusted URL returned by the connector, never a user/model URL. */

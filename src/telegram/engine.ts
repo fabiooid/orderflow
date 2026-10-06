@@ -10,9 +10,11 @@ import type { OrderConnector } from '../connector/contract.js';
 import { createOrderAgent } from '../assistant/agent.js';
 import type { Extractor } from '../assistant/workflow.js';
 import { createOrderWorkflow } from '../assistant/workflow.js';
-import { draftSchema, type Issue, type OrderDraft } from '../domain/types.js';
+import { draftSchema, type Issue, type OrderDraft, type PreparedOrder } from '../domain/types.js';
 import type { ConversationEngine } from './controller.js';
-import { askedText, customerPreview, lineQuery, orderPreview } from './preview.js';
+import { askedText, customerPreview, lineQuery, orderPreview, type Review } from './preview.js';
+import { priceDiscrepancies } from '../domain/history.js';
+import { clientTier } from '../config/schema.js';
 import type { MastraDBMessage } from '@mastra/core/agent';
 import { evalContext, liveEvalSettings } from '../assistant/live-evals.js';
 import { createDeliveredReplyWorkflow } from './evaluation.js';
@@ -34,6 +36,16 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
   const deliveredReply = createDeliveredReplyWorkflow(scorers, live);
   const mastra = new Mastra({ observability, storage, agents: { orderAssistant: agent }, workflows: { prepareOrder: workflow, deliveredReply }, scorers: Object.fromEntries(Object.values(scorers).map(scorer => [scorer.id, scorer])) });
   const it = config.locale === 'it';
+  /** Price list in use, plus differences from the client's previous orders. Lookup failures only drop the comparison. */
+  const review = async (order: PreparedOrder): Promise<Review> => {
+    const own = clientTier(config, order.client.id);
+    const applied = config.priceTiers.find(t => t.id === order.priceTier);
+    const warnings: string[] = [];
+    if (applied && own?.id !== applied.id) warnings.push(it ? `Prezzi ${applied.name}, ma il cliente non è nella lista ${applied.name}` : `${applied.name} prices, but the client is not on the ${applied.name} list`);
+    if (!applied && own) warnings.push(it ? `Prezzi standard per un cliente ${own.name}` : `Standard prices for a ${own.name} client`);
+    const previous = order.client.id ? await connector.listClientOrders(order.client.id, 5).catch(() => []) : [];
+    return { tierName: applied?.name, warnings, discrepancies: priceDiscrepancies(order, previous) };
+  };
   const handle: ConversationEngine = async (text, previous) => {
     extracted = await extract(JSON.stringify({ currentDraft: previous.draft, pendingQuestions: previous.questions, operatorMessage: text, task: previous.kind === 'customer' ? 'Collect newClient details only; no products or order required.' : 'Prepare order' }), previous.orderId);
     if (previous.kind === 'customer') {
@@ -75,7 +87,7 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
     const { order, totals } = outcome.result;
     return {
       conversation: { ...previous, revision, runId, status: 'ready', prepared: order, totals, draft: extracted, questions: '' },
-      text: orderPreview(order, totals, it, config.orderSavingEnabled && mode !== 'demo'),
+      text: orderPreview(order, totals, it, config.orderSavingEnabled && mode !== 'demo', await review(order)),
     };
   };
   const shared = {resource: `${config.deploymentId}:telegram:${config.telegram.groupId}`, thread: `${config.deploymentId}:telegram:${config.telegram.groupId}:chat`};
