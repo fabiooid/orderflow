@@ -1,4 +1,4 @@
-import type { AppConfig } from '../config/schema.js';
+import { translate, type AppConfig } from '../config/schema.js';
 import { parseCommand, startsOrder, type OrderLink, type TextEvent } from './adapter.js';
 import type { Conversation } from './store.js';
 
@@ -26,7 +26,8 @@ export function commandAction(text: string, config: AppConfig, botUsername: stri
   const kind = command && (command.name === config.telegram.command ? 'start' : commands[command.name]);
   if (!command || !kind) return { kind: 'ignore' };
   if (kind === 'start' || kind === 'customer') return { kind: 'start', customer: kind === 'customer', text: command.text };
-  if (command.text) return { kind: 'ignore' };
+  // A command with trailing text is not a bare command: treat a reply to a summary as an edit of it.
+  if (command.text) return link ? { kind: 'edit', target: link, text } : { kind: 'ignore' };
   if (kind === 'cancel') return { kind: 'cancel', target: link };
   // Confirmations, review and reopen must reply to the summary they act on.
   return link ? { kind, target: link } : { kind: 'ignore' };
@@ -52,17 +53,16 @@ export async function routeMessage(event: TextEvent, ctx: RoutingContext): Promi
   const selected = link ? linked : active;
   const target = selected && { orderId: selected.orderId, revision: selected.revision };
   if (ctx.model) {
-    const it = config.locale === 'it';
-    const intent = await ctx.model(event.text, event.senderId, selected).catch((): Intent => ({ action: 'answer', text: it
-      ? 'Non riesco a elaborare il messaggio. Riprova; la richiesta aperta non è stata modificata.'
-      : 'Unable to process this message. Please retry; the open request is unchanged.' }));
+    const intent = await ctx.model(event.text, event.senderId, selected).catch((): Intent => ({ action: 'answer', text: translate(config,
+      'Non riesco a elaborare il messaggio. Riprova; la richiesta aperta non è stata modificata.',
+      'Unable to process this message. Please retry; the open request is unchanged.') }));
     switch (intent.action) {
       case 'answer': return { kind: 'answer', text: intent.text };
       case 'cancel': return { kind: 'cancel', target };
       case 'order': case 'customer': return { kind: 'start', customer: intent.action === 'customer', text: intent.text };
       case 'continue': return target
         ? { kind: 'edit', target, text: intent.text }
-        : { kind: 'answer', text: it ? 'Quale ordine o cliente vuoi preparare?' : 'Which order or customer would you like to prepare?' };
+        : { kind: 'answer', text: translate(config, 'Quale ordine o cliente vuoi preparare?', 'Which order or customer would you like to prepare?') };
     }
   }
   if (target) return { kind: 'edit', target, text: event.text };

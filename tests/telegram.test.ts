@@ -65,6 +65,12 @@ it('routes cancel to the replied-to request or the active one, and confirmations
   expect(commandAction('/confermaordine', config(), 'demo_bot').kind).toBe('ignore');
   expect(commandAction('/unknown', config(), 'demo_bot', link).kind).toBe('ignore');
 });
+it('treats a command with trailing text in a reply to a summary as an edit', () => {
+  const link = { orderId: 'first', revision: 1 };
+  for (const text of ['/annulla scusa, sbagliato', '/reopen cambia la quantità', '/confermaordine@demo_bot ma con 3 pezzi'])
+    expect(commandAction(text, config(), 'demo_bot', link)).toEqual({ kind: 'edit', target: link, text });
+  expect(commandAction('/reopen cambia la quantità', config(), 'demo_bot').kind).toBe('ignore');
+});
 it('without a model, starts only explicit natural-language order requests', async () => {
   const c = config(); c.telegram.respondToAllMessages = true;
   expect(await routeMessage({ ...event(), text: 'crea ordine per Cliente Test: 5 Sapone Mani Lavanda 250ml' }, ctx({ config: c })))
