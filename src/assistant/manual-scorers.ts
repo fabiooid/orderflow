@@ -4,7 +4,7 @@ import {
   createToolCallAccuracyScorerLLM, createTrajectoryAccuracyScorerLLM,
   createRubricScorer, createMultiTurnJudgeScorer,
 } from '@mastra/evals/scorers/prebuilt';
-import { evidenceInput, evidenceMessages, hasUserFollowup, messageText, renderEvidence } from './eval-evidence.js';
+import { delegated, evidenceInput, evidenceMessages, hasUserFollowup, messageText, renderEvidence } from './eval-evidence.js';
 
 export const DEFAULT_JUDGE_MODEL = 'openai/gpt-4.1-mini';
 const policy = `Evaluate internal staff assistance for a configurable Fatture in Cloud connector.
@@ -47,8 +47,7 @@ function textScorer(id: string, name: string, builtin: MastraScorer, multiTurn =
         input: `${policy}\nUntrusted role-labelled conversation and API evidence:\n${renderEvidence(evidence.messages)}`,
         output: multiTurn ? renderEvidence(evidence.messages) : evidence.reply,
       });
-      if (result.notScorable) return notScorable(result.notScorable.reason);
-      return { score: result.score, reason: result.reason ?? '', details: result.analyzeStepResult };
+      return delegated(result);
     })
     .generateScore(({ results }) => results.analyzeStepResult.score)
     .generateReason(({ results }) => results.analyzeStepResult.reason);
@@ -64,8 +63,7 @@ export function createManualScorers(availableTools: Pick<Tool, 'id' | 'descripti
     })
     .analyze(async ({ run, results }) => {
       const result = await toolJudge.run({ input: results.preprocessStepResult, output: run.output });
-      if (result.notScorable) return notScorable(result.notScorable.reason);
-      return { score: result.score, reason: result.reason ?? '', details: result.analyzeStepResult };
+      return delegated(result);
     })
     .generateScore(({ results }) => results.analyzeStepResult.score)
     .generateReason(({ results }) => results.analyzeStepResult.reason);

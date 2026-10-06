@@ -86,9 +86,14 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
     };
   };
   const shared = {resource: `${config.deploymentId}:telegram:${config.telegram.groupId}`, thread: `${config.deploymentId}:telegram:${config.telegram.groupId}:chat`};
+  // The shared thread is never deleted, so one successful check per process is enough.
+  let sharedThread: Promise<void> | undefined;
+  const ensureSharedThread = () => sharedThread ??= (async () => {
+    if (!await memory.getThreadById({threadId:shared.thread})) await memory.createThread({threadId:shared.thread,resourceId:shared.resource,title:'OrderFlow Telegram group'});
+  })().catch(error => { sharedThread = undefined; throw error; });
   const intentSchema = z.object({action:z.enum(['continue','order','customer','cancel','answer']),text:z.string()});
   const route: NonNullable<ConversationEngine['route']> = async (text, senderId, active) => {
-    if (!await memory.getThreadById({threadId:shared.thread})) await memory.createThread({threadId:shared.thread,resourceId:shared.resource,title:'OrderFlow Telegram group'});
+    await ensureSharedThread();
     const requestContext = evalContext('routing');
     requestContext.set('telegramSenderId', senderId);
     requestContext.set('telegramGroupId', config.telegram.groupId);
@@ -108,7 +113,7 @@ For continue/order/customer, text must restate the current operator's requested 
   const record: NonNullable<ConversationEngine['record']> = async (id, plan) => {
     // Stable message IDs make transport replay safe. Include application-rendered
     // summaries and save results, which agent.generate does not produce itself.
-    if (!await memory.getThreadById({threadId:shared.thread})) await memory.createThread({threadId:shared.thread,resourceId:shared.resource,title:'OrderFlow Telegram group'});
+    await ensureSharedThread();
     let history: MastraDBMessage[] = [];
     let canEvaluate = live.enabled;
     if (live.enabled) {

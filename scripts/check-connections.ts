@@ -1,8 +1,8 @@
-import { loadConfig } from '../src/config/load.js';
+import { loadAppConfig } from '../src/config/load.js';
 import { checkConnections } from '../src/health/check.js';
 import { liveHealthPorts } from '../src/health/ports.js';
 try {
-  const config = await loadConfig(process.env.APP_CONFIG_PATH ?? 'config/example.json');
+  const config = await loadAppConfig();
   const missing = ['TELEGRAM_BOT_TOKEN', 'FIC_ACCESS_TOKEN'].filter(key => !process.env[key]);
   if (missing.length) console.log(`FAIL | Missing local credentials: ${missing.join(', ')}. Add them to .env; do not paste them in chat.`);
   const report = await checkConnections(config, liveHealthPorts(config, process.env));

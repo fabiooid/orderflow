@@ -6,9 +6,9 @@ import { customerCreator } from '../src/telegram/customer.js';
 import { WriteJournal } from '../src/storage/write-journal.js';
 import { mkdir } from 'node:fs/promises';
 import { LibSQLStore } from '@mastra/libsql';
-import { loadConfig } from '../src/config/load.js';
+import { connectorMode, loadAppConfig } from '../src/config/load.js';
 import { TelegramApi } from '../src/telegram/api.js';
-import { TelegramStore } from '../src/telegram/store.js';
+import { TELEGRAM_STATE_URL, TelegramStore, pollerLockPath, telegramMemoryUrl, telegramScopePrefix } from '../src/telegram/store.js';
 import { TelegramController } from '../src/telegram/controller.js';
 import { createConversationEngine } from '../src/telegram/engine.js';
 import { acquirePollerLock } from '../src/telegram/lock.js';
@@ -18,9 +18,9 @@ import { checkConnections } from '../src/health/check.js';
 import { liveHealthPorts } from '../src/health/ports.js';
 
 async function main() {
-  const config = await loadConfig(process.env.APP_CONFIG_PATH ?? 'config/example.json');
-  const mode = process.env.CONNECTOR_MODE ?? 'demo';
-  if (mode !== 'demo' && mode !== 'read-only') throw new Error('CONNECTOR_MODE supports demo or read-only only');
+  const config = await loadAppConfig();
+  const mode = connectorMode();
+  const fic = (options?: { writesEnabled?: boolean; clientWritesEnabled?: boolean }) => FattureInCloudConnector.fromToken(config.companyId, process.env.FIC_ACCESS_TOKEN ?? '', options);
   const api = new TelegramApi(process.env.TELEGRAM_BOT_TOKEN ?? '');
   const me = await api.getMe();
   const ports = liveHealthPorts(config, process.env);
@@ -31,11 +31,9 @@ async function main() {
     if (report.some(c => c.status === 'fail')) throw new Error('Account checks failed; run connections:check');
   }
   await mkdir('.data', { recursive: true });
-  // Mode included to keep fictional state separate from account data.
-  const scope = `${config.deploymentId}:${config.telegram.groupId}:${mode}:${me.id}`;
-  const unlock = await acquirePollerLock(`.data/telegram-${config.deploymentId}.lock`);
-  const store = new TelegramStore('file:.data/telegram.db', scope);
-  const storage = new LibSQLStore({ id: 'telegram-memory', url: `file:.data/telegram-${config.deploymentId}-${mode}.db` });
+  const unlock = await acquirePollerLock(pollerLockPath(config));
+  const store = new TelegramStore(TELEGRAM_STATE_URL, `${telegramScopePrefix(config, mode)}${me.id}`);
+  const storage = new LibSQLStore({ id: 'telegram-memory', url: telegramMemoryUrl(config, mode) });
   const journal = new WriteJournal('file:.data/customer-writes.db');
   await journal.init();
   const traces = telegramTraces(storage);
@@ -46,11 +44,11 @@ async function main() {
   try {
     await store.init();
     await traces.sync(store);
-    const connector = mode === 'demo' ? new DemoConnector() : FattureInCloudConnector.fromToken(config.companyId, process.env.FIC_ACCESS_TOKEN ?? '');
+    const connector = mode === 'demo' ? new DemoConnector() : fic();
     const engine = createConversationEngine(config, connector, storage, mode);
     engineShutdown = engine.shutdown;
-    const orderConnector: OrderConnector = mode === 'demo' ? connector : FattureInCloudConnector.fromToken(config.companyId, process.env.FIC_ACCESS_TOKEN ?? '', { writesEnabled: mode === 'read-only' && config.orderSavingEnabled });
-    const controller = new TelegramController(config, me.username, store, engine, (text, reply, keyboard) => api.sendText(config.telegram.groupId, text, reply, keyboard), mode === 'read-only' ? customerCreator(config, FattureInCloudConnector.fromToken(config.companyId, process.env.FIC_ACCESS_TOKEN ?? '', { clientWritesEnabled: true }), journal) : undefined,
+    const orderConnector: OrderConnector = mode === 'demo' ? connector : fic({ writesEnabled: config.orderSavingEnabled });
+    const controller = new TelegramController(config, me.username, store, engine, (text, reply, keyboard) => api.sendText(config.telegram.groupId, text, reply, keyboard), mode === 'read-only' ? customerCreator(config, fic({ clientWritesEnabled: true }), journal) : undefined,
       mode === 'read-only' && config.orderSavingEnabled ? orderCreator(config, orderConnector, journal) : undefined,
       async id => {
         const saved = await orderConnector.getOrder(id);
@@ -71,7 +69,7 @@ async function main() {
       for (const update of updates) {
         if (stopping) break;
         await controller.handle(update);
-        try { await traces.sync(store); } catch { console.warn('Trace export failed; Telegram state remains stored for later import.'); }
+        try { await traces.sync(store, update.update_id); } catch { console.warn('Trace export failed; Telegram state remains stored for later import.'); }
       }
     }
   } finally {
@@ -83,7 +81,7 @@ async function main() {
 }
 main().catch(error => {
   // SDK/model exceptions can contain authenticated headers; never dump them.
-  const safe = error instanceof Error && /^(Telegram delivery uncertain|CONNECTOR_MODE|A Telegram poller|Telegram delivery|Telegram getUpdates|Telegram send|Telegram group checks|Account checks|TELEGRAM_BOT_TOKEN)/.test(error.message);
+  const safe = error instanceof Error && /^(CONNECTOR_MODE|A Telegram poller|Telegram delivery|Telegram getUpdates|Telegram send|Telegram group checks|Account checks|TELEGRAM_BOT_TOKEN)/.test(error.message);
   console.error(safe ? error.message : 'Telegram stopped. Check config/credentials and local state; inspect write and delivery state before retrying.');
   process.exitCode = 1;
 });

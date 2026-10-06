@@ -1,5 +1,5 @@
 import type { MastraDBMessage } from '@mastra/core/agent';
-import type { ScorerRunInputForAgent } from '@mastra/core/evals';
+import { notScorable, type ScorerRunInputForAgent, type ScorerRunResult } from '@mastra/core/evals';
 
 /** Preserve roles and API provenance; never infer missing Telegram history. */
 export function evidenceMessages(input: ScorerRunInputForAgent | undefined, output: MastraDBMessage[]) {
@@ -45,4 +45,9 @@ export function evidenceInput(input: ScorerRunInputForAgent | undefined, message
     } }],
     rememberedMessages: [], systemMessages: [], taggedSystemMessages: {},
   };
+}
+
+/** Wrapper analysis for a delegated built-in scorer run. */
+export function delegated(result: ScorerRunResult) {
+  return result.notScorable ? notScorable(result.notScorable.reason) : { score: result.score, reason: result.reason ?? '', details: result.analyzeStepResult };
 }

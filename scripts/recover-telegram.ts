@@ -1,6 +1,6 @@
-import { loadConfig } from '../src/config/load.js';
+import { connectorMode, loadAppConfig } from '../src/config/load.js';
 import { TelegramApi } from '../src/telegram/api.js';
-import { TelegramStore } from '../src/telegram/store.js';
+import { TELEGRAM_STATE_URL, TelegramStore, pollerLockPath, telegramScopePrefix } from '../src/telegram/store.js';
 import { acquirePollerLock } from '../src/telegram/lock.js';
 async function main() {
   const [idText, action, messageText] = process.argv.slice(2);
@@ -8,12 +8,11 @@ async function main() {
   if (!idText || !Number.isSafeInteger(id) || id < 0 || !['delivered', 'not-delivered'].includes(action ?? '') || (action === 'delivered' && (!Number.isSafeInteger(message) || message <= 0))) {
     throw new Error('Usage: telegram:recover -- UPDATE_ID delivered MESSAGE_ID | UPDATE_ID not-delivered');
   }
-  const config = await loadConfig(process.env.APP_CONFIG_PATH ?? 'config/example.json');
-  const mode = process.env.CONNECTOR_MODE ?? 'demo';
-  if (!['demo', 'read-only'].includes(mode)) throw new Error('Invalid connector mode');
+  const config = await loadAppConfig();
+  const mode = connectorMode();
   const me = await new TelegramApi(process.env.TELEGRAM_BOT_TOKEN ?? '').getMe();
-  const unlock = await acquirePollerLock(`.data/telegram-${config.deploymentId}.lock`);
-  const store = new TelegramStore('file:.data/telegram.db', `${config.deploymentId}:${config.telegram.groupId}:${mode}:${me.id}`);
+  const unlock = await acquirePollerLock(pollerLockPath(config));
+  const store = new TelegramStore(TELEGRAM_STATE_URL, `${telegramScopePrefix(config, mode)}${me.id}`);
   try {
     await store.init();
     if (!(await store.update(id))?.sending) throw new Error('No uncertain delivery exists for this update');

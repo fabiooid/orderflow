@@ -19,13 +19,16 @@ function chunks(text: string): string[] {
 }
 
 export class TelegramController {
+  private readonly policy: string;
   constructor(private readonly config: AppConfig, private readonly username: string, private readonly store: TelegramStore,
     private readonly engine: ConversationEngine,
     private readonly send: (text: string, replyTo: number, keyboard?: Keyboard) => Promise<{ message_id: number }>,
     private readonly createCustomer?: (previous: Conversation) => Promise<string>,
     private readonly saveOrder?: (previous: Conversation) => Promise<SavedOrder>,
     private readonly sendPdf?: (orderId: number) => Promise<{ message_id: number }>,
-    private readonly buttons?: { answer: (id: string) => Promise<unknown>; clear: (messageId: number) => Promise<unknown> }) {}
+    private readonly buttons?: { answer: (id: string) => Promise<unknown>; clear: (messageId: number) => Promise<unknown> }) {
+    this.policy = policyFingerprint(config);
+  }
 
   /** Caller must serialize updates. Polling entry point uses an exclusive process lock. */
   async handle(update: { update_id: number }) {
@@ -48,6 +51,7 @@ export class TelegramController {
       if (!event) { await this.store.advance(id + 1); return; }
       const link = event.replyTo === undefined ? undefined : await this.store.link(event.replyTo);
       const links = new Map(event.replyTo !== undefined && link ? [[event.replyTo, link]] : []);
+      const linked = link && await this.store.order(link.orderId);
       const active = await this.store.activeRequest();
       const open = active ? {orderId:active.orderId,revision:active.revision} : undefined;
       let route = routeTextEvent(event, this.config, this.username, links, open);
@@ -55,8 +59,8 @@ export class TelegramController {
       let contextualText: string | undefined;
       const isCommand = event.text.trim().startsWith('/');
       // A linked older summary must never be reinterpreted against a newer draft.
-      if (!isCommand && this.engine.route && (!link || (await this.store.order(link.orderId))?.revision === link.revision)) {
-        const selected = link ? await this.store.order(link.orderId) : active;
+      if (!isCommand && this.engine.route && (!link || linked?.revision === link.revision)) {
+        const selected = link ? linked : active;
         const intent = await this.engine.route(event.text, event.senderId, selected).catch(() => ({action:'answer' as const,text:this.config.locale === 'it' ? 'Non riesco a elaborare il messaggio. Riprova; la richiesta aperta non è stata modificata.' : 'Unable to process this message. Please retry; the open request is unchanged.'}));
         contextualText = intent.text;
         if (intent.action === 'answer') answer = intent.text;
@@ -72,8 +76,9 @@ export class TelegramController {
       const command = parseCommand(event.text.trim(), this.username);
       const confirms = (...names: string[]) => Boolean(command && !command.text && names.includes(command.name));
       const it = this.config.locale === 'it';
-      let previous = route.kind === 'reply' ? await this.store.order(route.orderId)
-        : route.kind === 'cancel' ? await (route.orderId ? this.store.order(route.orderId) : this.store.activeRequest())
+      const load = (orderId: string) => orderId === linked?.orderId ? linked : orderId === active?.orderId ? active : this.store.order(orderId);
+      let previous = route.kind === 'reply' ? await load(route.orderId)
+        : route.kind === 'cancel' ? (route.orderId ? await load(route.orderId) : active)
         : undefined;
       let plan: ReplyPlan;
       if (answer !== undefined) plan = {replyTo:event.messageId,texts:chunks(answer)};
@@ -86,7 +91,7 @@ export class TelegramController {
         plan = { replyTo: event.messageId, texts: [it ? 'Questo messaggio riguarda una versione precedente. Rispondi al riepilogo più recente.' : 'This message refers to an older revision. Reply to the latest summary.'] };
       } else if (previous?.status === 'cancelled') {
         plan = { replyTo: event.messageId, texts: [it ? 'Richiesta annullata. Usa /ordine o /cliente per iniziarne una nuova.' : 'This request was cancelled. Use /order or /customer to start a new one.'], order: previous };
-      } else if (previous && previous.policy !== policyFingerprint(this.config)) {
+      } else if (previous && previous.policy !== this.policy) {
         plan = { replyTo: event.messageId, texts: [it ? 'La configurazione è cambiata. Inizia un nuovo ordine per ricalcolare i dati.' : 'Configuration changed. Start a new order to recalculate its data.'] };
       } else if (previous && !previous.kind && confirms('confermaordine', 'confirmorder')) {
         if (previous.status === 'saved') plan = {replyTo:event.messageId,texts:[`Ordine già salvato: ${previous.savedOrder?.number}. Nessun duplicato creato.`],order:previous};
@@ -121,7 +126,7 @@ export class TelegramController {
       } else if (previous && event.text.trim() === '/reopen') {
         plan = { replyTo: event.messageId, texts: [it ? 'Rispondi con le modifiche.' : 'Reply with your changes.'], order: { ...previous, status: 'ready' } };
       } else {
-        previous ??= { orderId: `u${id}`, startedBy: event.senderId, startedAt: new Date().toISOString(), revision: 0, status: 'new', ...(route.kind === 'new' && 'customer' in route ? { kind: 'customer' as const } : route.kind === 'new' && 'catalogue' in route ? { kind: 'catalogue' as const } : {}), draft: draftSchema.parse({}), questions: '', policy: policyFingerprint(this.config) };
+        previous ??= { orderId: `u${id}`, startedBy: event.senderId, startedAt: new Date().toISOString(), revision: 0, status: 'new', ...(route.kind === 'new' && 'customer' in route ? { kind: 'customer' as const } : route.kind === 'new' && 'catalogue' in route ? { kind: 'catalogue' as const } : {}), draft: draftSchema.parse({}), questions: '', policy: this.policy };
         const text = contextualText ?? (route.kind === 'new' ? route.text : event.text);
         if (!text) plan = { replyTo: event.messageId, texts: [previous.kind === 'catalogue' ? 'Chiedimi quali prodotti, formati o varianti sono in catalogo.' : previous.kind === 'customer' ? 'Descrivi il nuovo cliente: nome, indirizzo, paese, email, telefono e partita IVA. Nessun dato verrà salvato senza /confermacliente. /annulla per annullare.' : it ? 'Descrivi cliente, prodotti, quantità e costo di consegna. /annulla per annullare.' : 'Describe the client, products, quantities and delivery charge. /cancel to cancel.'], order: previous };
         else {

@@ -41,7 +41,7 @@ export function parseCommand(text: string, botUsername: string) {
 }
 
 export type OrderLink = { orderId: string; revision: number };
-/** `open` is the sender's newest empty request; it receives their next plain message. */
+/** `open` is the group's active request; it receives plain follow-up text. */
 export function routeTextEvent(event: TextEvent, config: AppConfig, botUsername: string, links: ReadonlyMap<number, OrderLink>, open?: OrderLink) {
   const command = parseCommand(event.text, botUsername);
   if (command && [config.telegram.command, 'order', 'ordine'].includes(command.name)) return { kind: 'new' as const, text: command.text };
@@ -58,6 +58,7 @@ export function routeTextEvent(event: TextEvent, config: AppConfig, botUsername:
   return { kind: 'unrouted' as const };
 }
 
+const callbackCommands = { save: '/confermaordine', customer: '/confermacliente', cancel: '/annulla' } as const;
 /** Callback payload is a revision-bound capability, checked against our stored message link. */
 export function normalizeCallback(input: unknown, config: AppConfig) {
   const parsed = z.object({ update_id: z.number().int(), callback_query: z.object({
@@ -71,5 +72,5 @@ export function normalizeCallback(input: unknown, config: AppConfig) {
   if (!match) return undefined;
   return {id:q.id, orderId:match[2]!,revision:Number(match[3]), action:match[1]!, messageId:q.message.message_id,
     update:{update_id:parsed.data.update_id,message:{message_id:q.message.message_id,chat:q.message.chat,from:q.from,
-      reply_to_message:{message_id:q.message.message_id},text:match[1]==='save'?'/confermaordine':match[1]==='customer'?'/confermacliente':'/annulla'}}};
+      reply_to_message:{message_id:q.message.message_id},text:callbackCommands[match[1] as keyof typeof callbackCommands]}}};
 }

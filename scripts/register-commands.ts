@@ -1,7 +1,7 @@
-import { loadConfig } from '../src/config/load.js';
+import { loadAppConfig } from '../src/config/load.js';
 import { TelegramApi } from '../src/telegram/api.js';
 try {
- const config = await loadConfig(process.env.APP_CONFIG_PATH ?? 'config/example.json');
+ const config = await loadAppConfig();
  const api = new TelegramApi(process.env.TELEGRAM_BOT_TOKEN ?? '');
  const scope = {type:'chat',chat_id:config.telegram.groupId};
  const commands = [
