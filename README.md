@@ -79,8 +79,8 @@ Customers often send back a printed price list with quantities written next to e
 
 ```bash
 npm run orderform:import -- path/to/clean-price-list.pdf --id my-form            # writes private/order-forms/my-form.json
-npm run orderform:import -- path/to/hospitality-list.pdf --id hotel --tier hotel   # prices on this form are the "hotel" tier's
-npm run pricetier:suggest -- --tier hotel                                        # clients whose past orders used those prices
+npm run orderform:import -- path/to/trade-list.pdf --id trade --tier trade        # prices on this form are the "trade" tier's
+npm run pricetier:suggest -- --tier trade                                        # clients whose past orders used those prices
 ```
 
 The import maps each fill-in cell to a catalogue product using printed codes and the form's own printed notes. Review each generated file, then list it in your business config under `orderForms` (paths are fine) and add a `priceTiers` entry with the client IDs you agree with. Both scripts are read-only. Templates describe your business, so keep them out of git (`private/` is ignored). When the printed form changes, import it again.
