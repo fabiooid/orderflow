@@ -73,6 +73,22 @@ npm run demo    # scripted end-to-end run against a fictional catalogue
 
 `npm run demo` uses scripted extraction and simulated API responses. It shows the orchestration and duplicate protection, but it says **nothing about LLM accuracy**. Its temporary databases are removed when it finishes.
 
+### Order forms and price tiers
+
+Customers often send back a printed price list with quantities written next to each product. OrderFlow reads those against a **template** of the form, so the model only says which printed row carries which handwritten value and the catalogue IDs come from the template:
+
+```bash
+npm run orderform:import -- path/to/clean-price-list.pdf --id my-form            # writes private/order-forms/my-form.json
+npm run orderform:import -- path/to/hospitality-list.pdf --id hotel --tier hotel   # prices on this form are the "hotel" tier's
+npm run pricetier:suggest -- --tier hotel                                        # clients whose past orders used those prices
+```
+
+Review each generated file, then list it in your business config under `orderForms` (paths are fine) and add a `priceTiers` entry with the client IDs you agree with. Both scripts are read-only. Templates describe your business, so keep them out of git (`private/` is ignored).
+
+When a photo or scan arrives, OrderFlow turns it upright, recognises the form, enlarges small scans and reads it **twice**. Quantities both readings agree on are used; disagreements become questions. A tester mark adds the row's tester product; a mark on a row without a quantity, which has often slipped from the row above, becomes a question between the two. Two readings plus the form check take about a minute per page, with "typing…" shown meanwhile.
+
+Clients in a tier get the tier's prices; a product without a tier price is asked about, never guessed. The order summary names the price list in use and, under **⚠️ Da verificare**, lists prices that differ from the client's previous orders. Those are pointed out only: nothing is changed and saving is not blocked.
+
 ### Try the assistant in Mastra Studio
 
 ```bash

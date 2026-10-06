@@ -1,6 +1,6 @@
 import type { OrderConnector } from './contract.js';
 import { calculateLineTotals } from '../domain/totals.js';
-import { preparedOrderSchema, type Client, type PreparedOrder, type Product, type SavedOrder } from '../domain/types.js';
+import { preparedOrderSchema, type Client, type ClientOrder, type PreparedOrder, type Product, type SavedOrder } from '../domain/types.js';
 
 /** Fictional in-memory service. Never contacts Fatture in Cloud. */
 export class DemoConnector implements OrderConnector {
@@ -35,6 +35,12 @@ export class DemoConnector implements OrderConnector {
     if (!this.orders.has(id)) throw new Error('Demo order not found');
     this.orders.set(id, preparedOrderSchema.parse(input));
     return { id, number: `DEMO-${id}` };
+  }
+  async listClientOrders(clientId: number, limit: number): Promise<ClientOrder[]> {
+    return [...this.orders.entries()].reverse().filter(([, o]) => o.client.id === clientId).slice(0, limit).map(([id, o]) => ({
+      id, number: `DEMO-${id}`, date: o.date,
+      lines: o.lines.map(l => ({ productId: l.productId, code: l.code, name: l.name, quantity: l.quantity, netPrice: l.netPrice, discountPercent: l.discountPercent })),
+    }));
   }
   async getOrder(id: number) {
     if (!this.orders.has(id)) throw new Error('Demo order not found');

@@ -1,5 +1,6 @@
 import { MAX_CHOICES } from '../domain/matching.js';
 import type { Client, Issue, OrderDraft, PreparedOrder, Totals } from '../domain/types.js';
+import type { Discrepancy } from '../domain/history.js';
 
 const rule = '━━━━━━━━━━━━━━━━';
 
@@ -52,7 +53,15 @@ export function customerPreview(client: Client, it: boolean) {
   return lines.join('\n');
 }
 
-export function orderPreview(order: PreparedOrder, totals: Totals, it: boolean, canSave: boolean) {
+/** Things the operator should look at before confirming; they never block saving. */
+export type Review = { tierName?: string; discrepancies?: Discrepancy[]; warnings?: string[] };
+
+function day(date: string, it: boolean) {
+  const [y, m, d] = date.split('-');
+  return y && m && d ? (it ? `${d}/${m}/${y}` : date) : date;
+}
+
+export function orderPreview(order: PreparedOrder, totals: Totals, it: boolean, canSave: boolean, review: Review = {}) {
   const goods = order.lines.filter(line => !line.shipping);
   const shipping = order.lines.filter(line => line.shipping);
   const rates = [...new Set(order.lines.map(line => `${line.vatRate}%${line.nature ? ` ${line.nature}` : ''}`))];
@@ -63,8 +72,16 @@ export function orderPreview(order: PreparedOrder, totals: Totals, it: boolean, 
     const discount = line.discountPercent > 0 ? ` — ${line.discountPercent}% ${it ? 'sconto' : 'discount'}` : '';
     lines.push(`${line.quantity} × ${line.name} — ${money(line.netPrice, it)}${discount}`);
   }
+  if (review.tierName) lines.push('', `🏷️ ${it ? 'Prezzi' : 'Prices'}: ${it ? 'listino' : 'price list'} ${review.tierName}`);
   lines.push('', it ? '💶 Totali' : '💶 Totals', `${it ? 'Imponibile' : 'Net'} ${money(totals.net, it)}`, `IVA ${rates.join(', ')} ${money(totals.vat, it)}`, `${it ? 'Totale' : 'Total'} ${money(totals.gross, it)}`);
   if (order.notes.trim()) lines.push('', '📝 Note', order.notes.trim());
+  const checks = [
+    ...(review.warnings ?? []),
+    ...(review.discrepancies ?? []).map(d => it
+      ? `${d.name}: ora ${money(d.now, it)}, ordine precedente ${money(d.before, it)} (#${d.order.number}, ${day(d.order.date, it)})`
+      : `${d.name}: now ${money(d.now, it)}, previous order ${money(d.before, it)} (#${d.order.number}, ${day(d.order.date, it)})`),
+  ];
+  if (checks.length) lines.push('', it ? '⚠️ Da verificare' : '⚠️ To check', ...checks.map(c => `• ${c}`));
   const actions = it
     ? ['Rispondi con le modifiche.', canSave ? 'Usa Conferma e salva per ricevere il PDF (oppure /confermaordine)' : '/review per segnare il controllo', '/annulla per annullare']
     : ['Reply with changes.', canSave ? 'Use Confirm and save to receive the PDF (or /confirmorder)' : '/review to mark it checked', '/cancel to cancel'];
