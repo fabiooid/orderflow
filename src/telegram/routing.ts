@@ -1,5 +1,5 @@
 import { translate, type AppConfig } from '../config/schema.js';
-import { parseCommand, startsOrder, type OrderLink, type TextEvent } from './adapter.js';
+import { parseCommand, startsOrder, type MessageEvent, type OrderLink } from './adapter.js';
 import type { Conversation } from './store.js';
 
 export type Intent = { action: 'continue' | 'order' | 'customer' | 'cancel' | 'answer'; text: string };
@@ -12,6 +12,10 @@ export type Action =
   | { kind: 'confirmOrder' | 'confirmCustomer' | 'review' | 'reopen'; target: OrderLink }
   | { kind: 'cancel'; target?: OrderLink }
   | { kind: 'answer'; text: string }
+  /** Ask what to do with media or a forward that did not say. */
+  | { kind: 'prompt' }
+  /** A button under that question; message is the original media message. */
+  | { kind: 'pending'; message: number; accept: boolean }
   | { kind: 'ignore' };
 
 const commands: Record<string, 'start' | 'customer' | 'cancel' | 'confirmOrder' | 'confirmCustomer' | 'review' | 'reopen'> = {
@@ -42,14 +46,27 @@ export type RoutingContext = {
   model?: IntentRouter;
 };
 
-export async function routeMessage(event: TextEvent, ctx: RoutingContext): Promise<Action> {
+/**
+ * Media with no caption carries no intent, so ask before spending model calls on it. Two exceptions: a reply to a bot
+ * message edits that request, and a voice note is spoken text, routed like a typed message wherever one would be.
+ */
+export function asksFirst(event: MessageEvent, ctx: Pick<RoutingContext, 'config' | 'link' | 'active'>) {
+  const files = event.attachments ?? [];
+  if (!files.length || event.text.trim() || ctx.link) return false;
+  const spoken = files.every(f => f.kind === 'voice');
+  return !(spoken && (ctx.config.telegram.respondToAllMessages || (ctx.active !== undefined && event.replyTo === undefined)));
+}
+
+export async function routeMessage(event: MessageEvent, ctx: RoutingContext): Promise<Action> {
   const { config, link, linked, active } = ctx;
   if (event.text.trim().startsWith('/')) return commandAction(event.text, config, ctx.botUsername, link);
   // A reply to an older summary must never be reinterpreted against a newer draft.
   if (link && linked && linked.revision !== link.revision) return { kind: 'edit', target: link, text: event.text };
   const mention = new RegExp(`(^|\\s)@${ctx.botUsername}\\b`, 'i');
   const addressed = Boolean(link) || mention.test(event.text) || config.telegram.respondToAllMessages || (active !== undefined && event.replyTo === undefined);
-  if (!addressed) return { kind: 'ignore' };
+  // Forwarded customer messages and files are rarely chat between colleagues: ask rather than drop them.
+  const unaddressed: Action = event.attachments?.length || event.forwardedFrom ? { kind: 'prompt' } : { kind: 'ignore' };
+  if (!addressed) return unaddressed;
   const selected = link ? linked : active;
   const target = selected && { orderId: selected.orderId, revision: selected.revision };
   if (ctx.model) {
@@ -67,5 +84,5 @@ export async function routeMessage(event: TextEvent, ctx: RoutingContext): Promi
   }
   if (target) return { kind: 'edit', target, text: event.text };
   const text = event.text.replace(mention, ' ').trim();
-  return startsOrder(text) ? { kind: 'start', customer: false, text } : { kind: 'ignore' };
+  return startsOrder(text) ? { kind: 'start', customer: false, text } : unaddressed;
 }

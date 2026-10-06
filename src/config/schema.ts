@@ -42,6 +42,8 @@ export const configSchema = z.object({
   }).strict(),
   vatRules: z.array(vatRuleSchema).min(1),
   model: z.string().regex(/^[^/\s]+\/[^\s]+$/),
+  /** Speech-to-text for Telegram voice notes; omit to answer voice notes with "not enabled". */
+  transcription: z.object({ model: z.string().regex(/^openai\/[^\s]+$/, 'Only OpenAI transcription models are supported') }).strict().optional(),
   memory: z.object({ lastMessages: z.number().int().min(1).max(100) }).strict(),
 }).strict().superRefine((config, ctx) => {
   const ids = new Set<string>();

@@ -12,6 +12,8 @@ import { TELEGRAM_STATE_URL, TelegramStore, pollerLockPath, telegramMemoryUrl, t
 import { TelegramController } from '../src/telegram/controller.js';
 import { createConversationEngine } from '../src/telegram/engine.js';
 import { acquirePollerLock } from '../src/telegram/lock.js';
+import { albumOf, groupAlbums } from '../src/telegram/adapter.js';
+import { createMediaReader, modelReader, openAiTranscriber } from '../src/telegram/media.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { FattureInCloudConnector } from '../src/connector/fatture-in-cloud.js';
 import { checkConnections } from '../src/health/check.js';
@@ -54,22 +56,29 @@ async function main() {
         const saved = await orderConnector.getOrder(id);
         if (!saved.url) throw new Error('Saved order PDF not available; reconcile delivery without recreating order');
         return api.sendOrderPdf(config.telegram.groupId, saved.url, `Ordine ${saved.number}`);
-      }, {answer: id => api.answerCallback(id), clear: id => api.clearButtons(config.telegram.groupId, id)});
+      }, {answer: id => api.answerCallback(id), clear: id => api.clearButtons(config.telegram.groupId, id)},
+      createMediaReader(config, connector, (id, max) => api.download(id, max), {
+        read: modelReader(config.model),
+        transcribe: config.transcription && openAiTranscriber(config.transcription.model.slice('openai/'.length), process.env.OPENAI_API_KEY ?? ''),
+      }));
     console.log(`OrderFlow Telegram ${mode} running. Customer creation requires /confirmcustomer. Order saving: ${config.orderSavingEnabled ? 'confirmation required' : 'disabled'}. Stop with Ctrl+C.`);
     while (!stopping) {
       let updates: { update_id: number }[];
       try {
-        updates = await api.updates(await store.offset());
+        const offset = await store.offset();
+        updates = await api.updates(offset);
+        // Album photos arrive as separate updates; give the rest of an album a moment to arrive with its first part.
+        if (albumOf(updates.at(-1)) !== undefined) { await delay(1500); updates = await api.updates(offset); }
       } catch {
         if (stopping) break;
         console.warn('Telegram polling unavailable; retrying the read in 5 seconds. No writes retried.');
         await delay(5000);
         continue;
       }
-      for (const update of updates) {
+      for (const [update, ...album] of groupAlbums(updates)) {
         if (stopping) break;
-        await controller.handle(update);
-        try { await traces.sync(store, update.update_id); } catch { console.warn('Trace export failed; Telegram state remains stored for later import.'); }
+        await controller.handle(update!, album);
+        try { await traces.sync(store, update!.update_id); } catch { console.warn('Trace export failed; Telegram state remains stored for later import.'); }
       }
     }
   } finally {

@@ -3,7 +3,7 @@ import type { Product } from '../domain/types.js';
 
 export type Check = { name: string; status: 'pass' | 'fail' | 'manual'; detail: string };
 export interface HealthPorts {
-  telegram(): Promise<{ member: boolean; canSend: boolean; polling: boolean }>;
+  telegram(): Promise<{ member: boolean; canSend: boolean; polling: boolean; readsAll?: boolean }>;
   company(): Promise<boolean>;
   products(): Promise<Product[]>;
   clients(): Promise<unknown[]>;
@@ -16,11 +16,14 @@ export async function checkConnections(config: AppConfig, ports: HealthPorts): P
     try { checks.push({ name, status: 'pass', detail: await task() }); }
     catch { checks.push({ name, status: 'fail', detail: 'Check credentials, permissions and the configured account references. No writes attempted.' }); }
   }
+  let readsAll = true;
   await check('Telegram group', async () => {
     const t = await ports.telegram();
+    readsAll = t.readsAll ?? false;
     if (!t.member || !t.canSend || !t.polling) throw new Error();
     return 'Bot can access the group and send text/documents; no webhook conflicts with polling. No message sent.';
   });
+  if (!readsAll) checks.push({ name: 'Telegram privacy mode', status: 'manual', detail: 'The bot sees only commands, mentions and replies to it, so photos, voice notes and forwards sent on their own never reach it. To change this, turn privacy off in BotFather (/setprivacy) or make the bot a group admin, then remove the bot from the group and add it again.' });
   await check('Fatture in Cloud company', async () => {
     if (!await ports.company()) throw new Error(); return 'Configured company is accessible.';
   });

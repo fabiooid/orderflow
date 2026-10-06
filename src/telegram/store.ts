@@ -1,6 +1,6 @@
 import { createClient, type Client } from '@libsql/client';
 import type { OrderDraft, PreparedOrder, Totals, SavedOrder } from '../domain/types.js';
-import type { OrderLink } from './adapter.js';
+import type { MessageEvent, OrderLink } from './adapter.js';
 import type { AppConfig } from '../config/schema.js';
 import type { ConnectorMode } from '../config/load.js';
 export type Conversation = { orderId: string; startedBy?: string; startedAt?: string; kind?: 'customer'; revision: number; runId?: string; status: 'new' | 'suspended' | 'ready' | 'reviewed' | 'saving' | 'saved' | 'cancelled'; prepared?: PreparedOrder; totals?: Totals; savedOrder?: SavedOrder; draft: OrderDraft; questions: string; policy: string };
@@ -13,7 +13,12 @@ export const pollerLockPath = (config: AppConfig) => `.data/telegram-${config.de
 export function journalKey(config: AppConfig, conversationId: string) {
   return `${config.deploymentId}:${config.companyId}:${config.telegram.groupId}:${conversationId}`;
 }
-export type ReplyPlan ={ incomingText?: string; senderId?: string; receivedAt?: string; texts: string[]; pdfOrderId?: number; order?: Conversation; replyTo: number };
+export type ReplyPlan ={ incomingText?: string; senderId?: string; receivedAt?: string; texts: string[]; pdfOrderId?: number; order?: Conversation; replyTo: number;
+  /** Original media message whose question the last text asks; it carries the yes/no buttons. */
+  prompt?: { message: number; active: boolean } };
+/** Media waiting for an answer to "prepare an order from this?". `read` keeps text already extracted from it. */
+export type Pending = { event: MessageEvent; read?: { text: string; echo?: string } };
+export type PlanEffects = { pending?: { message: number; value: Pending }; consume?: number; absorbed?: number[] };
 
 /** Durable transport state; Mastra continues to own workflow and conversation memory. */
 export class TelegramStore {
@@ -25,7 +30,14 @@ export class TelegramStore {
       'CREATE TABLE IF NOT EXISTS tg_orders (scope TEXT, id TEXT, state TEXT NOT NULL, PRIMARY KEY(scope,id))',
       'CREATE TABLE IF NOT EXISTS tg_links (scope TEXT, message INTEGER, order_id TEXT, revision INTEGER, PRIMARY KEY(scope,message))',
       'CREATE TABLE IF NOT EXISTS tg_offsets (scope TEXT PRIMARY KEY, offset INTEGER NOT NULL)',
+      'CREATE TABLE IF NOT EXISTS tg_pending (scope TEXT, message INTEGER, album TEXT, state TEXT NOT NULL, used INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(scope,message))',
     ], 'write');
+  }
+  /** Unanswered media, by its original message or by the album it belongs to. */
+  async pending(by: { message: number } | { album: string }): Promise<{ message: number; value: Pending } | undefined> {
+    const [column, value] = 'message' in by ? ['message', by.message] : ['album', by.album];
+    const row = (await this.db.execute({ sql: `SELECT message,state FROM tg_pending WHERE scope=? AND ${column}=? AND used=0`, args: [this.scope, value] })).rows[0];
+    return row ? { message: Number(row.message), value: JSON.parse(String(row.state)) } : undefined;
   }
   async offset() { return Number((await this.db.execute({ sql: 'SELECT offset FROM tg_offsets WHERE scope=?', args: [this.scope] })).rows[0]?.offset ?? 0); }
   async advance(offset: number) { await this.db.execute({ sql: 'INSERT INTO tg_offsets VALUES (?,?) ON CONFLICT(scope) DO UPDATE SET offset=MAX(offset,excluded.offset)', args: [this.scope, offset] }); }
@@ -50,8 +62,17 @@ export class TelegramStore {
     const row = (await this.db.execute({ sql: 'SELECT * FROM tg_updates WHERE scope=? AND id=?', args: [this.scope, id] })).rows[0];
     return row ? { plan: JSON.parse(String(row.plan)) as ReplyPlan, next: Number(row.next_part), sending: Boolean(row.sending), done: Boolean(row.done) } : undefined;
   }
-  async plan(id: number, plan: ReplyPlan) {
-    const statements: Parameters<Client['batch']>[0] = [{ sql: 'INSERT INTO tg_updates(scope,id,plan) VALUES (?,?,?)', args: [this.scope, id, JSON.stringify(plan)] }];
+  /** Stores the reply and its side effects atomically, so a replayed update finds them all or none. */
+  async plan(id: number, plan: ReplyPlan, effects: PlanEffects = {}) {
+    const silent = !plan.texts.length && plan.pdfOrderId === undefined;
+    const statements: Parameters<Client['batch']>[0] = [{ sql: 'INSERT INTO tg_updates(scope,id,plan,done) VALUES (?,?,?,?)', args: [this.scope, id, JSON.stringify(plan), silent ? 1 : 0] }];
+    // Album parts merged into this update are handled; they must not be answered again on replay.
+    for (const part of effects.absorbed ?? []) statements.push({ sql: 'INSERT OR IGNORE INTO tg_updates(scope,id,plan,done) VALUES (?,?,?,1)', args: [this.scope, part, JSON.stringify({ texts: [], replyTo: plan.replyTo })] });
+    if (effects.pending) {
+      const { message, value } = effects.pending;
+      statements.push({ sql: 'INSERT INTO tg_pending(scope,message,album,state) VALUES (?,?,?,?) ON CONFLICT(scope,message) DO UPDATE SET state=excluded.state', args: [this.scope, message, value.event.album ?? null, JSON.stringify(value)] });
+    }
+    if (effects.consume !== undefined) statements.push({ sql: 'UPDATE tg_pending SET used=1 WHERE scope=? AND message=?', args: [this.scope, effects.consume] });
     if (plan.order) {
       statements.push({ sql: 'INSERT INTO tg_orders VALUES (?,?,?) ON CONFLICT(scope,id) DO UPDATE SET state=excluded.state', args: [this.scope, plan.order.orderId, JSON.stringify(plan.order)] });
       statements.push({ sql: 'INSERT OR REPLACE INTO tg_links VALUES (?,?,?,?)', args: [this.scope, plan.replyTo, plan.order.orderId, plan.order.revision] });

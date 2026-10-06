@@ -30,6 +30,8 @@ Copy the intended group ID into `telegram.groupId`. Discovery lists group names/
 
 Privacy mode can remain enabled. Start orders with the configured command, and **reply to the bot's latest message** for follow-ups. Unrelated messages are ignored. Any human group member can contribute; anonymous sender identities and other bots are ignored.
 
+With privacy mode enabled, the bot never receives photos, voice notes or forwarded messages sent on their own, only those that reply to it or mention it in a caption. To let operators drop media straight into the group, turn privacy off in BotFather (`/setprivacy`) or make the bot an administrator, then remove the bot from the group and add it again. `connections:check` reports this as `MANUAL` while privacy mode hides messages.
+
 ## 3. Read-only diagnostics
 
 ```sh
