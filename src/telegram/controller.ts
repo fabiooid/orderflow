@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { AppConfig } from '../config/schema.js';
+import { translate, type AppConfig } from '../config/schema.js';
 import { callbackData, normalizeCallback, normalizeTextUpdate, type OrderLink, type TextEvent } from './adapter.js';
 import { routeMessage, type Action, type IntentRouter } from './routing.js';
 import { TelegramStore, type Conversation, type ReplyPlan } from './store.js';
@@ -36,7 +36,7 @@ export class TelegramController {
     this.policy = policyFingerprint(config);
   }
 
-  private t(itText: string, en: string) { return this.config.locale === 'it' ? itText : en; }
+  private t(itText: string, en: string) { return translate(this.config, itText, en); }
 
   /** Caller must serialize updates. Polling entry point uses an exclusive process lock. */
   async handle(update: { update_id: number }) {
