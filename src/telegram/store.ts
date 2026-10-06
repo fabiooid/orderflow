@@ -3,7 +3,7 @@ import type { OrderDraft, PreparedOrder, Totals, SavedOrder } from '../domain/ty
 import type { OrderLink } from './adapter.js';
 import type { AppConfig } from '../config/schema.js';
 import type { ConnectorMode } from '../config/load.js';
-export type Conversation = { orderId: string; startedBy?: string; startedAt?: string; kind?: 'customer' | 'catalogue'; revision: number; runId?: string; status: 'new' | 'suspended' | 'ready' | 'reviewed' | 'saving' | 'saved' | 'cancelled'; prepared?: PreparedOrder; totals?: Totals; savedOrder?: SavedOrder; draft: OrderDraft; questions: string; policy: string };
+export type Conversation = { orderId: string; startedBy?: string; startedAt?: string; kind?: 'customer'; revision: number; runId?: string; status: 'new' | 'suspended' | 'ready' | 'reviewed' | 'saving' | 'saved' | 'cancelled'; prepared?: PreparedOrder; totals?: Totals; savedOrder?: SavedOrder; draft: OrderDraft; questions: string; policy: string };
 // Local state locations. Scopes include the mode so fictional state stays separate from account data.
 export const TELEGRAM_STATE_URL = 'file:.data/telegram.db';
 export const telegramScopePrefix = (config: AppConfig, mode: ConnectorMode) => `${config.deploymentId}:${config.telegram.groupId}:${mode}:`;
@@ -29,8 +29,9 @@ export class TelegramStore {
   }
   async offset() { return Number((await this.db.execute({ sql: 'SELECT offset FROM tg_offsets WHERE scope=?', args: [this.scope] })).rows[0]?.offset ?? 0); }
   async advance(offset: number) { await this.db.execute({ sql: 'INSERT INTO tg_offsets VALUES (?,?) ON CONFLICT(scope) DO UPDATE SET offset=MAX(offset,excluded.offset)', args: [this.scope, offset] }); }
+  // Earlier versions stored catalogue answers as conversations; they are never requests and are skipped here.
   async order(id: string): Promise<Conversation | undefined> {
-    const row = (await this.db.execute({ sql: 'SELECT state FROM tg_orders WHERE scope=? AND id=?', args: [this.scope, id] })).rows[0];
+    const row = (await this.db.execute({ sql: "SELECT state FROM tg_orders WHERE scope=? AND id=? AND json_extract(state,'$.kind') IS NOT 'catalogue'", args: [this.scope, id] })).rows[0];
     return row ? JSON.parse(String(row.state)) : undefined;
   }
   async activeRequest(): Promise<Conversation | undefined> {
