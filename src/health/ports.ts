@@ -21,6 +21,7 @@ export function liveHealthPorts(config: AppConfig, env: NodeJS.ProcessEnv): Heal
         member: me.is_bot && String(chat.id) === config.telegram.groupId && ['group', 'supergroup'].includes(chat.type) && (admin || memberOk),
         canSend: admin || (memberOk && (member.status === 'restricted' ? member.can_send_messages === true && member.can_send_documents === true : chat.permissions?.can_send_messages === true && chat.permissions?.can_send_documents === true)),
         polling: !webhook.url,
+        readsAll: admin || me.can_read_all_group_messages === true,
       };
     },
     company: async () => Boolean((await new CompaniesApi(sdk()).getCompanyInfo(config.companyId)).data.data),

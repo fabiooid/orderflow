@@ -15,7 +15,19 @@ export class TelegramApi {
       return body.result;
     } catch { throw new Error(`Telegram ${method} failed; check connectivity, permissions, and rate limits`); }
   }
-  getMe() { return this.call<{ id: number; username: string; is_bot: boolean }>('getMe'); }
+  getMe() { return this.call<{ id: number; username: string; is_bot: boolean; can_read_all_group_messages?: boolean }>('getMe'); }
+  /** File bytes for a received file. The file URL contains the token, so it never leaves this method. */
+  async download(fileId: string, maxBytes: number): Promise<Uint8Array<ArrayBuffer>> {
+    const file = await this.call<{ file_path?: string; file_size?: number }>('getFile', { file_id: fileId });
+    if (!file.file_path || (file.file_size ?? 0) > maxBytes) throw new Error('Telegram file is unavailable or too large');
+    try {
+      const response = await this.request(`https://api.telegram.org/file/bot${this.token}/${file.file_path}`, { signal: AbortSignal.timeout(60000) });
+      if (!response.ok) throw new Error();
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (bytes.byteLength > maxBytes) throw new Error();
+      return bytes;
+    } catch { throw new Error('Telegram file download failed'); }
+  }
   getWebhookInfo() { return this.call<{ url: string }>('getWebhookInfo'); }
   getChat(chatId: string) { return this.call<{ id: number; type: string; permissions?: { can_send_messages?: boolean; can_send_documents?: boolean } }>('getChat', { chat_id: chatId }); }
   getChatMember(chatId: string, userId: number) { return this.call<{ status: string; can_send_messages?: boolean; can_send_documents?: boolean }>('getChatMember', { chat_id: chatId, user_id: userId }); }

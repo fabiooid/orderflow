@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
 import { translate, type AppConfig } from '../config/schema.js';
-import { callbackData, normalizeCallback, normalizeTextUpdate, type OrderLink, type TextEvent } from './adapter.js';
-import { routeMessage, type Action, type IntentRouter } from './routing.js';
-import { TelegramStore, type Conversation, type ReplyPlan } from './store.js';
+import { callbackData, mediaCallbackData, normalizeCallback, normalizeMessage, type MessageEvent, type OrderLink } from './adapter.js';
+import { asksFirst, routeMessage, type Action, type IntentRouter } from './routing.js';
+import { TelegramStore, type Conversation, type PlanEffects, type ReplyPlan } from './store.js';
+import { MediaError, type MediaReader, type ReadMedia } from './media.js';
 import type { Keyboard } from './api.js';
 import { draftSchema, type SavedOrder } from '../domain/types.js';
 
@@ -19,10 +20,16 @@ function chunks(text: string): string[] {
   return result;
 }
 
-type Reply = Pick<ReplyPlan, 'texts' | 'order' | 'pdfOrderId'>;
+type Reply = Pick<ReplyPlan, 'texts' | 'order' | 'pdfOrderId' | 'prompt'>;
 type TargetedAction = Extract<Action, { target: OrderLink }>;
 type Loaded = { linked?: Conversation; active?: Conversation };
 const say = (text: string, order?: Conversation): Reply => ({ texts: [text], order });
+
+/** Merges the other parts of a Telegram album into its first message. */
+function withAlbum(event: MessageEvent, parts: MessageEvent[]): MessageEvent {
+  if (!parts.length) return event;
+  return { ...event, text: [event, ...parts].map(p => p.text).find(Boolean) ?? '', attachments: [event, ...parts].flatMap(p => p.attachments ?? []) };
+}
 
 export class TelegramController {
   private readonly policy: string;
@@ -32,42 +39,96 @@ export class TelegramController {
     private readonly createCustomer?: (previous: Conversation) => Promise<string>,
     private readonly saveOrder?: (previous: Conversation) => Promise<SavedOrder>,
     private readonly sendPdf?: (orderId: number) => Promise<{ message_id: number }>,
-    private readonly buttons?: { answer: (id: string) => Promise<unknown>; clear: (messageId: number) => Promise<unknown> }) {
+    private readonly buttons?: { answer: (id: string) => Promise<unknown>; clear: (messageId: number) => Promise<unknown> },
+    private readonly media?: MediaReader) {
     this.policy = policyFingerprint(config);
   }
 
   private t(itText: string, en: string) { return translate(this.config, itText, en); }
 
-  /** Caller must serialize updates. Polling entry point uses an exclusive process lock. */
-  async handle(update: { update_id: number }) {
+  /**
+   * Caller must serialize updates. Polling entry point uses an exclusive process lock.
+   * `album` holds the other updates of the same Telegram album; they are answered together with this one.
+   */
+  async handle(update: { update_id: number }, album: { update_id: number }[] = []) {
     const id = update.update_id;
     if (!Number.isSafeInteger(id) || id < 0) throw new Error('Invalid update identifier');
     let entry = await this.store.update(id);
     const callback = normalizeCallback(update, this.config);
     if (callback) await this.buttons?.answer(callback.id).catch(() => undefined);
     if (!entry) {
-      let event: TextEvent | null;
+      let event: MessageEvent | null;
       let action: Action;
+      let read: ReadMedia | undefined;
+      const effects: PlanEffects = {};
       const loaded: Loaded = {};
-      if (callback) {
+      if (callback && callback.action.kind === 'pending') {
+        const pending = await this.store.pending({ message: callback.action.message });
+        if (!pending) { await this.buttons?.clear(callback.messageId).catch(() => undefined); await this.store.advance(id + 1); return; }
+        event = callback.event;
+        loaded.active = await this.store.activeRequest();
+        if (!callback.action.accept) {
+          effects.consume = pending.message;
+          action = { kind: 'answer', text: this.t('Ok, lo ignoro.', 'OK, ignoring it.') };
+        } else {
+          const result = pending.value.read ? { read: pending.value.read } : await this.read(pending.value.event);
+          if ('read' in result) {
+            read = result.read;
+            event = { ...event, text: read.text };
+            effects.consume = pending.message;
+            const active = loaded.active;
+            action = active ? { kind: 'edit', target: { orderId: active.orderId, revision: active.revision }, text: read.text } : { kind: 'start', customer: false, text: read.text };
+          } else action = result.failed;
+        }
+      } else if (callback) {
+        const target = callback.target!;
         const link = await this.store.link(callback.messageId);
-        loaded.linked = await this.store.order(callback.target.orderId);
-        if (!link || link.orderId !== callback.target.orderId || link.revision !== callback.target.revision || loaded.linked?.revision !== callback.target.revision) {
+        loaded.linked = await this.store.order(target.orderId);
+        if (!link || link.orderId !== target.orderId || link.revision !== target.revision || loaded.linked?.revision !== target.revision) {
           await this.buttons?.clear(callback.messageId).catch(() => undefined);
           await this.store.advance(id + 1); return;
         }
         event = callback.event; action = callback.action;
       } else {
-        event = normalizeTextUpdate(update, this.config);
+        event = normalizeMessage(update, this.config);
         if (!event) { await this.store.advance(id + 1); return; }
+        const original = event;
+        const parts = album.map(u => normalizeMessage(u, this.config)).filter((p): p is MessageEvent => p !== null && p.album === original.album);
+        event = withAlbum(event, parts);
+        effects.absorbed = parts.map(p => p.updateId);
+        // A late album part joins its unanswered question instead of asking again.
+        const joined = event.album && !parts.length ? await this.store.pending({ album: event.album }) : undefined;
+        if (joined) {
+          const value = { event: withAlbum(joined.value.event, [event]) };
+          await this.store.plan(id, { replyTo: event.messageId, texts: [] }, { pending: { message: joined.message, value } });
+          await this.store.advance(id + 1); return;
+        }
         const link = event.replyTo === undefined ? undefined : await this.store.link(event.replyTo);
         loaded.linked = link && await this.store.order(link.orderId);
         loaded.active = await this.store.activeRequest();
-        action = await routeMessage(event, { config: this.config, botUsername: this.username, link, ...loaded, model: this.engine.route });
+        const unread = event;
+        if (asksFirst(event, { config: this.config, link, active: loaded.active })) action = { kind: 'prompt' };
+        else {
+          const result = event.attachments?.length || event.forwardedFrom ? await this.read(event) : undefined;
+          if (result && 'failed' in result) action = result.failed;
+          else {
+            read = result?.read;
+            if (read) event = { ...event, text: read.text };
+            action = await routeMessage(event, { config: this.config, botUsername: this.username, link, ...loaded, model: this.engine.route });
+          }
+        }
+        if (action.kind === 'prompt') effects.pending = { message: unread.messageId, value: { event: unread, ...(read ? { read } : {}) } };
       }
-      if (action.kind === 'ignore') { await this.store.advance(id + 1); return; }
-      const reply = await this.respond(action, event, id, loaded);
-      await this.store.plan(id, { replyTo: event.messageId, ...reply, incomingText: event.text, senderId: event.senderId, receivedAt: new Date().toISOString() });
+      if (action.kind === 'ignore') {
+        if (effects.absorbed?.length) await this.store.plan(id, { replyTo: event.messageId, texts: [] }, effects);
+        await this.store.advance(id + 1); return;
+      }
+      const reply = await this.respond(action as Exclude<Action, { kind: 'ignore' | 'pending' }>, event, id, loaded);
+      if (read?.echo && reply.texts.length) {
+        const first = `${read.echo}\n\n${reply.texts[0]}`;
+        reply.texts = first.length <= 4000 ? [first, ...reply.texts.slice(1)] : [read.echo, ...reply.texts];
+      }
+      await this.store.plan(id, { replyTo: event.messageId, ...reply, incomingText: event.text, senderId: event.senderId, receivedAt: new Date().toISOString() }, effects);
       entry = (await this.store.update(id))!;
     }
     if (entry.sending) throw new Error(`Telegram delivery uncertain for update ${id}. Use telegram:recover after inspecting the group.`);
@@ -75,7 +136,7 @@ export class TelegramController {
       await this.store.beginSend(id);
       const text = entry.plan.texts[entry.next];
       const sent = text
-        ? await this.send(text, entry.plan.replyTo, entry.next === entry.plan.texts.length - 1 ? this.keyboard(entry.plan.order) : undefined)
+        ? await this.send(text, entry.plan.replyTo, entry.next === entry.plan.texts.length - 1 ? this.keyboard(entry.plan) : undefined)
         : this.sendPdf && entry.plan.pdfOrderId !== undefined
           ? await this.sendPdf(entry.plan.pdfOrderId)
           : undefined;
@@ -83,15 +144,29 @@ export class TelegramController {
       await this.store.sent(id, sent.message_id);
       entry = (await this.store.update(id))!;
     }
-    await this.engine.record?.(id, entry.plan);
+    if (entry.plan.texts.length) await this.engine.record?.(id, entry.plan);
     if (callback) await this.buttons?.clear(callback.messageId).catch(() => undefined);
     await this.store.advance(id + 1);
   }
 
-  private async respond(action: Exclude<Action, { kind: 'ignore' }>, event: TextEvent, id: number, { linked, active }: Loaded): Promise<Reply> {
+  /** Media and forwards as text. Failures become a reply; the media stays unanswered so it can be sent again. */
+  private async read(event: MessageEvent): Promise<{ read: ReadMedia } | { failed: Action }> {
+    const fail = (text: string) => ({ failed: { kind: 'answer' as const, text } });
+    if (!this.media) return fail(this.t('Allegati e note vocali non sono attivi in questa installazione.', 'Attachments and voice notes are not enabled in this deployment.'));
+    try { return { read: await this.media(event) }; }
+    catch (error) {
+      return fail(error instanceof MediaError ? error.message : this.t('Non sono riuscito a leggere l’allegato. Nessun dato salvato: invialo di nuovo o scrivi i dettagli.', 'I could not read the attachment. Nothing was saved: send it again or type the details.'));
+    }
+  }
+
+  private async respond(action: Exclude<Action, { kind: 'ignore' | 'pending' }>, event: MessageEvent, id: number, { linked, active }: Loaded): Promise<Reply> {
     const load = async (orderId: string) => orderId === linked?.orderId ? linked : orderId === active?.orderId ? active : this.store.order(orderId);
     switch (action.kind) {
       case 'answer': return { texts: chunks(action.text) };
+      case 'prompt': return {
+        texts: [active ? this.t('Aggiungo questo alla richiesta aperta?', 'Add this to the open request?') : this.t('Preparo un ordine da questo?', 'Prepare an order from this?')],
+        prompt: { message: event.messageId, active: Boolean(active) },
+      };
       case 'start': return this.start(action, event, id, active);
       case 'cancel': return this.cancel(action.target ? await load(action.target.orderId) : active);
       default: {
@@ -104,7 +179,7 @@ export class TelegramController {
     }
   }
 
-  private async start(action: Extract<Action, { kind: 'start' }>, event: TextEvent, id: number, active?: Conversation): Promise<Reply> {
+  private async start(action: Extract<Action, { kind: 'start' }>, event: MessageEvent, id: number, active?: Conversation): Promise<Reply> {
     if (active) return say(this.t('C’è già una richiesta aperta. Completala oppure annullala prima di iniziarne un’altra.', 'A request is already open. Complete or cancel it before starting another.'));
     const fresh: Conversation = { orderId: `u${id}`, startedBy: event.senderId, startedAt: new Date().toISOString(), revision: 0, status: 'new', ...(action.customer ? { kind: 'customer' as const } : {}), draft: draftSchema.parse({}), questions: '', policy: this.policy };
     if (action.text) return this.process(action.text, fresh);
@@ -165,7 +240,11 @@ export class TelegramController {
     }
   }
 
-  private keyboard(order?: Conversation): Keyboard | undefined {
+  private keyboard({ order, prompt }: ReplyPlan): Keyboard | undefined {
+    if (prompt) return { inline_keyboard: [[
+      { text: this.t('✅ Sì', '✅ Yes'), callback_data: mediaCallbackData(prompt.message, true) },
+      { text: this.t('✖️ No', '✖️ No'), callback_data: mediaCallbackData(prompt.message, false) },
+    ]] };
     if (!order || !['new', 'suspended', 'ready'].includes(order.status)) return undefined;
     const link = { orderId: order.orderId, revision: order.revision };
     const row = [];
