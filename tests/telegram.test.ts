@@ -1,20 +1,20 @@
 import { expect, it, vi } from 'vitest';
-import { normalizeCallback, normalizeTextUpdate } from '../src/telegram/adapter.js';
+import { normalizeCallback, normalizeMessage } from '../src/telegram/adapter.js';
 import { commandAction, routeMessage, type IntentRouter, type RoutingContext } from '../src/telegram/routing.js';
 import type { Conversation } from '../src/telegram/store.js';
 import { draftSchema } from '../src/domain/types.js';
 import { config } from './helpers.js';
 const update = () => ({ update_id: 1, message: { message_id: 2, chat: { id: -1000000000001, type: 'supergroup' }, from: { id: 5, is_bot: false }, text: '/order two notebooks' } });
-const event = () => normalizeTextUpdate(update(), config())!;
+const event = () => normalizeMessage(update(), config())!;
 const conv = (orderId: string, revision: number): Conversation => ({ orderId, revision, status: 'ready', draft: draftSchema.parse({}), questions: '', policy: '' });
 const ctx = (extra: Partial<RoutingContext> = {}): RoutingContext => ({ config: config(), botUsername: 'demo_bot', ...extra });
 
 it('accepts any human member of the configured group, rejects other chats and bots', () => {
-  expect(normalizeTextUpdate(update(), config())?.senderId).toBe('5');
+  expect(normalizeMessage(update(), config())?.senderId).toBe('5');
   const other = update(); other.message.chat.id = -999;
-  expect(normalizeTextUpdate(other, config())).toBeNull();
+  expect(normalizeMessage(other, config())).toBeNull();
   const bot = update(); bot.message.from.is_bot = true;
-  expect(normalizeTextUpdate(bot, config())).toBeNull();
+  expect(normalizeMessage(bot, config())).toBeNull();
 });
 it('routes replies by message reference, not by whoever last spoke', async () => {
   expect(await routeMessage(event(), ctx())).toMatchObject({ kind: 'start', customer: false, text: 'two notebooks' });

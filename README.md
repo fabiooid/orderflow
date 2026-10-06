@@ -41,6 +41,8 @@ OrderFlow then:
 4. **Posts a summary** with a **Conferma e salva** button. Every edit creates a new revision, and buttons from older revisions stop working.
 5. **Saves the order** only after explicit confirmation, then sends the order PDF back to the group.
 
+Operators can also send **voice notes**, **photos and screenshots**, **PDFs** and **forwarded customer messages**. Voice notes are transcribed (the transcript is shown with the reply); images and PDFs are read into text before extraction. Media sent without a caption gets a *Preparo un ordine da questo?* question with yes/no buttons, so nothing is read or charged until someone says yes. Several photos sent together as an album are handled as one message. Media files are not stored; only the text read from them is.
+
 It can also create new customers (with duplicate checks) and answer catalogue questions, such as `@your_bot quali varianti di Sapone di Esempio abbiamo?`
 
 ## Design principles
@@ -125,6 +127,7 @@ Notes:
 - Product, VAT and payment IDs are **API IDs**, not product codes or printed document numbers.
 - Country conditions are explicit ISO lists. EU membership is never inferred.
 - Product matching uses names, attributes and optional codes. An exact normalized match wins; otherwise every query term must match, and several matches produce a choice.
+- `transcription.model` (optional, e.g. `openai/gpt-4o-mini-transcribe`) enables voice notes and uses `OPENAI_API_KEY`. Without it, voice notes get a "not enabled" reply. Images and PDFs are read with `model`, which must accept images.
 - `orderSavingEnabled` (default `false`) must be set explicitly before a deployment can save orders.
 - `*.local.json`, `.env`, `.data/` and database files are git-ignored. Keep them that way.
 
