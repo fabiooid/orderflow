@@ -1,7 +1,8 @@
-import { createScorer, notScorable, type ScorerRunInputForAgent, type ScorerRunOutputForAgent, type Trajectory } from '@mastra/core/evals';
+import { createScorer, type ScorerRunInputForAgent, type ScorerRunOutputForAgent, type Trajectory } from '@mastra/core/evals';
 import { createStep, createWorkflow } from '@mastra/core/workflows';
 import { z } from 'zod';
 import type { createManualScorers } from '../assistant/manual-scorers.js';
+import { delegated } from '../assistant/eval-evidence.js';
 import type { LiveEvalSettings } from '../assistant/live-evals.js';
 
 export const deliveredEvidenceSchema = z.object({
@@ -9,7 +10,6 @@ export const deliveredEvidenceSchema = z.object({
   output: z.custom<ScorerRunOutputForAgent>(),
   trajectory: z.custom<Trajectory>(),
 });
-export type DeliveredEvidence = z.infer<typeof deliveredEvidenceSchema>;
 
 /** No model generation, no sends, no writes: native step scorers observe a delivered reply. */
 export function createDeliveredReplyWorkflow(scorers: ReturnType<typeof createManualScorers>, settings: LiveEvalSettings) {
@@ -25,8 +25,7 @@ export function createDeliveredReplyWorkflow(scorers: ReturnType<typeof createMa
       const result = key === 'workflowAdherence'
         ? await scorers.workflowAdherence.run({ input: evidence.input, output: evidence.trajectory })
         : await scorers[key].run({ input: evidence.input, output: evidence.output });
-      if (result.notScorable) return notScorable(result.notScorable.reason);
-      return { score: result.score, reason: result.reason ?? '', details: result.analyzeStepResult };
+      return delegated(result);
     }).generateScore(({ results }) => results.analyzeStepResult.score)
       .generateReason(({ results }) => results.analyzeStepResult.reason);
     return [key, { scorer, sampling: { type: 'ratio' as const, rate: settings.rate } }];

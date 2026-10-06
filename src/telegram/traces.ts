@@ -11,10 +11,14 @@ export function telegramTraces(storage: LibSQLStore) {
  new Mastra({storage,observability});
  const synced = new Map<number, string>();
  return {
-  async sync(store: TelegramStore) {
-   const rows = (await store.db.execute({sql:'SELECT id,plan,sending,done FROM tg_updates WHERE scope=?',args:[store.scope]})).rows;
+  /** Pass an update ID on the polling path; omit it to (re)import the whole scope. */
+  async sync(store: TelegramStore, updateId?: number) {
+   const rows = (await store.db.execute(updateId === undefined
+    ? {sql:'SELECT id,plan,sending,done FROM tg_updates WHERE scope=?',args:[store.scope]}
+    : {sql:'SELECT id,plan,sending,done FROM tg_updates WHERE scope=? AND id=?',args:[store.scope,updateId]})).rows;
    for(const row of rows) {
-    const signature=JSON.stringify(row);
+    // Plans are immutable once stored, so delivery state alone identifies a change.
+    const signature=`${row.sending}:${row.done}`;
     if(synced.get(Number(row.id))===signature) continue;
     const plan=JSON.parse(String(row.plan));
     const digest=createHash('sha256').update(`${store.scope}:${row.id}`).digest('hex');

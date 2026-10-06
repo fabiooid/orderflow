@@ -5,6 +5,7 @@ import { asksForTester, isTester, matchProducts, normalize, sameClient, searchCa
 
 export type Preparation = { ready: false; issues: Issue[]; draft: OrderDraft } | { ready: true; order: PreparedOrder };
 export type ValidationLookup = (country: string, vatNumber: string) => Promise<VatValidation>;
+const toCandidates = (clients: Client[]) => clients.filter(c => c.id).map(c => ({ id: c.id!, label: c.name }));
 
 export async function prepareOrder(input: OrderDraft, config: AppConfig, connector: OrderConnector, date: string, validateVat?: ValidationLookup): Promise<Preparation> {
   const draft = draftSchema.parse(input);
@@ -16,11 +17,11 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
   if (draft.newClient) {
     const duplicates = clients.filter(c => sameClient(c, draft.newClient!));
     if (duplicates.length) {
-      issues.push({ field: 'client', message: 'Possible existing client: choose the record before creating another', candidates: duplicates.filter(c => c.id).map(c => ({ id: c.id!, label: c.name })) });
+      issues.push({ field: 'client', message: 'Possible existing client: choose the record before creating another', candidates: toCandidates(duplicates) });
       client = undefined;
     }
   } else if (!client) {
-    issues.push({ field: 'client', message: 'Choose an existing client or supply complete new-client details', candidates: matches.filter(c => c.id).map(c => ({ id: c.id!, label: c.name })) });
+    issues.push({ field: 'client', message: 'Choose an existing client or supply complete new-client details', candidates: toCandidates(matches) });
   }
   if (client) {
     const valid = clientSchema.safeParse(client);

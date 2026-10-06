@@ -3,7 +3,7 @@ import type { OrderConnector } from '../connector/contract.js';
 import { clientSchema, type OrderDraft } from '../domain/types.js';
 import { sameClient } from '../domain/matching.js';
 import type { WriteJournal } from '../storage/write-journal.js';
-import type { Conversation } from './store.js';
+import { journalKey, type Conversation } from './store.js';
 
 export function customerDetails(draft: OrderDraft, config: AppConfig) {
   const parsed = clientSchema.safeParse(draft.newClient);
@@ -23,7 +23,7 @@ export function customerCreator(config: AppConfig, connector: Pick<OrderConnecto
     if (!details.client) throw new Error('Customer details are incomplete');
     const client = details.client;
     // Journal covers the duplicate lookup too: a replay after a successful write returns the saved result.
-    return journal.once(`${config.deploymentId}:${config.companyId}:${config.telegram.groupId}:${conversation.orderId}:customer`, client, async () => {
+    return journal.once(`${journalKey(config, conversation.orderId)}:customer`, client, async () => {
       const matches = (await connector.listClients()).filter(c => sameClient(c, client));
       if (matches.length) return `Cliente già presente: ${matches.map(c => `${c.name} (ID ${c.id})`).join(', ')}. Nessun duplicato creato.`;
       const saved = await connector.createClient(client);
