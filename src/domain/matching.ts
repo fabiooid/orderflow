@@ -66,7 +66,7 @@ export function searchCatalogue(query: string, products: Product[]): Product[] {
     .map(entry => entry.product);
 }
 
-/** "A oppure B" (or "A or B") naming catalogue products exactly, such as a doubtful tester read from an order form; anything before a colon is a label. */
+/** "A oppure B" (or "A or B") naming catalogue products exactly, such as a doubtful value read from an order form; anything before a colon is a label. */
 export function namedAlternatives(query: string, products: Product[]): Product[] {
   const parts = query.replace(/^[^:]*:\s*/, '').split(/\s+(?:oppure|or)\s+/i);
   if (parts.length < 2) return [];
