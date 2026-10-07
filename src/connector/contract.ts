@@ -1,4 +1,4 @@
-import type { Client, PreparedOrder, Product, SavedOrder, Totals } from '../domain/types.js';
+import type { Client, ClientOrder, PreparedOrder, Product, SavedOrder, Totals } from '../domain/types.js';
 
 /** Orders-only capability boundary. No arbitrary HTTP, email, invoice, or delete operations. */
 export interface OrderConnector {
@@ -9,4 +9,6 @@ export interface OrderConnector {
   createOrder(order: PreparedOrder): Promise<SavedOrder>;
   updateOrder(id: number, order: PreparedOrder): Promise<SavedOrder>;
   getOrder(id: number): Promise<SavedOrder>;
+  /** Most recent orders of one client, newest first. Read-only. */
+  listClientOrders(clientId: number, limit: number): Promise<ClientOrder[]>;
 }

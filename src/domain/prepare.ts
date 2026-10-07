@@ -1,7 +1,7 @@
-import type { AppConfig } from '../config/schema.js';
+import { clientTier, tierPrices, type AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
 import { clientSchema, draftSchema, preparedOrderSchema, type Client, type Issue, type OrderDraft, type OrderLine, type PreparedOrder, type Product, type VatValidation } from './types.js';
-import { asksForTester, isTester, matchProducts, normalize, sameClient, searchCatalogue } from './matching.js';
+import { asksForTester, isTester, matchProducts, namedAlternatives, normalize, sameClient, searchCatalogue } from './matching.js';
 
 export type Preparation = { ready: false; issues: Issue[]; draft: OrderDraft } | { ready: true; order: PreparedOrder };
 export type ValidationLookup = (country: string, vatNumber: string) => Promise<VatValidation>;
@@ -36,7 +36,7 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
 
   if (!draft.lines.length) issues.push({ field: 'lines', message: 'Add at least one product and quantity' });
   const catalogue = products.filter(p => p.id !== shipping.id);
-  const selected: { product: Product; quantity: number; netPrice?: number }[] = [];
+  const selected: { product: Product; quantity: number; netPrice?: number; index: number }[] = [];
   for (const [index, line] of draft.lines.entries()) {
     const field = `lines.${index}`;
     if (line.quantity === undefined) {
@@ -52,12 +52,24 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
     const matches = accepted || line.productId !== undefined ? [] : matchProducts(line.query, catalogue);
     const chosen = accepted ?? (matches.length === 1 ? matches[0] : undefined);
     if (chosen) {
-      selected.push({ product: chosen, quantity: line.quantity, netPrice: line.netPrice });
+      selected.push({ product: chosen, quantity: line.quantity, netPrice: line.netPrice, index });
       continue;
     }
-    const candidates = matches.length ? matches : searchCatalogue(line.query, catalogue);
-    const message = matches.length ? 'Choose the exact product or variant' : candidates.length ? 'No exact product for this description; choose one of the related products' : 'No matching product; clarify the name and size';
+    const named = matches.length ? [] : namedAlternatives(line.query, catalogue);
+    const candidates = matches.length ? matches : named.length ? named : searchCatalogue(line.query, catalogue);
+    const message = matches.length || named.length ? 'Choose the exact product or variant' : candidates.length ? 'No exact product for this description; choose one of the related products' : 'No matching product; clarify the name and size';
     issues.push({ field, message, candidates: candidates.map(p => ({ id: p.id, label: p.name })) });
+  }
+
+  // An explicit tier (from an order form or the operator) wins over the client's configured tier.
+  const tierId = draft.priceTier ?? clientTier(config, client?.id)?.id;
+  const tier = tierId && tierId !== 'standard' ? config.priceTiers.find(t => t.id === tierId) : undefined;
+  if (tierId && tierId !== 'standard' && !tier) issues.push({ field: 'priceTier', message: `Unknown price tier ${tierId}; use standard prices or a configured tier` });
+  const prices = tier ? tierPrices(config, tier.id) : new Map<number, number>();
+  if (tier) for (const line of selected) {
+    if (line.netPrice === undefined && !prices.has(line.product.id)) {
+      issues.push({ field: `lines.${line.index}.netPrice`, message: `No ${tier.name} price for ${line.product.name}: confirm the standard price ${line.product.netPrice} ${config.currency} or state the price` });
+    }
   }
 
   const delivery = draft.delivery ?? (client ? { country: client.country ?? '', address: [client.street, client.postalCode, client.city, client.country].join(', ') } : undefined);
@@ -75,7 +87,7 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
 
   const makeLine = (product: Product, quantity: number, isShipping: boolean, netPrice?: number): OrderLine => ({
     productId: product.id, code: product.code, name: product.name, quantity,
-    netPrice: isShipping ? shippingPrice : netPrice ?? product.netPrice,
+    netPrice: isShipping ? shippingPrice : netPrice ?? prices.get(product.id) ?? product.netPrice,
     discountPercent: !isShipping || (draft.discountShipping ?? config.shipping.discountByDefault) ? draft.discountPercent : 0,
     vatId: rule.vatId, vatRate: rule.rate, nature: rule.nature, shipping: isShipping,
   });
@@ -88,5 +100,6 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
     lines: [...selected.map(({ product, quantity, netPrice }) => makeLine(product, quantity, false, netPrice)), makeLine(shipping, 1, true)],
     delivery, notes: [draft.notes, deliveryNote].filter(Boolean).join('\n'), date,
     paymentMethodId: config.payments.methodId, dueDate: due.toISOString().slice(0, 10),
+    ...(tier ? { priceTier: tier.id } : {}),
   }) };
 }

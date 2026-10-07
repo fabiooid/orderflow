@@ -73,6 +73,22 @@ npm run demo    # scripted end-to-end run against a fictional catalogue
 
 `npm run demo` uses scripted extraction and simulated API responses. It shows the orchestration and duplicate protection, but it says **nothing about LLM accuracy**. Its temporary databases are removed when it finishes.
 
+### Order forms and price tiers
+
+Customers often send back a printed price list with quantities written next to each product. OrderFlow reads those against a **template** of the form: its printed rows, the columns customers write in (a number, or a mark such as an X), and the product each cell orders. The model only says what is written in which row and column; the products come from the template, so the form's meaning lives in data you review, not in code:
+
+```bash
+npm run orderform:import -- path/to/clean-price-list.pdf --id my-form            # writes private/order-forms/my-form.json
+npm run orderform:import -- path/to/trade-list.pdf --id trade --tier trade        # prices on this form are the "trade" tier's
+npm run pricetier:suggest -- --tier trade                                        # clients whose past orders used those prices
+```
+
+The import maps each fill-in cell to a catalogue product using printed codes and the form's own printed notes. Review each generated file, then list it in your business config under `orderForms` (paths are fine) and add a `priceTiers` entry with the client IDs you agree with. Both scripts are read-only. Templates describe your business, so keep them out of git (`private/` is ignored). When the printed form changes, import it again.
+
+When a photo or scan arrives, OrderFlow turns it upright, recognises the form, enlarges small scans and reads it **twice** at full image detail. The two readings are compared by product, so a mark read on a neighbouring cell that orders the same product still agrees; quantities both readings agree on are used, and every disagreement becomes a question. Low-resolution scans produce more questions and occasionally a shared misreading: ask customers for phone photos or scans of at least 150 dpi, and check form orders against the paper. `npm run eval:orderforms` measures this on forms whose correct order you know (see [EVALS.md](EVALS.md)). Reading takes about a minute per page, with "typing…" shown meanwhile.
+
+Clients in a tier get the tier's prices; a product without a tier price is asked about, never guessed. The order summary names the price list in use and, under **⚠️ Da verificare**, lists prices that differ from the client's previous orders. Those are pointed out only: nothing is changed and saving is not blocked.
+
 ### Try the assistant in Mastra Studio
 
 ```bash

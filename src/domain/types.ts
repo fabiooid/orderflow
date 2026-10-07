@@ -49,6 +49,8 @@ export const draftSchema = z.object({
     address: z.string().min(1),
   }).strict().optional(),
   notes: z.string().max(4000).default(''),
+  /** Price tier asked for by an order form or the operator; 'standard' means catalogue prices. */
+  priceTier: z.string().regex(/^[a-z0-9-]+$/).optional(),
 }).strict().refine(d => !(d.clientId && d.newClient), { message: 'Choose an existing or a new client, not both' });
 export type OrderDraft = z.infer<typeof draftSchema>;
 
@@ -75,11 +77,15 @@ export const preparedOrderSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   paymentMethodId: z.number().int().positive().optional(),
   dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  /** Price tier applied to merchandise lines without a stated price. */
+  priceTier: z.string().optional(),
 }).strict();
 export type PreparedOrder = z.infer<typeof preparedOrderSchema>;
 export type OrderLine = z.infer<typeof orderLineSchema>;
 export const totalsSchema = z.object({ net: z.number(), vat: z.number(), gross: z.number() });
 export type Totals = z.infer<typeof totalsSchema>;
 export type SavedOrder = { id: number; number: string; url?: string };
+/** A client's earlier order, read only to point out differences. */
+export type ClientOrder = { id: number; number: string; date: string; lines: { productId?: number; code: string; name: string; quantity: number; netPrice: number; discountPercent: number }[] };
 export type VatValidation = 'valid' | 'invalid' | 'unavailable' | 'unchecked';
 export type Issue = { field: string; message: string; candidates?: { id: number; label: string }[] };

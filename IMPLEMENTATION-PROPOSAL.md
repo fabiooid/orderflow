@@ -49,7 +49,9 @@ Delivery is the existing shipping product; propose its default price and let the
 
 Resolve missing and ambiguous details, then save an Order and post its PDF internally. A separate pre-save approval is not mandatory. Corrections modify that same order and produce a new PDF revision. Review is an application status, not an invoice or sending action.
 
-Hard exclusions: invoice creation, proformas in V1, automatic customer sending, retail/OSS, separate price lists, live phone calls, generated speech, and autonomous catalogue edits.
+Hard exclusions: invoice creation, proformas in V1, automatic customer sending, retail/OSS, live phone calls, generated speech, and autonomous catalogue edits.
+
+> Updated decision (6 October 2026): price tiers are now supported, replacing the earlier "separate price lists" exclusion. Tier prices come from reviewed order-form templates in deployment configuration, apply only to clients listed in that tier, and are asked about rather than guessed when missing. Fatture in Cloud's own price lists can replace the templates as the price source later. Prices from a client's previous orders are only pointed out for review, never applied.
 
 ## Recommended technical design
 
