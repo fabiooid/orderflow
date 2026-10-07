@@ -74,7 +74,8 @@ it('runs identify, two parallel readings and the merge as a Mastra workflow with
   const result = await (await workflow.createRun()).start({ inputData: { page: await image() } });
   expect(result.status).toBe('success');
   expect(result.status === 'success' && result.result.lines).toEqual([
-    { kind: 'unsure', productId: 1, readings: [3, 2] },
+    // The readings run in parallel, so either may finish first.
+    { kind: 'unsure', productId: 1, readings: expect.arrayContaining([3, 2]) },
     { kind: 'sure', productId: 11, quantity: 1 },
   ]);
   expect(Object.keys(result.steps)).toEqual(expect.arrayContaining(['identify', 'read-1', 'read-2', 'merge']));
