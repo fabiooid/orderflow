@@ -138,3 +138,24 @@ References: [Mastra evaluations](https://mastra.ai/docs/evals/overview),
 [Multi-turn Judge](https://mastra.ai/reference/evals/multi-turn-judge),
 [Tool call accuracy](https://mastra.ai/reference/evals/tool-call-accuracy),
 [Trajectory accuracy](https://mastra.ai/reference/evals/trajectory-accuracy).
+
+## Order-form reading
+
+`read-order-form` is a Mastra workflow (identify → two readings in parallel → merge),
+so each step appears in traces and Studio. Page images never stay stored: the workflow
+keeps no snapshots and the `omit-media` span processor replaces file bytes in traces.
+
+Two deterministic scorers compare a reading with a known order, with no judge-model spend:
+
+- `order-form-no-silent-errors`: share of lines read as certain that are right. Below 1
+  means a wrong quantity the operator would not have been asked about.
+- `order-form-coverage`: share of the expected order read correctly without a question.
+
+```sh
+npm run eval:orderforms -- private/evals/order-forms.json --runs 3
+```
+
+A dataset lists real filled-in forms (file, page, expected product ID → quantity), so
+keep it out of git. Each run makes model calls. Run it after changing the reading
+prompt, the model or a template.
+

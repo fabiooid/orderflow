@@ -3,7 +3,8 @@ import { groupAlbums, MAX_FILE_BYTES, normalizeMessage, type MessageEvent } from
 import { asksFirst, routeMessage } from '../src/telegram/routing.js';
 import { TelegramController } from '../src/telegram/controller.js';
 import { TelegramStore, type Conversation } from '../src/telegram/store.js';
-import { createMediaReader, MediaError, openAiTranscriber, type MediaReader, type Read, type Transcribe } from '../src/telegram/media.js';
+import type { Agent } from '@mastra/core/agent';
+import { createMediaReader, MediaError, voiceTranscriber, type MediaReader, type Read, type Transcribe } from '../src/telegram/media.js';
 import { TelegramApi } from '../src/telegram/api.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { draftSchema } from '../src/domain/types.js';
@@ -181,17 +182,13 @@ describe('media reader', () => {
     await expect(media(event({ attachments: [{ kind: 'voice', fileId: 'v', mimeType: 'audio/ogg' }] }))).rejects.toThrow(/non sono configurate/);
     expect(download).not.toHaveBeenCalled();
   });
-  it('sends voice to OpenAI as an .ogg upload and never echoes the key', async () => {
-    const request = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(JSON.stringify({ text: ' tre candele ' })));
-    const transcribe = openAiTranscriber('gpt-4o-mini-transcribe', 'sk-secret', request as typeof fetch);
+  it('transcribes through the agent\'s Mastra voice with catalogue words as a prompt, without leaking errors', async () => {
+    const listen = vi.fn(async (_audio: NodeJS.ReadableStream, _options?: unknown) => ' tre candele ');
+    const transcribe = voiceTranscriber({ voice: { listen } } as unknown as Agent);
     expect(await transcribe(new Uint8Array([1, 2]), 'audio/ogg', 'Cedro, Oud')).toBe('tre candele');
-    const init = request.mock.calls[0]![1]!;
-    const form = init.body as FormData;
-    expect(form.get('model')).toBe('gpt-4o-mini-transcribe');
-    expect((form.get('file') as File).name).toBe('voice.ogg');
-    expect(form.get('prompt')).toBe('Cedro, Oud');
-    const failing = openAiTranscriber('m', 'sk-secret', vi.fn().mockRejectedValue(new Error('sk-secret')) as typeof fetch);
-    await expect(failing(new Uint8Array([1]), 'audio/ogg', '')).rejects.toThrow(/^Voice transcription failed$/);
+    expect(listen.mock.calls[0]![1]).toEqual({ providerOptions: { openai: { prompt: 'Cedro, Oud' } } });
+    listen.mockRejectedValueOnce(new Error('sk-secret'));
+    await expect(transcribe(new Uint8Array([1]), 'audio/ogg', '')).rejects.toThrow(/^Voice transcription failed$/);
   });
   it('downloads Telegram files without exposing the token', async () => {
     const request = vi.fn()

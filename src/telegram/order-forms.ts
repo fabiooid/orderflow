@@ -1,5 +1,6 @@
 import sharp from 'sharp';
 import { z } from 'zod';
+import { createStep, createWorkflow } from '@mastra/core/workflows';
 import type { OrderForm } from '../config/schema.js';
 
 /**
@@ -9,13 +10,12 @@ import type { OrderForm } from '../config/schema.js';
  */
 export type Vision = <T extends z.ZodType>(images: Buffer[], prompt: string, schema: T) => Promise<z.infer<T>>;
 
-/**
- * A product line read from a form. An unsure line lists the products it may be (more than one when a value could
- * belong to a neighbouring row) and what each reading saw.
- */
-export type FormLine =
-  | { kind: 'sure'; productId: number; quantity: number }
-  | { kind: 'unsure'; productIds: number[]; readings: (number | undefined)[]; where: string };
+const formLineSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('sure'), productId: z.number().int(), quantity: z.number() }),
+  /** The two readings disagree; `readings` holds what each saw (null for nothing). */
+  z.object({ kind: z.literal('unsure'), productId: z.number().int(), readings: z.array(z.number().nullable()) }),
+]);
+export type FormLine = z.infer<typeof formLineSchema>;
 export type FormReading = { form: OrderForm; lines: FormLine[] };
 
 const sides = ['top', 'right', 'bottom', 'left'] as const;
@@ -62,7 +62,7 @@ export async function identify(image: Buffer, forms: OrderForm[], vision: Vision
 }
 
 /** Small scans are enlarged: the model reads handwriting on a 3000-pixel page far better than on a 800-pixel one. */
-async function enlarged(image: Buffer) {
+export async function enlarged(image: Buffer) {
   const { width = 0, height = 0 } = await sharp(image).metadata();
   const scale = Math.max(1, Math.min(3, 3000 / Math.max(width, height)));
   return scale === 1 ? image : sharp(image).resize(Math.round(width * scale), Math.round(height * scale), { kernel: 'lanczos3' }).sharpen().png().toBuffer();
@@ -77,58 +77,68 @@ Report each row that has anything handwritten, using the row numbers above, with
 Handwriting is often written low in its cell and may touch the line below. Values in one row are written at the same height: place a mark by comparing its height with the numbers written in the other columns, not with the printed lines. Ignore rows that are not on this page.`;
 }
 
-/** One entry per row with one field per column, which keeps the model reading across rows. */
-function readSchema(form: OrderForm) {
+/** Products one reading orders, by product ID. One entry per row with one field per column keeps the model reading across rows. */
+export async function readOnce(page: Buffer, form: OrderForm, vision: Vision): Promise<Record<number, number>> {
   const columns = Object.fromEntries(form.columns.map(c => [c.id, c.value === 'quantity' ? z.number().nullable() : z.boolean()]));
-  return z.object({ rows: z.array(z.object({ row: z.number().int(), ...columns })) });
-}
-
-type Value = { row: number; column: string; value: number; otherRow: number | null };
-type Doubt = { options: number[]; value: number; where: string };
-
-/** Products one reading orders, and the values it could not place for sure. Several cells may order the same product. */
-function tally(form: OrderForm, values: Value[]) {
-  const product = (row: number | null, column: string) => row === null ? undefined : form.rows[row - 1]?.cells[column]?.productId;
-  const sure = new Map<number, number>();
-  const doubts: Doubt[] = [];
-  for (const v of values) {
-    const own = product(v.row, v.column), other = product(v.otherRow, v.column);
-    const where = form.rows[v.row - 1] ? `${form.rows[v.row - 1]!.code || form.rows[v.row - 1]!.label}, ${v.column}` : '';
-    if (own !== undefined && (other === undefined || other === own)) sure.set(own, (sure.get(own) ?? 0) + v.value);
-    else if (own !== undefined || other !== undefined) doubts.push({ options: [...new Set([own, other].filter((id): id is number => id !== undefined))].sort((x, y) => x - y), value: v.value, where });
+  const { rows } = await vision([page], readPrompt(form), z.object({ rows: z.array(z.object({ row: z.number().int(), ...columns })) }));
+  const ordered: Record<number, number> = {};
+  for (const row of rows as Record<string, unknown>[]) for (const column of form.columns) {
+    const written = row[column.id];
+    const value = typeof written === 'number' && written > 0 ? written : written === true ? 1 : 0;
+    // Several cells may order the same product: a mark read on a neighbouring cell ordering it still counts once.
+    const productId = form.rows[(row.row as number) - 1]?.cells[column.id]?.productId;
+    if (value && productId !== undefined) ordered[productId] = (ordered[productId] ?? 0) + value;
   }
-  return { sure, doubts };
+  return ordered;
 }
 
-/** Reads the form twice and keeps only what both readings agree on; the rest is returned as doubtful. */
+/** What both readings order is kept; every difference becomes a doubtful line. */
+export function mergeReadings(a: Record<number, number>, b: Record<number, number>): FormLine[] {
+  return [...new Set([...Object.keys(a), ...Object.keys(b)].map(Number))].sort((x, y) => x - y).map(productId => a[productId] === b[productId]
+    ? { kind: 'sure' as const, productId, quantity: a[productId]! }
+    : { kind: 'unsure' as const, productId, readings: [a[productId] ?? null, b[productId] ?? null] });
+}
+
+/** Reads the form twice and keeps only what both readings agree on. */
 export async function readForm(image: Buffer, form: OrderForm, vision: Vision): Promise<FormLine[]> {
   const page = await enlarged(image);
-  const reads = await Promise.all([0, 1].map(() => vision([page], readPrompt(form), readSchema(form))));
-  const values = (rows: Record<string, unknown>[]): Value[] => rows.flatMap(r => form.columns.flatMap(c => {
-    const written = r[c.id];
-    const value = typeof written === 'number' && written > 0 ? written : written === true ? 1 : undefined;
-    return value === undefined ? [] : [{ row: r.row as number, column: c.id, value, otherRow: null }];
-  }));
-  const [a, b] = reads.map(r => tally(form, values(r.rows as Record<string, unknown>[])));
-  // Overlapping doubts from either reading become one question.
-  const groups: Doubt[][] = [];
-  for (const doubt of [...a!.doubts, ...b!.doubts]) {
-    const joined = groups.filter(g => g.some(d => d.options.some(id => doubt.options.includes(id))));
-    for (const g of joined) groups.splice(groups.indexOf(g), 1);
-    groups.push([...joined.flat(), doubt]);
-  }
-  const doubtful = new Set(groups.flat().flatMap(d => d.options));
-  const lines: FormLine[] = [];
-  for (const productId of [...new Set([...a!.sure.keys(), ...b!.sure.keys()])]) {
-    const [qa, qb] = [a!.sure.get(productId), b!.sure.get(productId)];
-    if (qa === qb) lines.push({ kind: 'sure', productId, quantity: qa! });
-    else if (!doubtful.has(productId)) lines.push({ kind: 'unsure', productIds: [productId], readings: [qa, qb], where: '' });
-  }
-  for (const group of groups) {
-    const values = [...new Set(group.map(d => d.value))];
-    lines.push({ kind: 'unsure', productIds: [...new Set(group.flatMap(d => d.options))].sort((x, y) => x - y), readings: values.length === 1 ? [values[0]] : values, where: group[0]!.where });
-  }
-  return lines;
+  const [a, b] = await Promise.all([0, 1].map(() => readOnce(page, form, vision)));
+  return mergeReadings(a!, b!);
+}
+
+const bytes = z.custom<Buffer>(value => Buffer.isBuffer(value), 'Expected image bytes');
+
+/**
+ * One page as a Mastra workflow: identify → two readings in parallel → merge, each step visible in traces.
+ * Snapshots are off so page images are never stored.
+ */
+export function createOrderFormWorkflow(forms: OrderForm[], vision: Vision) {
+  const identified = z.object({ image: bytes, formId: z.string().nullable() });
+  const ordered = z.object({ ordered: z.record(z.string(), z.number()) });
+  const identifyStep = createStep({
+    id: 'identify', inputSchema: z.object({ page: bytes }), outputSchema: identified,
+    execute: async ({ inputData }) => {
+      const { image, form } = await identify(inputData.page, forms, vision);
+      return { image, formId: form?.id ?? null };
+    },
+  });
+  const reading = (id: string) => createStep({
+    id, inputSchema: identified, outputSchema: ordered,
+    execute: async ({ inputData }) => {
+      const form = forms.find(f => f.id === inputData.formId);
+      return { ordered: form ? await readOnce(await enlarged(inputData.image), form, vision) : {} };
+    },
+  });
+  const mergeStep = createStep({
+    id: 'merge', inputSchema: z.record(z.string(), ordered),
+    outputSchema: z.object({ image: bytes, formId: z.string().nullable(), lines: z.array(formLineSchema) }),
+    execute: async ({ inputData, getStepResult }) => {
+      const { image, formId } = getStepResult(identifyStep);
+      return { image, formId, lines: formId ? mergeReadings(inputData['read-1']?.ordered ?? {}, inputData['read-2']?.ordered ?? {}) : [] };
+    },
+  });
+  return createWorkflow({ id: 'read-order-form', inputSchema: z.object({ page: bytes }), outputSchema: mergeStep.outputSchema, options: { shouldPersistSnapshot: () => false } })
+    .then(identifyStep).parallel([reading('read-1'), reading('read-2')]).then(mergeStep).commit();
 }
 
 /** Text handed to extraction. Product IDs come from the template, so the model copies rather than matches them. */
@@ -140,12 +150,7 @@ export function formText(reading: FormReading, names: Map<number, string>, tierN
   const lines = reading.lines.map(line => {
     if (line.kind === 'sure') return `${line.quantity} × ${name(line.productId)}`;
     const seen = line.readings.map(r => r ?? (it ? 'niente' : 'nothing')).join(it ? ' e ' : ' and ');
-    if (line.productIds.length === 1) {
-      return it ? `? × ${name(line.productIds[0]!)} — quantità incerta (letto ${seen})` : `? × ${name(line.productIds[0]!)} — quantity unclear (read ${seen})`;
-    }
-    const quantity = line.readings.length === 1 && line.readings[0] !== undefined ? line.readings[0] : '?';
-    const options = line.productIds.map(name).join(it ? ' oppure ' : ' or ');
-    return it ? `${quantity} × da chiarire (${line.where}): ${options}` : `${quantity} × to clarify (${line.where}): ${options}`;
+    return it ? `? × ${name(line.productId)} — quantità incerta (letto ${seen})` : `? × ${name(line.productId)} — quantity unclear (read ${seen})`;
   });
   return [header, ...(lines.length ? lines : [it ? '(nessuna quantità scritta)' : '(no quantities written)'])].join('\n');
 }

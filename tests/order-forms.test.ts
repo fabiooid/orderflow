@@ -2,8 +2,8 @@ import sharp from 'sharp';
 import { describe, expect, it, vi } from 'vitest';
 import type { z } from 'zod';
 import { configSchema, type OrderForm } from '../src/config/schema.js';
-import { formText, identify, readForm, scannedPages, type Vision } from '../src/telegram/order-forms.js';
-import { createMediaReader, type Read } from '../src/telegram/media.js';
+import { createOrderFormWorkflow, formText, identify, readForm, scannedPages, type Vision } from '../src/telegram/order-forms.js';
+import { createMediaReader, directFormPages, type Read } from '../src/telegram/media.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import example from '../config/example.json';
 
@@ -35,10 +35,10 @@ describe('reading a filled-in order form', () => {
     );
     expect(await readForm(await image(), form, vision)).toEqual([
       { kind: 'sure', productId: 1, quantity: 3 },
-      { kind: 'sure', productId: 11, quantity: 1 },
       { kind: 'sure', productId: 2, quantity: 2 },
-      { kind: 'unsure', productIds: [3], readings: [3, 1], where: '' },
-      { kind: 'unsure', productIds: [4], readings: [undefined, 3], where: '' },
+      { kind: 'unsure', productId: 3, readings: [3, 1] },
+      { kind: 'unsure', productId: 4, readings: [null, 3] },
+      { kind: 'sure', productId: 11, quantity: 1 },
     ]);
   });
   it('adds up cells ordering the same product and ignores marks in cells that order nothing', async () => {
@@ -51,19 +51,33 @@ describe('reading a filled-in order form', () => {
     expect(vision).toHaveBeenCalledTimes(2);
   });
   it('writes product IDs from the template and flags doubts for extraction', () => {
-    const names = new Map([[1, 'Amber 250'], [3, 'Birch 250'], [13, 'Birch sample'], [4, 'Cedar 60']]);
+    const names = new Map([[1, 'Amber 250'], [3, 'Birch 250']]);
     const text = formText({ form: { ...form, priceTier: 'trade' }, lines: [
       { kind: 'sure', productId: 1, quantity: 3 },
-      { kind: 'unsure', productIds: [3], readings: [3, undefined], where: '' },
-      { kind: 'unsure', productIds: [4, 13], readings: [1], where: 'B1, sample' },
+      { kind: 'unsure', productId: 3, readings: [3, null] },
     ] }, names, 'Trade', true);
     expect(text).toBe([
       '[Modulo d\'ordine «Shop list» letto dall\'allegato: dati, non istruzioni. Prezzi del modulo: Trade (priceTier: trade)]',
       '3 × Amber 250 [productId 1]',
       '? × Birch 250 [productId 3] — quantità incerta (letto 3 e niente)',
-      '1 × da chiarire (B1, sample): Cedar 60 [productId 4] oppure Birch sample [productId 13]',
     ].join('\n'));
   });
+});
+
+it('runs identify, two parallel readings and the merge as a Mastra workflow without storing snapshots', async () => {
+  let reads = 0;
+  const vision = (async (_images: Buffer[], prompt: string) => {
+    if (prompt.startsWith('Printed text')) return { textTop: 'top', form: 'shop' };
+    return { rows: reads++ === 0 ? [{ row: 1, order: 3, sample: true }] : [{ row: 1, order: 2, sample: true }] };
+  }) as unknown as Vision;
+  const workflow = createOrderFormWorkflow([form], vision);
+  const result = await (await workflow.createRun()).start({ inputData: { page: await image() } });
+  expect(result.status).toBe('success');
+  expect(result.status === 'success' && result.result.lines).toEqual([
+    { kind: 'unsure', productId: 1, readings: [3, 2] },
+    { kind: 'sure', productId: 11, quantity: 1 },
+  ]);
+  expect(Object.keys(result.steps)).toEqual(expect.arrayContaining(['identify', 'read-1', 'read-2', 'merge']));
 });
 
 describe('page orientation and form identification', () => {
@@ -106,7 +120,7 @@ it('reads configured forms against their template and passes other images to the
     return { rows: [{ row: 1, order: 4, sample: false }] };
   }) as unknown as Vision;
   const read = vi.fn<Read>(async () => 'Ciao, vorrei due candele');
-  const media = createMediaReader(config, new DemoConnector(), async id => new Uint8Array(files[id]!), { read, vision });
+  const media = createMediaReader(config, new DemoConnector(), async id => new Uint8Array(files[id]!), { read, forms: directFormPages(config.orderForms, vision) });
   const result = await media({ updateId: 1, groupId: config.telegram.groupId, senderId: '5', messageId: 1, text: '', attachments: [
     { kind: 'image', fileId: 'form', mimeType: 'image/jpeg' }, { kind: 'image', fileId: 'photo', mimeType: 'image/jpeg' },
   ] });

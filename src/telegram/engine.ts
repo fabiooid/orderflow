@@ -18,6 +18,9 @@ import { clientTier } from '../config/schema.js';
 import type { MastraDBMessage } from '@mastra/core/agent';
 import { evalContext, liveEvalSettings } from '../assistant/live-evals.js';
 import { createDeliveredReplyWorkflow } from './evaluation.js';
+import { createMediaAgents, createMediaReader, modelReader, modelVision, voiceTranscriber, workflowFormPages, type Download, type MediaReader } from './media.js';
+import { createOrderFormWorkflow } from './order-forms.js';
+import { omitMedia } from '../assistant/omit-media.js';
 
 const wordingSchema = z.object({ questions: z.array(z.object({ field: z.string(), text: z.string() }).strict()) }).strict();
 
@@ -26,15 +29,23 @@ function plainQuestions(issues: Issue[]) {
 }
 
 /** Sequential runner reuses Mastra persistence; model receives latest structured draft + questions explicitly. */
-export function createConversationEngine(config: AppConfig, connector: OrderConnector, storage: LibSQLStore, mode: 'demo' | 'read-only', testExtractor?: Extractor, rewriteQuestions?: (issues: Issue[], operatorText: string) => Promise<Record<string, string>>): ConversationEngine & { shutdown: () => Promise<void> } {
+export function createConversationEngine(config: AppConfig, connector: OrderConnector, storage: LibSQLStore, mode: 'demo' | 'read-only', testExtractor?: Extractor, rewriteQuestions?: (issues: Issue[], operatorText: string) => Promise<Record<string, string>>): ConversationEngine & { shutdown: () => Promise<void>; media: (download: Download) => MediaReader } {
   const live = testExtractor ? { enabled: false, rate: 0 } : liveEvalSettings();
   const { agent, memory, scorers, extract: agentExtract } = createOrderAgent(config, connector, storage, live);
   const extract = testExtractor ?? agentExtract;
   let extracted: OrderDraft = draftSchema.parse({});
   const workflow = createOrderWorkflow(config, connector, async () => extracted);
-  const observability = new Observability({ configs: { default: { serviceName: "orderflow-telegram", exporters: [new MastraStorageExporter()] } } });
+  const observability = new Observability({ configs: { default: { serviceName: "orderflow-telegram", exporters: [new MastraStorageExporter()], spanOutputProcessors: [omitMedia] } } });
   const deliveredReply = createDeliveredReplyWorkflow(scorers, live);
-  const mastra = new Mastra({ observability, storage, agents: { orderAssistant: agent }, workflows: { prepareOrder: workflow, deliveredReply }, scorers: Object.fromEntries(Object.values(scorers).map(scorer => [scorer.id, scorer])) });
+  const { mediaReader, formReader } = createMediaAgents(config);
+  const readOrderForm = createOrderFormWorkflow(config.orderForms, modelVision(formReader));
+  const mastra = new Mastra({ observability, storage, agents: { orderAssistant: agent, mediaReader, formReader }, workflows: { prepareOrder: workflow, deliveredReply, readOrderForm }, scorers: Object.fromEntries(Object.values(scorers).map(scorer => [scorer.id, scorer])) });
+  /** Media reading through the registered agents and workflow, so it shows up in traces like the rest of the turn. */
+  const media = (download: Download) => createMediaReader(config, connector, download, {
+    read: modelReader(mediaReader),
+    forms: workflowFormPages(mastra.getWorkflow('readOrderForm'), config.orderForms),
+    ...(config.transcription ? { transcribe: voiceTranscriber(mediaReader) } : {}),
+  });
   const it = config.locale === 'it';
   /** Price list in use, plus differences from the client's previous orders. Lookup failures only drop the comparison. */
   const review = async (order: PreparedOrder): Promise<Review> => {
@@ -159,5 +170,5 @@ For continue/order/customer, text must restate the current operator's requested 
       } catch { console.warn('Live evaluation dispatch failed; the delivered reply and business state are unchanged.'); }
     }
   };
-  return Object.assign(handle, { record, ...(testExtractor ? {} : {route}), shutdown: () => mastra.shutdown({ drainTimeout: 30000 }) });
+  return Object.assign(handle, { record, media, ...(testExtractor ? {} : {route}), shutdown: () => mastra.shutdown({ drainTimeout: 30000 }) });
 }
