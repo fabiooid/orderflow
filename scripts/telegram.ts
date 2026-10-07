@@ -13,7 +13,7 @@ import { TelegramController } from '../src/telegram/controller.js';
 import { createConversationEngine } from '../src/telegram/engine.js';
 import { acquirePollerLock } from '../src/telegram/lock.js';
 import { albumOf, groupAlbums } from '../src/telegram/adapter.js';
-import { createMediaReader, modelReader, modelVision, openAiTranscriber, type MediaReader } from '../src/telegram/media.js';
+import type { MediaReader } from '../src/telegram/media.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { FattureInCloudConnector } from '../src/connector/fatture-in-cloud.js';
 import { checkConnections } from '../src/health/check.js';
@@ -64,10 +64,7 @@ async function main() {
         if (!saved.url) throw new Error('Saved order PDF not available; reconcile delivery without recreating order');
         return api.sendOrderPdf(config.telegram.groupId, saved.url, `Ordine ${saved.number}`);
       }, {answer: id => api.answerCallback(id), clear: id => api.clearButtons(config.telegram.groupId, id)},
-      typing(createMediaReader(config, connector, (id, max) => api.download(id, max), {
-        read: modelReader(config.model), vision: modelVision(config.model),
-        transcribe: config.transcription && openAiTranscriber(config.transcription.model.slice('openai/'.length), process.env.OPENAI_API_KEY ?? ''),
-      })));
+      typing(engine.media((id, max) => api.download(id, max))));
     console.log(`OrderFlow Telegram ${mode} running. Customer creation requires /confirmcustomer. Order saving: ${config.orderSavingEnabled ? 'confirmation required' : 'disabled'}. Stop with Ctrl+C.`);
     while (!stopping) {
       let updates: { update_id: number }[];

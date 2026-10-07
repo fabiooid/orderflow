@@ -24,9 +24,11 @@
     "telegram:commands": "node --env-file-if-exists=.env --import tsx scripts/register-commands.ts",
     "telegram:traces:import": "node --env-file-if-exists=.env --import tsx scripts/import-telegram-traces.ts",
     "orderform:import": "node --env-file-if-exists=.env --import tsx scripts/order-form-import.ts",
-    "pricetier:suggest": "node --env-file-if-exists=.env --import tsx scripts/price-tier-suggest.ts"
+    "pricetier:suggest": "node --env-file-if-exists=.env --import tsx scripts/price-tier-suggest.ts",
+    "eval:orderforms": "node --env-file-if-exists=.env --import tsx scripts/eval-order-forms.ts"
   },
   "dependencies": {
+    "@ai-sdk/openai": "2.0.133",
     "@fattureincloud/fattureincloud-ts-sdk": "2.1.3",
     "@libsql/client": "0.18.0",
     "@mastra/core": "1.71.0",
