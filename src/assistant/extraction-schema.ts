@@ -14,6 +14,7 @@ export const extractionSchema = z.object({
   lines: z.array(z.object({ query: z.string().min(1), productId: z.number().int().positive().nullable(), quantity: z.number().positive().nullable(), netPrice: z.number().nonnegative().nullable() }).strict()),
   shippingPrice: z.number().nonnegative().nullable(), discountPercent: z.number().min(0).max(100), discountShipping: z.boolean().nullable(),
   delivery: z.object({ country: z.string().regex(/^[A-Z]{2}$/), address: z.string().min(1) }).strict().nullable(), notes: z.string(),
+  priceTier: z.string().regex(/^[a-z0-9-]+$/).nullable(),
 }).strict();
 export function parseExtraction(value: unknown) {
   const strip = (v: unknown): unknown => Array.isArray(v) ? v.map(strip) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).filter(([, x]) => x !== null).map(([k, x]) => [k, strip(x)])) : v;

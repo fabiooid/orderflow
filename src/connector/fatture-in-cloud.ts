@@ -3,13 +3,13 @@ import {
   type Client as FicClient, type IssuedDocument,
 } from '@fattureincloud/fattureincloud-ts-sdk';
 import { z } from 'zod';
-import { clientSchema, preparedOrderSchema, productSchema, totalsSchema, type Client, type PreparedOrder, type Product, type SavedOrder } from '../domain/types.js';
+import { clientSchema, preparedOrderSchema, productSchema, totalsSchema, type Client, type ClientOrder, type PreparedOrder, type Product, type SavedOrder } from '../domain/types.js';
 import type { OrderConnector } from './contract.js';
 
 export type SdkPorts = {
   products: Pick<ProductsApi, 'listProducts'>;
   clients: Pick<ClientsApi, 'listClients' | 'createClient'>;
-  documents: Pick<IssuedDocumentsApi, 'createIssuedDocument' | 'modifyIssuedDocument' | 'getIssuedDocument' | 'getNewIssuedDocumentTotals'>;
+  documents: Pick<IssuedDocumentsApi, 'createIssuedDocument' | 'modifyIssuedDocument' | 'getIssuedDocument' | 'getNewIssuedDocumentTotals' | 'listIssuedDocuments'>;
 };
 
 const positiveId = z.number().int().positive();
@@ -146,6 +146,19 @@ export class FattureInCloudConnector implements OrderConnector {
     positiveId.parse(id);
     const response = await this.#sdk.documents.getIssuedDocument(this.#companyId, id, undefined, 'detailed');
     return saved(response.data.data);
+  }
+
+  async listClientOrders(clientId: number, limit: number): Promise<ClientOrder[]> {
+    positiveId.parse(clientId);
+    // The API accepts 5 to 100 results per page.
+    const { data } = await this.#sdk.documents.listIssuedDocuments(this.#companyId, 'order', undefined, 'detailed', '-date', 1, Math.min(100, Math.max(5, limit)), `entity.id = ${clientId}`);
+    return (data.data ?? []).filter(d => d.type === 'order' && d.entity?.id === clientId).slice(0, limit).map(d => ({
+      id: positiveId.parse(d.id), number: String(d.number ?? d.id), date: d.date ?? '',
+      lines: (d.items_list ?? []).map(i => ({
+        productId: i.product_id ?? undefined, code: i.code ?? '', name: i.name ?? '',
+        quantity: i.qty ?? 0, netPrice: i.net_price ?? 0, discountPercent: i.discount ?? 0,
+      })),
+    }));
   }
 
   async #orderPayload(order: PreparedOrder) {

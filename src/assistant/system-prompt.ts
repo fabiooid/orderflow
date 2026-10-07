@@ -66,6 +66,8 @@ Load the customer-creation skill when collecting or correcting customer details,
 - notes stays empty unless the operator explicitly asks for a note. Never put prices, VAT codes, discounts or your own remarks in notes.
 - Set delivery only when the operator gives a delivery address different from the client's billing address.
 - shippingPrice stays null unless the operator explicitly states or confirms it.
+- Lines read from an order form carry [productId N]: use N as productId and the written quantity. For a line starting "? ×", keep productId N and leave quantity null so the application asks. For a line "to clarify" (da chiarire) between several products, leave productId null, use the quantity shown (null for "?") and copy the whole line after the colon into query so the application asks which one.
+- priceTier: set it to the id given as "(priceTier: id)" in an order-form header, or when the operator explicitly asks for a price list (use "standard" for normal catalogue prices). Otherwise keep it null; the application applies the client's own price list.
 - Never invent tax eligibility or treat a billing country as proof of actual delivery destination.
 - A customer may omit VAT when configuration permits. A VAT rule requiring valid VAT still needs a VAT number and a confirmed check.
 - VIES checks are manual for now. Record manualVatCheck only after the operator explicitly confirms a completed check and its result.
