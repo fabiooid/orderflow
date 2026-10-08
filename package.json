@@ -25,7 +25,8 @@
     "telegram:traces:import": "node --env-file-if-exists=.env --import tsx scripts/import-telegram-traces.ts",
     "orderform:import": "node --env-file-if-exists=.env --import tsx scripts/order-form-import.ts",
     "pricetier:suggest": "node --env-file-if-exists=.env --import tsx scripts/price-tier-suggest.ts",
-    "eval:orderforms": "node --env-file-if-exists=.env --import tsx scripts/eval-order-forms.ts"
+    "eval:orderforms": "node --env-file-if-exists=.env --import tsx scripts/eval-order-forms.ts",
+    "write:recover": "node --env-file-if-exists=.env --import tsx scripts/recover-write.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "2.0.133",
