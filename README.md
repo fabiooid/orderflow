@@ -45,6 +45,8 @@ Operators can also send **voice notes**, **photos and screenshots**, **PDFs** an
 
 It can also create new customers (with duplicate checks) and answer catalogue questions, such as `@your_bot quali varianti di Sapone Zenzero abbiamo?`
 
+The agent can consult a resolved customer's recent orders through the read-only `getCustomerOrderHistory` tool in Telegram and Studio (five orders by default, at most twenty). It uses history to ask better product/size questions and compare past prices, citing the order number and date. Previous prices and discounts never become automatic defaults. A failed lookup is reported as unavailable rather than as an empty order history.
+
 ## Design principles
 
 - **Orders only.** The public connector and agent tools contain no invoice, proforma, customer-email, document-conversion or delete operations. Configuration cannot turn them on.
@@ -88,6 +90,12 @@ The import maps each fill-in cell to a catalogue product using printed codes and
 When a photo or scan arrives, OrderFlow turns it upright, recognises the form, enlarges small scans and reads it **twice** at full image detail. The two readings are compared by product, so a mark read on a neighbouring cell that orders the same product still agrees; quantities both readings agree on are used, and every disagreement becomes a question. Low-resolution scans produce more questions and occasionally a shared misreading: ask customers for phone photos or scans of at least 150 dpi, and check form orders against the paper. `npm run eval:orderforms` measures this on forms whose correct order you know (see [EVALS.md](EVALS.md)). Reading takes about a minute per page, with "typing…" shown meanwhile.
 
 Clients in a tier get the tier's prices; a product without a tier price is asked about, never guessed. The order summary names the price list in use and, under **⚠️ Da verificare**, lists prices that differ from the client's previous orders. Those are pointed out only: nothing is changed and saving is not blocked.
+
+### Alias learning
+
+Operators can teach product names and shop/business-name aliases in ordinary messages. The agent's `rememberAlias` tool verifies that the target exists, records the exact operator quote and identity, and persists the mapping in Mastra resource-scoped working memory. Shared Telegram routing and new order threads use the same resource; older order threads retain their history and searches still consult shared aliases. There are no aliases embedded in the source code.
+
+Learning requires an explicit correction or teaching statement, not merely order confirmation. Attachments and forwarded text cannot authorize learning. Conflicting mappings remain candidates for clarification; operators can explicitly ask to forget a mapping. Prices, tax rules and delivery defaults are not learned. Recognizing a teaching statement is model behavior, so review early learning traces during the pilot.
 
 ### Try the assistant in Mastra Studio
 
