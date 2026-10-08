@@ -139,3 +139,51 @@ it('rejects a model reading stopped at its output limit', async () => {
   await expect(modelReader(agent)([{ data: new Uint8Array([1]), mimeType: 'application/pdf' }])).rejects.toThrow('Incomplete');
 });
 
+it('resolves language for command details but keeps it for bare commands', async () => {
+  const store = new TelegramStore(':memory:', 'commands-language'); await store.init();
+  const process = vi.fn(async (_text: string, previous: Conversation) => ({ conversation: { ...previous, status: 'ready' as const, revision: previous.revision + 1 }, text: 'Summary' }));
+  const language = vi.fn(async () => 'en' as const);
+  const send = vi.fn(async (_text: string) => ({ message_id: 100 }));
+  const ctl = new TelegramController(config(), 'bot', store, Object.assign(process, { language }), send);
+  try {
+    await ctl.handle(message(1, '/ordine Please prepare two bottles'));
+    expect(language).toHaveBeenCalledWith('Please prepare two bottles', 'it');
+    expect(process.mock.calls[0]?.[1].locale).toBe('en');
+    await ctl.handle(message(2, '/annulla'));
+    expect(language).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls.at(-1)?.[0]).toContain('Cancelled.');
+  } finally { store.close(); }
+});
+
+it('persists the routed language through restart, confirmation buttons and cancellation', async () => {
+  const c = config(); c.telegram.respondToAllMessages = true;
+  const store = new TelegramStore(':memory:', 'language'); await store.init();
+  let mid = 100;
+  const process = vi.fn(async (_text: string, previous: Conversation) => ({ conversation: { ...previous, status: 'ready' as const, revision: previous.revision + 1 }, text: previous.locale === 'en' ? 'Summary' : 'Riepilogo' }));
+  const engine = Object.assign(process, { route: vi.fn(async () => ({ action: 'customer' as const, text: 'New customer', locale: 'en' as const })) });
+  const send = vi.fn(async (_text: string, _reply: number, _keyboard?: unknown) => ({ message_id: mid++ }));
+  try {
+    await new TelegramController(c, 'bot', store, engine, send, async () => 'Created').handle(message(1, 'Please create a customer'));
+    expect(process.mock.calls[0]?.[1].locale).toBe('en');
+    expect(send.mock.calls[0]?.[2]).toMatchObject({ inline_keyboard: [[{ text: '✅ Confirm and save' }, { text: '❌ Cancel' }]] });
+    await new TelegramController(c, 'bot', store, engine, send).handle(message(2, '/annulla'));
+    expect(send.mock.calls.at(-1)?.[0]).toContain('Cancelled.');
+    expect(await store.locale()).toBe('en');
+  } finally { store.close(); }
+});
+
+it('renders customer validation, saved results and order labels in the resolved language', async () => {
+  const c = config(); c.locale = 'en'; c.clients.requiredFields = []; c.clients.sdiCountries = [];
+  expect(customerDetails(draft(), c).error).toContain('Complete name');
+  const { id: _id, ...newClient } = (await new DemoConnector().listClients())[0]!;
+  const journal = new WriteJournal(':memory:'); await journal.init();
+  try {
+    const creator = customerCreator(config(), { listClients: async () => [], createClient: async client => ({ ...client, id: 999 }) }, journal);
+    const text = await creator({ orderId: 'en', kind: 'customer', locale: 'en', revision: 1, status: 'ready', draft: { ...draft(), newClient }, questions: '', policy: '' });
+    expect(text).toContain('Customer created');
+    expect(customerPreview({ ...newClient, notes: 'Test' }, false)).toContain('📝 Notes');
+    const preview = orderPreview(await prepared(), { net: 1, vat: 0.22, gross: 1.22 }, false, true);
+    expect(preview).toContain('VAT 22%');
+    expect(preview).not.toContain('IVA');
+  } finally { journal.close(); }
+});
