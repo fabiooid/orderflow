@@ -45,6 +45,8 @@ Operators can also send **voice notes**, **photos and screenshots**, **PDFs** an
 
 It can also create new customers (with duplicate checks) and answer catalogue questions, such as `@your_bot quali varianti di Sapone Zenzero abbiamo?`
 
+The agent can consult a resolved customer's recent orders through the read-only `getCustomerOrderHistory` tool in Telegram and Studio (five orders by default, at most twenty). It uses history to ask better product/size questions and compare past prices, citing the order number and date. Previous prices and discounts never become automatic defaults. A failed lookup is reported as unavailable rather than as an empty order history.
+
 ## Design principles
 
 - **Orders only.** The public connector and agent tools contain no invoice, proforma, customer-email, document-conversion or delete operations. Configuration cannot turn them on.
@@ -83,9 +85,17 @@ npm run orderform:import -- path/to/clean-price-list.pdf --id my-form           
 
 The import maps each fill-in cell to a catalogue product using printed codes and the form's own printed notes. Review each generated file, then list it in your business config under `orderForms` (paths are fine). The importer reads Fatture in Cloud without writing records. Templates describe your business, so keep them out of git (`private/` is ignored). When the printed form changes, import it again.
 
+When a photo or scanned image arrives, OrderFlow turns it upright, recognises the form, enlarges small scans and reads it **twice** at full image detail. The two readings are compared by product: agreed quantities are used and disagreements become questions. Another reading preserves customer details, delivery instructions, visible unit prices and notes. PDFs are always rendered as complete pages (including text, images and overlays), with or without templates; the limit is ten pages per request and 2400 pixels on the longest PDF-page edge. JPEG, PNG, WebP, static GIF and TIFF are normalized into page images; multi-page TIFF is supported. Animated images are rejected. Overlong readings are rejected instead of silently truncated. Two readings can still make the same mistake; check the summary against the original. `npm run eval:orderforms` measures accuracy on forms with known answers (see [EVALS.md](EVALS.md)).
+
+Document reading lives in `src/documents` behind a replaceable `DocumentProvider`. It returns page text and raw template-cell observations; OrderFlow resolves catalogue IDs afterwards. The current provider uses direct vision and always marks its output as requiring review. See [ADR 0001](docs/decisions/0001-document-reading.md) for the boundary, limitations and planned comparison with a document-AI provider.
+
 Fresh Fatture in Cloud catalogue prices are the default for every customer. Explicit unit prices in an order message or its document are customizations for that order only. Historical prices and legacy `priceTiers`/template prices never become automatic defaults. Those config fields remain readable for compatibility; an explicitly requested nonstandard tier requires clarification. The preview flags differences from recent customer orders without changing prices or blocking saving. Future FIC price-list support is separate work.
 
-When a photo or scan arrives, OrderFlow turns it upright, recognises the form, enlarges small scans and reads it **twice** at full image detail. The two readings are compared by product, so a mark read on a neighbouring cell that orders the same product still agrees; quantities both readings agree on are used, and every disagreement becomes a question. Low-resolution scans produce more questions and occasionally a shared misreading: ask customers for phone photos or scans of at least 150 dpi, and check form orders against the paper. `npm run eval:orderforms` measures this on forms whose correct order you know (see [EVALS.md](EVALS.md)). Reading takes about a minute per page, with "typing…" shown meanwhile.
+### Alias learning
+
+Operators can teach product names and shop/business-name aliases in ordinary messages. The agent's `rememberAlias` tool verifies that the target exists, records the exact operator quote and identity, and persists the mapping in Mastra resource-scoped working memory. Shared Telegram routing and new order threads use the same resource; older order threads retain their history and searches still consult shared aliases. There are no aliases embedded in the source code.
+
+Learning requires an explicit correction or teaching statement, not merely order confirmation. Attachments and forwarded text cannot authorize learning. Conflicting mappings remain candidates for clarification; operators can explicitly ask to forget a mapping. Prices, tax rules and delivery defaults are not learned. Recognizing a teaching statement is model behavior, so review early learning traces during the pilot.
 
 ### Try the assistant in Mastra Studio
 
@@ -158,6 +168,8 @@ npm run telegram:start        # start the poller (Ctrl+C to stop gracefully)
 
 Talk to the bot naturally in the configured group. The group has one active request at a time; finish or cancel it before you start another. Slash commands are optional shortcuts:
 
+The router resolves the reply language from substantive operator messages and explicit preferences. The selected language is stored for application summaries, buttons and subsequent confirmations. Commands with descriptive text use a separate language-resolution call; bare commands keep the current language. Attachment approval buttons are bound to the request and revision shown when the question was asked; resend an attachment if that context has changed.
+
 | Command | Alias | Action |
 | --- | --- | --- |
 | `/ordine` | `/order` | Start preparing an order |
@@ -169,6 +181,8 @@ Talk to the bot naturally in the configured group. The group has one active requ
 **Token permissions:** give the Fatture in Cloud token read access to products, clients and settings, plus order-only document access. **Do not grant invoice permissions.** The application's own restrictions are a second layer, not a substitute for a scoped token.
 
 **If a delivery is uncertain** (for example, Telegram timed out), the poller stops instead of resending. Check the group, then run `npm run telegram:recover`. CONNECTIONS.md describes the steps.
+
+**If a Fatture in Cloud save is uncertain**, keep the request blocked and use the operator-only [write recovery runbook](RECOVERY.md). Recovery records evidence locally; it never creates or sends anything itself.
 
 ## Scripts
 
@@ -185,6 +199,9 @@ Talk to the bot naturally in the configured group. The group has one active requ
 | `npm run telegram:discover` | List candidate group IDs from pending updates |
 | `npm run telegram:commands` | Register the bot command menu for the group |
 | `npm run telegram:recover` | Reconcile an uncertain message delivery |
+| `npm run write:recover` | Inspect/reconcile an uncertain Fatture in Cloud save |
+| `npm run eval:acceptance -- --offline` | Fictional application acceptance scenarios, no model calls |
+| `npm run eval:acceptance` | The same scenarios with live model extraction; provider charges apply |
 | `npm run telegram:pdf` | Send an **existing** order's PDF to the group |
 | `npm run telegram:traces:import` | Import historical transport records into Mastra traces |
 
@@ -238,13 +255,16 @@ OrderFlow is in **foundation / pre-pilot** stage.
 - [x] Duplicate-safe write journal and uncertain-delivery recovery
 - [x] Configurable VAT rules, including manual VIES confirmation
 - [x] Background evaluation scorers
+- [x] Voice-note, image and PDF input (whole-document PDF reading)
+- [x] Confirmed product/customer alias learning in Mastra memory
+- [x] Operator tooling for uncertain remote writes
+- [x] Live turn tracing across model/workflow/API/delivery operations
+- [x] Fictional acceptance scenarios with optional live-model extraction
 
 **Not yet done**
 
 - [ ] First confirmed order against a live account (user acceptance testing)
-- [ ] Voice-note and image input
-- [ ] Approved-alias management and automatic learning
-- [ ] Remote-write reconciliation tooling and automatic recovery of failed PDF deliveries
+- [ ] Automatic recovery of failed PDF deliveries (manual delivery recovery is available)
 - [ ] Shipping notes for existing customers
 - [ ] Editing orders after they are saved (handled manually in Fatture in Cloud for now)
 - [ ] Live-model accuracy evaluation
