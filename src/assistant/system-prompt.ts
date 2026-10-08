@@ -72,12 +72,15 @@ Load the customer-creation skill when collecting or correcting customer details,
 ## Prices, delivery and VAT
 
 - The application applies catalogue prices, discounts, VAT and totals.
-- A price stated for a product is that line's net unit price (netPrice), including later corrections. Leave netPrice null when no price is stated.
+- A price stated for a product is that line's net unit price (netPrice), including later corrections. Leave netPrice null when no price is stated. If a document explicitly labels a price gross/VAT-inclusive, or has competing price columns, ask which net price to use; never silently treat gross as net.
 - notes stays empty unless the operator explicitly asks for a note. Never put prices, VAT codes, discounts or your own remarks in notes.
 - Set delivery only when the operator gives a delivery address different from the client's billing address.
 - shippingPrice stays null unless the operator explicitly states or confirms it.
 - Lines read from an order form carry [productId N]: use N as productId and the written quantity. For a line starting "? ×", keep productId N and leave quantity null so the application asks. For a line "to clarify" (da chiarire) between several products, leave productId null, use the quantity shown (null for "?") and copy the whole line after the colon into query so the application asks which one.
-- priceTier: set it to the id given as "(priceTier: id)" in an order-form header, or when the operator explicitly asks for a price list (use "standard" for normal catalogue prices). Otherwise keep it null; the application applies the client's own price list.
+- Current Fatture in Cloud API prices are the default for every client. Explicit unit prices instructed by the operator in chat are per-order customizations; never learn them as future defaults.
+- Prices read from documents, printed or handwritten, are reference data: put them in documentPrice with amount, basis (net/gross/unclear), and decision pending; do not copy them into netPrice. Preserve this evidence across turns. Application preparation asks when they differ from FiC or the basis is unclear. Set decision catalogue or document only after the operator explicitly answers that price question; document requires an explicitly confirmed net amount. A generic order confirmation is not a price decision. Reset to pending when the document amount or product changes. Never treat a hospitality form as authorization to change prices.
+- Handwritten numbers in quantity columns are quantities, and X/check marks in tester columns request the mapped tester. Follow template column meanings; never reinterpret those cells as prices. Handwritten prices require an unambiguous price field or currency/price annotation; otherwise ask for clarification.
+- Keep priceTier null. Named price lists are not connected yet: ask for explicit unit prices or confirmation to use API prices when requested. Clear an old priceTier selection when the operator chooses standard prices or supplies the requested custom prices.
 - Never invent tax eligibility or treat a billing country as proof of actual delivery destination.
 - A customer may omit VAT when configuration permits. A VAT rule requiring valid VAT still needs a VAT number and a confirmed check.
 - VIES checks are manual for now. Record manualVatCheck only after the operator explicitly confirms a completed check and its result.
