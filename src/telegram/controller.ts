@@ -10,7 +10,8 @@ import { draftSchema, type SavedOrder } from '../domain/types.js';
 import { PreflightFailed } from '../storage/write-journal.js';
 
 export type { Intent } from './routing.js';
-export type ConversationEngine = ((text: string, previous: Conversation) => Promise<{ conversation: Conversation; text: string }>) & {
+export type ConversationEngine = ((text: string, previous: Conversation, source?: { operatorText: string }) => Promise<{ conversation: Conversation; text: string }>) & {
+  matchingPolicy?: string;
   language?: (text: string, fallback: AppConfig['locale']) => Promise<AppConfig['locale']>;
   route?: IntentRouter;
   record?: (id: number, plan: ReplyPlan) => Promise<void>;
@@ -37,6 +38,7 @@ function withAlbum(event: MessageEvent, parts: MessageEvent[]): MessageEvent {
 export class TelegramController {
   private readonly policy: string;
   private locale: AppConfig['locale'];
+  private operatorText = '';
   constructor(private readonly config: AppConfig, private readonly username: string, private readonly store: TelegramStore,
     private readonly engine: ConversationEngine,
     private readonly send: (text: string, replyTo: number, keyboard?: Keyboard) => Promise<{ message_id: number }>,
@@ -45,7 +47,7 @@ export class TelegramController {
     private readonly sendPdf?: (orderId: number, locale?: AppConfig['locale']) => Promise<{ message_id: number }>,
     private readonly buttons?: { answer: (id: string) => Promise<unknown>; clear: (messageId: number) => Promise<unknown> },
     private readonly media?: MediaReader) {
-    this.policy = policyFingerprint(config);
+    this.policy = engine.matchingPolicy ? createHash('sha256').update(JSON.stringify({ config, matchingPolicy: engine.matchingPolicy })).digest('hex') : policyFingerprint(config);
     this.locale = config.locale;
   }
 
@@ -138,6 +140,7 @@ export class TelegramController {
       else if (event.text.trim().startsWith('/') && (action.kind === 'start' || action.kind === 'edit') && action.text && this.engine.language) {
         this.locale = await this.engine.language(action.text, this.locale).catch(() => this.locale);
       }
+      this.operatorText = event.text;
       const reply = await this.respond(action as Exclude<Action, { kind: 'ignore' | 'pending' }>, event, id, loaded);
       if (read?.echo && reply.texts.length) {
         const first = `${read.echo}\n\n${reply.texts[0]}`;
@@ -255,7 +258,7 @@ export class TelegramController {
 
   private async process(text: string, previous: Conversation): Promise<Reply> {
     try {
-      const result = await this.engine(text, { ...previous, locale: this.locale });
+      const result = await this.engine(text, { ...previous, locale: this.locale }, { operatorText: this.operatorText });
       return { texts: chunks(result.text), order: result.conversation };
     } catch {
       return say(this.t('Non sono riuscito a interpretare il messaggio. Nessun dato salvato. Rispondi a questo messaggio ripetendo i dettagli.', 'I could not interpret the message. Nothing was saved. Reply to this message with the details again.'), previous);

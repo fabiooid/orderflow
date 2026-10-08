@@ -8,7 +8,7 @@ export const matchingConfigSchema = z.object({
 }).strict();
 export type MatchingConfig = z.infer<typeof matchingConfigSchema>;
 
-/** Foundation configuration only; Telegram/Studio activation is a later phase. */
+/** Shared workflow configuration for Telegram, Studio and read-only evaluation. */
 export function loadMatchingConfig(env: NodeJS.ProcessEnv = process.env): MatchingConfig {
   const parsed = matchingConfigSchema.safeParse({
     mode: env.JEV_MODE, model: env.JEV_MODEL,

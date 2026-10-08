@@ -190,3 +190,12 @@ does not test the complete document provider. See [ADR 0001](docs/decisions/0001
 for the planned held-out scan corpus, Azure comparison and separate measurements of
 silent errors, missed rows, operator effort, latency and cost. No comparative OCR
 accuracy is claimed by the offline regression suite.
+
+### JEV workflow integration
+
+`JEV_MODE=on npm run eval:matching:workflow` sends fictional product/customer cases
+through the same native resolution and preparation workflow used by Telegram and
+Studio. Extraction is scripted; JEV calls are real and billed normally. No FIC or
+Telegram access or writes occur. Ten cases passed on 8 October 2026; this is smoke
+evidence, not held-out calibration. `npm test` covers authoritative IDs, explicit
+choices, shadow/off, resume, original routing text, alias guards, and failures.
