@@ -93,4 +93,4 @@ export type SavedOrder = { id: number; number: string; url?: string };
 /** A client's earlier order, read only to point out differences. */
 export type ClientOrder = { id: number; number: string; date: string; lines: { productId?: number; code: string; name: string; quantity: number; netPrice: number; discountPercent: number }[] };
 export type VatValidation = 'valid' | 'invalid' | 'unavailable' | 'unchecked';
-export type Issue = { field: string; message: string; candidates?: { id: number; label: string }[]; priceComparison?: { document: number; catalogue: number; basis: 'net' | 'gross' | 'unclear' } };
+export type Issue = { matchingStatus?: 'ambiguous' | 'no-match' | 'unavailable'; field: string; message: string; candidates?: { id: number; label: string }[]; priceComparison?: { document: number; catalogue: number; basis: 'net' | 'gross' | 'unclear' } };

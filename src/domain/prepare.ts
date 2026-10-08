@@ -7,7 +7,7 @@ export type Preparation = { ready: false; issues: Issue[]; draft: OrderDraft } |
 export type ValidationLookup = (country: string, vatNumber: string) => Promise<VatValidation>;
 const toCandidates = (clients: Client[]) => clients.filter(c => c.id).map(c => ({ id: c.id!, label: c.name }));
 
-export async function prepareOrder(input: OrderDraft, config: AppConfig, connector: OrderConnector, date: string, validateVat?: ValidationLookup): Promise<Preparation> {
+export async function prepareOrder(input: OrderDraft, config: AppConfig, connector: Pick<OrderConnector, 'listProducts' | 'listClients'>, date: string, validateVat?: ValidationLookup): Promise<Preparation> {
   const draft = draftSchema.parse(input);
   const [products, clients] = await Promise.all([connector.listProducts(), connector.listClients()]);
   const issues: Issue[] = [];

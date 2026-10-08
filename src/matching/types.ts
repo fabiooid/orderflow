@@ -3,9 +3,11 @@ import { z } from 'zod';
 export const selectionRequestSchema = z.object({
   kind: z.enum(['product', 'client']),
   query: z.string().trim().min(1).max(4000),
+  context: z.string().max(12000).optional(),
   candidates: z.array(z.object({
     id: z.number().int().positive(),
     name: z.string().min(1).max(500),
+    aliases: z.array(z.string().max(160)).max(500).optional(),
     code: z.string().max(200).optional(),
     description: z.string().max(4000).optional(),
     country: z.string().max(100).optional(),

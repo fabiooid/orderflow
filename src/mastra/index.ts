@@ -36,8 +36,8 @@ const storageUrl = configuredUrl.startsWith('file:') && !configuredUrl.startsWit
 const storage = new LibSQLStore({ id: 'assistant-storage', url: storageUrl });
 const connector = mode === 'read-only' ? FattureInCloudConnector.fromToken(config.companyId, process.env.FIC_ACCESS_TOKEN ?? '') : new DemoConnector();
 const live = liveEvalSettings();
-const { agent, extract, scorers: manualScorers } = createOrderAgent(config, connector, storage, live);
-const workflow = createOrderWorkflow(config, connector, extract);
+const { agent, extract, matching, scorers: manualScorers } = createOrderAgent(config, connector, storage, live);
+const workflow = createOrderWorkflow(config, connector, extract, undefined, matching);
 const deliveredReply = createDeliveredReplyWorkflow(manualScorers, live);
 // The media readers and the order-form workflow can be tried and inspected in Studio too.
 const { mediaReader, formReader } = createMediaAgents(config);

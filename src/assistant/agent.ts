@@ -1,3 +1,5 @@
+import { createIdentityResolver } from '../matching/resolver.js';
+import { loadMatchingConfig } from '../matching/config.js';
 import { customerCreationSkill } from './skills/customer-creation.js';
 import { tracingContext } from './execution-trace.js';
 import { aliasMemory, sharedKnowledgeSchema } from './aliases.js';
@@ -23,13 +25,15 @@ export function memoryScope(config: AppConfig, orderId: string) {
   return { resource: `${config.deploymentId}:telegram:${config.telegram.groupId}`, thread: `${config.deploymentId}:order:${orderId}` };
 }
 
-export function createOrderAgent(config: AppConfig, connector: OrderConnector, storage: LibSQLStore, live: LiveEvalSettings = { enabled: false, rate: 0 }) {
+export function createOrderAgent(config: AppConfig, connector: OrderConnector, storage: LibSQLStore, live: LiveEvalSettings = { enabled: false, rate: 0 }, matchingOptions: Parameters<typeof createIdentityResolver>[2] = {}) {
   const memory = new Memory({ storage, options: {
     lastMessages: config.memory.lastMessages,
     semanticRecall: false,
     workingMemory: { enabled: true, scope: 'resource', schema: sharedKnowledgeSchema, agentManaged: false },
   } });
-  const knowledge = aliasMemory(memory, `${config.deploymentId}:telegram:${config.telegram.groupId}`, connector);
+  const matchingConfig = matchingOptions.config ?? loadMatchingConfig();
+  const knowledge = aliasMemory(memory, `${config.deploymentId}:telegram:${config.telegram.groupId}`, connector, matchingConfig.mode === 'on');
+  const matching = createIdentityResolver(config, connector, { ...matchingOptions, config: matchingConfig, aliases: knowledge.read });
   // Search only: results may be up to two minutes old. Order preparation always reads fresh prices.
   let catalogue: { at: number; products: Promise<Product[]> } | undefined;
   const searchable = () => {
@@ -60,8 +64,24 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
         .map(c => ({ id: c.id!, name: c.name, country: c.country, vatNumber: c.vatNumber }));
     },
   });
+  const resolveTool = (kind: 'client' | 'product') => createTool({
+    id: `resolve-${kind}`,
+    description: `Resolve one intended ${kind} against all current eligible records. Returns an application-validated selection or explicit ambiguity/unavailability. Never substitute an ID after a failed resolution. Product browsing remains searchProducts.`,
+    inputSchema: z.object({ query: z.string().min(1).max(4000) }),
+    outputSchema: z.object({ status: z.enum(['matched', 'ambiguous', 'no-match', 'unavailable']), selectedId: z.number().optional(), candidates: z.array(z.object({ id: z.number(), label: z.string() })).optional() }),
+    execute: async ({ query }, context) => {
+      const source = context?.requestContext?.get('matchingOperatorText');
+      const result = await matching.resolve({ clientQuery: kind === 'client' ? query : '', lines: kind === 'product' ? [{ query }] : [], discountPercent: 0, notes: '' },
+        { orderId: 'lookup', revision: 0, operatorText: typeof source === 'string' ? source : query });
+      const field = kind === 'client' ? 'client' : 'lines.0';
+      const decision = result.decisions.find(d => d.field === field);
+      return { status: decision?.status ?? 'unavailable' as const, selectedId: decision?.selectedId, candidates: result.issues.find(i => i.field === field)?.candidates };
+    },
+  });
+  const identityTools: Record<string, ReturnType<typeof resolveTool>> = matching.mode === 'on' ? { resolveProduct: resolveTool('product'), resolveClient: resolveTool('client') } : {};
   const getCustomerOrderHistory = customerOrderHistoryTool(connector);
   const scorers = createManualScorers([
+    ...Object.entries(identityTools).map(([id, tool]) => ({ id, description: tool!.description })),
     { id: 'searchProducts', description: searchProducts.description },
     { id: 'searchClients', description: searchClients.description },
     { id: 'getCustomerOrderHistory', description: getCustomerOrderHistory.description },
@@ -72,9 +92,9 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
   const agent = new Agent({
     // Keep the persisted agent ID stable across the OrderFlow rebrand.
     id: 'order-assistant', name: 'OrderFlow', model: config.model,
-    instructions: buildSystemPrompt(config),
+    instructions: buildSystemPrompt(config) + (matching.mode === 'on' ? '\nIdentity matching is enforced by the application. Use resolveProduct/resolveClient for a single identity; search tools are for browsing only. On ambiguous, no-match or unavailable, ask for clarification; never choose a substitute ID. Keep queries faithful to the original operator wording, including code, size, tester and tax identity. IDs from extraction are not selection evidence. Historical-order semantic selection is not supported: do not infer product identities from history; ask for explicit current names/codes. Never claim an unresolved identity is confirmed.' : ''),
     skills: [customerCreationSkill(config)],
-    memory, tools: { searchProducts, searchClients, getCustomerOrderHistory, rememberAlias: knowledge.rememberAlias },
+    memory, tools: { ...identityTools, searchProducts, searchClients, getCustomerOrderHistory, rememberAlias: knowledge.rememberAlias },
     scorers: liveAgentScorers(scorers, live),
   });
   const extract: Extractor = async (text, orderId) => {
@@ -82,12 +102,14 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
     // Preserve ownership and history of order threads created before shared alias learning.
     const existing = await memory.getThreadById({ threadId: scope.thread });
     if (existing?.resourceId) scope.resource = existing.resourceId;
+    const requestContext = evalContext('extraction');
+    requestContext.set('matchingOperatorText', text);
     const response = await agent.generate(text, {
       tracingContext: tracingContext(),
       memory: scope, structuredOutput: { schema: extractionSchema }, maxSteps: 8,
-      requestContext: evalContext('extraction'),
+      requestContext,
     });
     return parseExtraction(response.object);
   };
-  return { agent, memory, extract, scorers };
+  return { agent, memory, extract, scorers, matching };
 }
