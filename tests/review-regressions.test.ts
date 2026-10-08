@@ -1,3 +1,5 @@
+import { mixedPdf } from './pdf-fixture.js';
+import { createVisionDocumentProvider } from '../src/documents/reader.js';
 import { expect, it, vi } from 'vitest';
 import { config, draft, prepared } from './helpers.js';
 import { TelegramStore, type Conversation } from '../src/telegram/store.js';
@@ -17,6 +19,28 @@ const from = { id: 5, is_bot: false };
 const message = (id: number, text: string) => ({ update_id: id, message: { message_id: id, chat, from, text } });
 const photo = (id: number) => ({ update_id: id, message: { message_id: id, chat, from, photo: [{ file_id: 'test' }] } });
 const button = (id: number, messageId: number, data: string) => ({ update_id: id, callback_query: { id: `cb${id}`, from, data, message: { message_id: messageId, chat } } });
+
+it.each(['replacement', 'revision', 'new-request'] as const)('rejects attachment approval after %s changes its context', async change => {
+  const store = new TelegramStore(':memory:', change); await store.init();
+  let mid = 100;
+  const engine = vi.fn(async (_text: string, previous: Conversation) => ({ conversation: { ...previous, status: 'ready' as const, revision: previous.revision + 1 }, text: 'Summary' }));
+  const read = vi.fn(async () => ({ text: 'old attachment' }));
+  const send = vi.fn(async (_text: string) => ({ message_id: mid++ }));
+  const ctl = new TelegramController(config(), 'bot', store, engine, send, undefined, undefined, undefined, undefined, read);
+  try {
+    if (change !== 'new-request') await ctl.handle(message(1, '/ordine A'));
+    await ctl.handle(photo(2));
+    if (change === 'replacement') { await ctl.handle(message(3, '/annulla')); await ctl.handle(message(4, '/ordine B')); }
+    else if (change === 'revision') await ctl.handle(message(3, 'make it three'));
+    else await ctl.handle(message(3, '/ordine B'));
+    const before = engine.mock.calls.length;
+    await ctl.handle(button(5, change === 'new-request' ? 100 : 101, 'media:2:y'));
+    expect(engine).toHaveBeenCalledTimes(before);
+    expect(read).not.toHaveBeenCalled();
+    expect(send.mock.calls.at(-1)?.[0]).toContain('richiesta è cambiata');
+    expect(await store.pending({ message: 2 })).toBeUndefined();
+  } finally { store.close(); }
+});
 
 it('blocks edits, cancellation and repeat creation after an uncertain customer write', async () => {
   const store = new TelegramStore(':memory:', 'customer'); await store.init();
@@ -91,5 +115,27 @@ it('keeps a failed read confirmable, but invalidates a summary whose totals chan
     await ctl.handle(button(4, 100, 'save:u1:1'));
     expect(save).toHaveBeenCalledTimes(2);
   } finally { store.close(); }
+});
+
+it('renders every PDF page for the general reader when no templates are configured', async () => {
+  const c = config();
+  const data = mixedPdf();
+  const read = vi.fn(async () => '2 bottles; deliver to another address');
+  const media = createMediaReader(c, new DemoConnector(), async () => data, { documents: createVisionDocumentProvider({ read }) });
+  const result = await media({ updateId: 1, groupId: c.telegram.groupId, senderId: '5', messageId: 1, text: '', attachments: [{ kind: 'pdf', fileId: 'pdf', mimeType: 'application/pdf' }] });
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(read).toHaveBeenCalledWith([{ data: expect.any(Buffer), mimeType: 'image/png' }], false);
+  expect(result.text).toContain('another address');
+});
+
+it('rejects overlong document readings rather than accepting a truncated order', async () => {
+  const c = config();
+  const read = createMediaReader(c, new DemoConnector(), async () => mixedPdf(), { documents: createVisionDocumentProvider({ read: async () => 'A'.repeat(8000) + '\nDelivery address and discount' }) });
+  await expect(read({ updateId: 1, groupId: c.telegram.groupId, senderId: '5', messageId: 1, text: '', attachments: [{ kind: 'pdf', fileId: 'pdf', mimeType: 'application/pdf' }] }, 'en')).rejects.toThrow('No draft updated');
+});
+
+it('rejects a model reading stopped at its output limit', async () => {
+  const agent = { generate: async () => ({ text: 'Partial order', finishReason: 'length' }) } as unknown as Agent;
+  await expect(modelReader(agent)([{ data: new Uint8Array([1]), mimeType: 'application/pdf' }])).rejects.toThrow('Incomplete');
 });
 

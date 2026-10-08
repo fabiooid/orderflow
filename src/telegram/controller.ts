@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { traceOperation } from '../assistant/execution-trace.js';
 import { translate, type AppConfig } from '../config/schema.js';
 import { callbackData, mediaCallbackData, normalizeCallback, normalizeMessage, type MessageEvent, type OrderLink } from './adapter.js';
 import { asksFirst, routeMessage, type Action, type IntentRouter } from './routing.js';
@@ -71,6 +72,11 @@ export class TelegramController {
         if (!callback.action.accept) {
           effects.consume = pending.message;
           action = { kind: 'answer', text: this.t('Ok, lo ignoro.', 'OK, ignoring it.') };
+        } else if (pending.value.target === undefined || (pending.value.target === null
+          ? loaded.active !== undefined
+          : loaded.active?.orderId !== pending.value.target.orderId || loaded.active.revision !== pending.value.target.revision)) {
+          effects.consume = pending.message;
+          action = { kind: 'answer', text: this.t('La richiesta è cambiata. Invia di nuovo l’allegato per scegliere a quale richiesta applicarlo.', 'The request has changed. Send the attachment again to choose which request it belongs to.') };
         } else {
           const result = pending.value.read ? { read: pending.value.read } : await this.read(pending.value.event);
           if ('read' in result) {
@@ -100,7 +106,7 @@ export class TelegramController {
         // A late album part joins its unanswered question instead of asking again.
         const joined = event.album && !parts.length ? await this.store.pending({ album: event.album }) : undefined;
         if (joined) {
-          const value = { event: withAlbum(joined.value.event, [event]) };
+          const value = { ...joined.value, read: undefined, event: withAlbum(joined.value.event, [event]) };
           await this.store.plan(id, { replyTo: event.messageId, texts: [] }, { pending: { message: joined.message, value } });
           await this.store.advance(id + 1); return;
         }
@@ -118,7 +124,7 @@ export class TelegramController {
             action = await routeMessage(event, { config: this.config, botUsername: this.username, link, ...loaded, model: this.engine.route });
           }
         }
-        if (action.kind === 'prompt') effects.pending = { message: unread.messageId, value: { event: unread, ...(read ? { read } : {}) } };
+        if (action.kind === 'prompt') effects.pending = { message: unread.messageId, value: { event: unread, target: loaded.active ? { orderId: loaded.active.orderId, revision: loaded.active.revision } : null, ...(read ? { read } : {}) } };
       }
       if (action.kind === 'ignore') {
         if (effects.absorbed?.length) await this.store.plan(id, { replyTo: event.messageId, texts: [] }, effects);
@@ -127,7 +133,7 @@ export class TelegramController {
       const reply = await this.respond(action as Exclude<Action, { kind: 'ignore' | 'pending' }>, event, id, loaded);
       if (read?.echo && reply.texts.length) {
         const first = `${read.echo}\n\n${reply.texts[0]}`;
-        reply.texts = first.length <= 4000 ? [first, ...reply.texts.slice(1)] : [read.echo, ...reply.texts];
+        reply.texts = first.length <= 4000 ? [first, ...reply.texts.slice(1)] : [...chunks(read.echo), ...reply.texts];
       }
       await this.store.plan(id, { replyTo: event.messageId, ...reply, incomingText: event.text, senderId: event.senderId, receivedAt: new Date().toISOString() }, effects);
       entry = (await this.store.update(id))!;
@@ -201,7 +207,7 @@ export class TelegramController {
       if (previous.status === 'saved') return say(this.t(`Ordine già salvato: ${previous.savedOrder?.number}. Nessun duplicato creato.`, `Order already saved: ${previous.savedOrder?.number}. No duplicate created.`), previous);
       if (!this.saveOrder || !this.sendPdf || !['ready', 'saving'].includes(previous.status) || !previous.prepared) return say(this.t('Completa i dati e conferma il riepilogo più recente.', 'Complete the details and confirm the latest summary.'), previous);
       try {
-        const saved = await this.saveOrder(previous);
+        const saved = await traceOperation('Confirmed order save', () => this.saveOrder!(previous), { orderId: previous.orderId, revision: previous.revision, policy: previous.policy });
         return { texts: [this.t(`Ordine ${saved.number} salvato in Fatture in Cloud. Il PDF segue in questo gruppo; nessun invio al cliente.`, `Order ${saved.number} saved in Fatture in Cloud. The PDF follows in this group; nothing was sent to the customer.`)], pdfOrderId: saved.id, order: { ...previous, status: 'saved', savedOrder: saved, revision: previous.revision + 1 } };
       } catch (error) {
         if (error instanceof PreflightFailed) return say(error.needsReview
@@ -231,7 +237,7 @@ export class TelegramController {
     if (action.kind !== 'confirmCustomer') return say(this.t('Per i clienti usa /confermacliente sul riepilogo più recente.', 'For customers, use /confirmcustomer on the latest summary.'), previous);
     if (previous.status !== 'ready' || !this.createCustomer) return say(this.t('Creazione non disponibile: completa i dati e controlla il riepilogo.', 'Creation unavailable: complete the details and check the summary.'), previous);
     try {
-      return say(await this.createCustomer(previous), { ...previous, status: 'reviewed', revision: previous.revision + 1 });
+      return say(await traceOperation('Confirmed customer save', () => this.createCustomer!(previous), { orderId: previous.orderId, revision: previous.revision, policy: previous.policy }), { ...previous, status: 'reviewed', revision: previous.revision + 1 });
     } catch (error) {
       if (error instanceof PreflightFailed) return say(this.t('Controlli temporaneamente non disponibili. Nessun salvataggio tentato: puoi riprovare a confermare.', 'Checks are temporarily unavailable. No save was attempted: you can confirm again.'), previous);
       return say(this.t('Creazione cliente non confermata. Non ripetere la richiesta: controlla Fatture in Cloud prima di riprovare. Nessun ordine o fattura creato.', 'Customer creation was not confirmed. Do not repeat the request: reconcile Fatture in Cloud before retrying. No order or invoice created.'), { ...previous, status: 'saving' });

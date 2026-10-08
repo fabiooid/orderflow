@@ -26,7 +26,8 @@
     "orderform:import": "node --env-file-if-exists=.env --import tsx scripts/order-form-import.ts",
     "pricetier:suggest": "node --env-file-if-exists=.env --import tsx scripts/price-tier-suggest.ts",
     "eval:orderforms": "node --env-file-if-exists=.env --import tsx scripts/eval-order-forms.ts",
-    "write:recover": "node --env-file-if-exists=.env --import tsx scripts/recover-write.ts"
+    "write:recover": "node --env-file-if-exists=.env --import tsx scripts/recover-write.ts",
+    "eval:acceptance": "node --env-file-if-exists=.env --import tsx scripts/eval-acceptance.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "2.0.133",
@@ -37,7 +38,9 @@
     "@mastra/libsql": "1.23.3",
     "@mastra/memory": "1.32.1",
     "@mastra/observability": "1.18.1",
+    "@napi-rs/canvas": "1.0.10",
     "decimal.js": "10.6.0",
+    "pdfjs-dist": "6.4.299",
     "sharp": "0.35.5",
     "zod": "4.6.5"
   },

@@ -1,14 +1,14 @@
-import sharp from 'sharp';
 import { z } from 'zod';
 import { createStep, createWorkflow } from '@mastra/core/workflows';
 import type { OrderForm } from '../config/schema.js';
 
 /**
  * Filled-in order forms are read against their template: the model only says which numbered printed row and which
- * column carry which handwritten value, and the template says which product that cell orders. Two independent
+ * column carry which handwritten value, and the template says which product that cell orders. Two repeated
  * readings must agree on the products ordered; anything else becomes a question for the operator.
  */
-export type Vision = <T extends z.ZodType>(images: Buffer[], prompt: string, schema: T) => Promise<z.infer<T>>;
+export type { Vision } from '../documents/contract.js';
+import type { Vision } from '../documents/contract.js';
 
 const formLineSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('sure'), productId: z.number().int(), quantity: z.number() }),
@@ -18,69 +18,16 @@ const formLineSchema = z.discriminatedUnion('kind', [
 export type FormLine = z.infer<typeof formLineSchema>;
 export type FormReading = { form: OrderForm; lines: FormLine[] };
 
-const sides = ['top', 'right', 'bottom', 'left'] as const;
-/** Rotation that brings the side carrying the top of the text up. */
-const turn: Record<(typeof sides)[number], number> = { top: 0, right: 270, bottom: 180, left: 90 };
-
-/** Scanned PDFs usually hold one JPEG per page; those bytes are the scan itself, at full resolution. */
-export function scannedPages(pdf: Uint8Array): Buffer[] {
-  const data = Buffer.from(pdf);
-  const pages: Buffer[] = [];
-  for (const match of data.toString('latin1').matchAll(/<<((?:(?!>>)[\s\S])*?\/Subtype\s*\/Image(?:(?!>>)[\s\S])*?)>>\s*stream\r?\n/g)) {
-    const dict = match[1]!;
-    if (!/\/DCTDecode/.test(dict) || Number(/\/Width\s+(\d+)/.exec(dict)?.[1] ?? 0) < 400) continue;
-    const start = match.index! + match[0].length;
-    const end = data.indexOf('endstream', start, 'latin1');
-    if (end > start) pages.push(data.subarray(start, end).subarray(0, data.subarray(start, end).lastIndexOf(Buffer.from([0xff, 0xd9])) + 2));
-  }
-  return pages.filter(page => page.length > 4 && page[0] === 0xff && page[1] === 0xd8);
-}
-
-const thumbnail = (image: Buffer) => sharp(image).resize({ width: 1000, height: 1000, fit: 'inside', withoutEnlargement: true }).png().toBuffer();
-
-function describe(forms: OrderForm[]) {
-  return forms.map(f => `- ${f.id}: "${f.name}". Column headings: ${f.headings.join(' | ') || 'n/a'}. First rows: ${f.rows.slice(0, 3).map(r => r.label).join('; ')}`).join('\n');
-}
-
-/** Turns a page upright and says which configured form it is, if any. Upside-down checks are reliable; left/right guesses are not. */
-export async function identify(image: Buffer, forms: OrderForm[], vision: Vision): Promise<{ image: Buffer; form?: OrderForm }> {
-  const ids: [string, ...string[]] = ['none', ...forms.map(f => f.id)];
-  let upright = await sharp(image).rotate().toBuffer();
-  const first = await vision([await thumbnail(upright)],
-    `Printed text on this page reads normally when which edge of the image is at the top? Look at titles and table headings.\nIs the page one of these printed order forms? Answer none if not, or if unsure.\n${describe(forms)}`,
-    z.object({ textTop: z.enum(sides), form: z.enum(ids) }));
-  let formId = first.form;
-  if (first.textTop !== 'top') {
-    upright = await sharp(upright).rotate(turn[first.textTop]).toBuffer();
-    const check = await vision([await thumbnail(upright)],
-      `Is the printed text on this page upright or upside down? Is the page one of these printed order forms? Answer none if not, or if unsure.\n${describe(forms)}`,
-      z.object({ text: z.enum(['upright', 'upside down', 'sideways']), form: z.enum(ids) }));
-    if (check.text === 'upside down') upright = await sharp(upright).rotate(180).toBuffer();
-    formId = check.form;
-  }
-  return { image: upright, form: forms.find(f => f.id === formId) };
-}
-
-/** Small scans are enlarged: the model reads handwriting on a 3000-pixel page far better than on a 800-pixel one. */
-export async function enlarged(image: Buffer) {
-  const { width = 0, height = 0 } = await sharp(image).metadata();
-  const scale = Math.max(1, Math.min(3, 3000 / Math.max(width, height)));
-  return scale === 1 ? image : sharp(image).resize(Math.round(width * scale), Math.round(height * scale), { kernel: 'lanczos3' }).sharpen().png().toBuffer();
-}
-
-function readPrompt(form: OrderForm) {
-  return `This is a customer's filled-in copy of the order form "${form.name}". Its printed rows are, in order:
-${form.rows.map((r, i) => `${i + 1}. ${r.code || '(no code)'} — ${r.label}`).join('\n')}
-Customers write in these columns:
-${form.columns.map(c => `- ${c.id}: "${c.heading}" — ${c.value === 'quantity' ? 'a number of pieces, or null' : 'true when marked (such as an X)'}`).join('\n')}
-Report each row that has anything handwritten, using the row numbers above, with what is written in each column. Read straight across from the printed code and description.
-Handwriting is often written low in its cell and may touch the line below. Values in one row are written at the same height: place a mark by comparing its height with the numbers written in the other columns, not with the printed lines. Ignore rows that are not on this page.`;
-}
-
+export { renderPdfPages as scannedPages } from '../documents/pdf-pages.js';
+export { identify, enlarged } from '../documents/templates.js';
+import { identify, enlarged, readCells } from '../documents/templates.js';
+import type { CellRow, DocumentTemplate, DocumentResult } from '../documents/contract.js';
 /** Products one reading orders, by product ID. One entry per row with one field per column keeps the model reading across rows. */
 export async function readOnce(page: Buffer, form: OrderForm, vision: Vision): Promise<Record<number, number>> {
-  const columns = Object.fromEntries(form.columns.map(c => [c.id, c.value === 'quantity' ? z.number().nullable() : z.boolean()]));
-  const { rows } = await vision([page], readPrompt(form), z.object({ rows: z.array(z.object({ row: z.number().int(), ...columns })) }));
+  return mapCells(await readCells(page, form, vision), form);
+}
+
+function mapCells(rows: CellRow[], form: OrderForm): Record<number, number> {
   const ordered: Record<number, number> = {};
   for (const row of rows as Record<string, unknown>[]) for (const column of form.columns) {
     const written = row[column.id];
@@ -153,4 +100,23 @@ export function formText(reading: FormReading, names: Map<number, string>, tierN
     return it ? `? × ${name(line.productId)} — quantità incerta (letto ${seen})` : `? × ${name(line.productId)} — quantity unclear (read ${seen})`;
   });
   return [header, ...(lines.length ? lines : [it ? '(nessuna quantità scritta)' : '(no quantities written)'])].join('\n');
+}
+
+/** Strip business bindings before crossing the document service boundary. */
+export function documentTemplates(forms: OrderForm[]): DocumentTemplate[] {
+  return forms.map(({ id, name, headings, columns, rows }) => ({
+    id, name, headings: [...headings], columns: columns.map(c => ({ ...c })),
+    rows: rows.map(({ code, label }) => ({ code, label })),
+  }));
+}
+
+/** Resolve document observations against business configuration, outside the reader. */
+export function documentForms(result: DocumentResult, forms: OrderForm[]): FormReading[] {
+  return result.pages.flatMap(page => {
+    if (!page.template) return [];
+    const form = forms.find(f => f.id === page.template!.id);
+    if (!form) throw new Error('Unknown document template');
+    const [a, b] = page.template.readings;
+    return [{ form, lines: mergeReadings(mapCells(a, form), mapCells(b, form)) }];
+  });
 }

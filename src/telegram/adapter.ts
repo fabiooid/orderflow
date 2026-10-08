@@ -48,7 +48,7 @@ function attachments(message: NonNullable<z.infer<typeof updateSchema>['message'
   if (photo) found.push({ kind: 'image', fileId: photo.file_id, mimeType: 'image/jpeg', size: photo.file_size });
   const doc = message.document;
   if (doc?.mime_type === 'application/pdf') found.push({ kind: 'pdf', fileId: doc.file_id, mimeType: doc.mime_type, size: doc.file_size });
-  else if (doc?.mime_type && /^image\/(jpeg|png|webp|gif)$/.test(doc.mime_type)) found.push({ kind: 'image', fileId: doc.file_id, mimeType: doc.mime_type, size: doc.file_size });
+  else if (doc?.mime_type && /^image\/(jpeg|png|webp|gif|tiff)$/.test(doc.mime_type)) found.push({ kind: 'image', fileId: doc.file_id, mimeType: doc.mime_type, size: doc.file_size });
   return found;
 }
 
