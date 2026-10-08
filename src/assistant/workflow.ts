@@ -13,7 +13,7 @@ export const workflowInput = z.object({
 });
 const extractedSchema = z.object({ orderId: z.string(), draft: draftSchema, date: z.string(), policyVersion: z.string() });
 const resultSchema = z.object({ orderId: z.string(), order: preparedOrderSchema, totals: totalsSchema });
-const issueSchema = z.object({ field: z.string(), message: z.string(), candidates: z.array(z.object({ id: z.number(), label: z.string() })).optional() });
+const issueSchema = z.object({ field: z.string(), message: z.string(), candidates: z.array(z.object({ id: z.number(), label: z.string() })).optional(), priceComparison: z.object({ document: z.number(), catalogue: z.number(), basis: z.enum(['net', 'gross', 'unclear']) }).optional() });
 
 /** Preparation has no writes. Persisting an order is a separate application operation. */
 export function createOrderWorkflow(config: AppConfig, connector: OrderConnector, extract: Extractor, validateVat?: ValidationLookup) {

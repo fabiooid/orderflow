@@ -75,23 +75,21 @@ npm run demo    # scripted end-to-end run against a fictional catalogue
 
 `npm run demo` uses scripted extraction and simulated API responses. It shows the orchestration and duplicate protection, but it says **nothing about LLM accuracy**. Its temporary databases are removed when it finishes.
 
-### Order forms and price tiers
+### Order forms and custom prices
 
 Customers often send back a printed price list with quantities written next to each product. OrderFlow reads those against a **template** of the form: its printed rows, the columns customers write in (a number, or a mark such as an X), and the product each cell orders. The model only says what is written in which row and column; the products come from the template, so the form's meaning lives in data you review, not in code:
 
 ```bash
 npm run orderform:import -- path/to/clean-price-list.pdf --id my-form            # writes private/order-forms/my-form.json
-npm run orderform:import -- path/to/trade-list.pdf --id trade --tier trade        # prices on this form are the "trade" tier's
-npm run pricetier:suggest -- --tier trade                                        # clients whose past orders used those prices
 ```
 
-The import maps each fill-in cell to a catalogue product using printed codes and the form's own printed notes. Review each generated file, then list it in your business config under `orderForms` (paths are fine) and add a `priceTiers` entry with the client IDs you agree with. Both scripts are read-only. Templates describe your business, so keep them out of git (`private/` is ignored). When the printed form changes, import it again.
-
-Clients in a tier get the tier's prices; a product without a tier price is asked about, never guessed. The order summary names the price list in use and, under **⚠️ Da verificare**, lists prices that differ from the client's previous orders. Those are pointed out only: nothing is changed and saving is not blocked.
+The import maps each fill-in cell to a catalogue product using printed codes and the form's own printed notes. Review each generated file, then list it in your business config under `orderForms` (paths are fine). The importer reads Fatture in Cloud without writing records. Templates describe your business, so keep them out of git (`private/` is ignored). When the printed form changes, import it again.
 
 When a photo or scanned image arrives, OrderFlow turns it upright, recognises the form, enlarges small scans and reads it **twice** at full image detail. The two readings are compared by product: agreed quantities are used and disagreements become questions. Another reading preserves customer details, delivery instructions, visible unit prices and notes. PDFs are always rendered as complete pages (including text, images and overlays), with or without templates; the limit is ten pages per request and 2400 pixels on the longest PDF-page edge. JPEG, PNG, WebP, static GIF and TIFF are normalized into page images; multi-page TIFF is supported. Animated images are rejected. Overlong readings are rejected instead of silently truncated. Two readings can still make the same mistake; check the summary against the original. `npm run eval:orderforms` measures accuracy on forms with known answers (see [EVALS.md](EVALS.md)).
 
 Document reading lives in `src/documents` behind a replaceable `DocumentProvider`. It returns page text and raw template-cell observations; OrderFlow resolves catalogue IDs afterwards. The current provider uses direct vision and always marks its output as requiring review. See [ADR 0001](docs/decisions/0001-document-reading.md) for the boundary, limitations and planned comparison with a document-AI provider.
+
+Fresh Fatture in Cloud catalogue prices are the default for every customer. Explicit unit prices in an order message or its document are customizations for that order only. Historical prices and legacy `priceTiers`/template prices never become automatic defaults. Those config fields remain readable for compatibility; an explicitly requested nonstandard tier requires clarification. The preview flags differences from recent customer orders without changing prices or blocking saving. Future FIC price-list support is separate work.
 
 ### Alias learning
 
@@ -258,11 +256,10 @@ OrderFlow is in **foundation / pre-pilot** stage.
 - [x] Configurable VAT rules, including manual VIES confirmation
 - [x] Background evaluation scorers
 - [x] Voice-note, image and PDF input (whole-document PDF reading)
+- [x] Confirmed product/customer alias learning in Mastra memory
 - [x] Operator tooling for uncertain remote writes
 - [x] Live turn tracing across model/workflow/API/delivery operations
 - [x] Fictional acceptance scenarios with optional live-model extraction
-
-- [x] Confirmed product/customer alias learning in Mastra memory
 
 **Not yet done**
 
