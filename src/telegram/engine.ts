@@ -14,7 +14,6 @@ import { draftSchema, type Issue, type OrderDraft, type PreparedOrder } from '..
 import type { ConversationEngine } from './controller.js';
 import { askedText, customerPreview, lineQuery, orderPreview, type Review } from './preview.js';
 import { priceDiscrepancies } from '../domain/history.js';
-import { clientTier } from '../config/schema.js';
 import type { MastraDBMessage } from '@mastra/core/agent';
 import { evalContext, liveEvalSettings } from '../assistant/live-evals.js';
 import { createDeliveredReplyWorkflow } from './evaluation.js';
@@ -48,14 +47,10 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
   });
   const it = config.locale === 'it';
   /** Price list in use, plus differences from the client's previous orders. Lookup failures only drop the comparison. */
-  const review = async (order: PreparedOrder): Promise<Review> => {
-    const own = clientTier(config, order.client.id);
-    const applied = config.priceTiers.find(t => t.id === order.priceTier);
+  const review = async (order: PreparedOrder, it: boolean): Promise<Review> => {
     const warnings: string[] = [];
-    if (applied && own?.id !== applied.id) warnings.push(it ? `Prezzi ${applied.name}, ma il cliente non è nella lista ${applied.name}` : `${applied.name} prices, but the client is not on the ${applied.name} list`);
-    if (!applied && own) warnings.push(it ? `Prezzi standard per un cliente ${own.name}` : `Standard prices for a ${own.name} client`);
     const previous = order.client.id ? await connector.listClientOrders(order.client.id, 5).catch(() => []) : [];
-    return { tierName: applied?.name, warnings, discrepancies: priceDiscrepancies(order, previous) };
+    return { warnings, discrepancies: priceDiscrepancies(order, previous) };
   };
   const handle: ConversationEngine = async (text, previous) => {
     extracted = await extract(JSON.stringify({ currentDraft: previous.draft, pendingQuestions: previous.questions, operatorMessage: text, task: previous.kind === 'customer' ? 'Collect newClient details only; no products or order required.' : 'Prepare order' }), previous.orderId);
@@ -98,7 +93,7 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
     const { order, totals } = outcome.result;
     return {
       conversation: { ...previous, revision, runId, status: 'ready', prepared: order, totals, draft: extracted, questions: '' },
-      text: orderPreview(order, totals, it, config.orderSavingEnabled && mode !== 'demo', await review(order)),
+      text: orderPreview(order, totals, it, config.orderSavingEnabled && mode !== 'demo', await review(order, it)),
     };
   };
   const shared = {resource: `${config.deploymentId}:telegram:${config.telegram.groupId}`, thread: `${config.deploymentId}:telegram:${config.telegram.groupId}:chat`};
