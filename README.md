@@ -172,6 +172,8 @@ Talk to the bot naturally in the configured group. The group has one active requ
 
 **If a delivery is uncertain** (for example, Telegram timed out), the poller stops instead of resending. Check the group, then run `npm run telegram:recover`. CONNECTIONS.md describes the steps.
 
+**If a Fatture in Cloud save is uncertain**, keep the request blocked and use the operator-only [write recovery runbook](RECOVERY.md). Recovery records evidence locally; it never creates or sends anything itself.
+
 ## Scripts
 
 | Script | Description |
