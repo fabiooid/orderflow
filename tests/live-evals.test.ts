@@ -36,6 +36,7 @@ it('filters internal Telegram calls from style checks while retaining tool check
   expect(eligible('conciseness', {})).toBe(true); // Studio's normal chat
   expect(bindings.conciseness!.sampling).toEqual({ type: 'ratio', rate: 0.5 });
   expect(liveAgentScorers(createManualScorers([]), { enabled: false, rate: 1 })).toEqual({});
+  expect(liveEvalSettings({})).toEqual({ enabled: true, rate: 0.1 });
   expect(() => liveEvalSettings({ EVALS_SAMPLE_RATE: '2' })).toThrow();
   expect(() => liveEvalSettings({ EVALS_ENABLED: 'perhaps' })).toThrow();
 });
@@ -94,4 +95,15 @@ it('delivered replies finish while native background judges are still waiting', 
     release();
     await vi.waitFor(async () => expect((await scores!.listScoresByScorerId({ scorerId: 'telegram-conciseness', pagination: { page: 0, perPage: 10 } })).scores).toHaveLength(1));
   } finally { release(); await engine.shutdown(); await storage.close(); }
+});
+
+ it('uses matching workflow scorer names and IDs so Studio does not list each twice', async () => {
+  const { createDeliveredReplyWorkflow } = await import('../src/telegram/evaluation.js');
+  const workflow = createDeliveredReplyWorkflow(createManualScorers([]), { enabled: true, rate: 0.1 });
+  const scorers = await workflow.listScorers();
+  expect(Object.values(scorers)).toHaveLength(5);
+  for (const entry of Object.values(scorers)) {
+    expect(entry.scorer.name).toBe(entry.scorer.id);
+    expect(entry.sampling).toEqual({ type: 'ratio', rate: 0.1 });
+  }
 });
