@@ -45,8 +45,15 @@ source, model, prompt version and distributions separately from model output.
 The integration does not invent a confidence threshold: calibrate rollout on held-out
 realistic cases before enabling `on` in a live deployment.
 
-Only complete sets of up to 253 candidates are accepted. Larger or incomplete sets
-fail explicitly; they are not silently truncated. Independent client/product judgments are batched in one request. The application
+Each Choice question accepts up to 253 records plus ambiguity/no-match options.
+Customer name searches covering 254–2,530 eligible records search every record in
+up to ten independent groups, batched in one request. A single match is accepted
+only when every other group reports no match. Multiple matches or any ambiguous
+group require clarification; a failed group blocks selection. No probabilities are
+compared across groups, and per-group evidence is retained. This preserves partial
+name/typo matching without dropping customers through a lexical shortlist.
+Larger customer sets require a narrower city/VAT query or explicit record choice.
+Product sets above 253 and incomplete sets still fail explicitly. Independent client/product judgments are batched in one request. The application
 filters shipping, tester status, explicit codes and sizes, and structured customer
 tax identity and explicitly named catalogue cities before applying a result. History pagination/selection, chunked
 retrieval and semantic multi-result browsing remain separate work; browsing still

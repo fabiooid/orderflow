@@ -4,7 +4,7 @@ import { RequestContext } from '@mastra/core/request-context';
 export type LiveEvalSettings = { enabled: boolean; rate: number };
 export function liveEvalSettings(env: NodeJS.ProcessEnv = process.env): LiveEvalSettings {
   const enabled = env.EVALS_ENABLED ?? 'true';
-  const rate = Number(env.EVALS_SAMPLE_RATE ?? '1');
+  const rate = Number(env.EVALS_SAMPLE_RATE ?? '0.1');
   if (!['true', 'false'].includes(enabled)) throw new Error('EVALS_ENABLED must be true or false');
   if (!Number.isFinite(rate) || rate < 0 || rate > 1) throw new Error('EVALS_SAMPLE_RATE must be between 0 and 1');
   return { enabled: enabled === 'true', rate };

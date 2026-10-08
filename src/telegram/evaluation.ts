@@ -16,9 +16,11 @@ export function createDeliveredReplyWorkflow(scorers: ReturnType<typeof createMa
   const keys = ['conciseness', 'languageConsistency', 'contextRetention', 'userReportedMistakes', 'workflowAdherence'] as const;
   const attachments = Object.fromEntries(keys.map(key => {
     const delegate = scorers[key];
+    // Mastra merges workflow listings by name and registered scorers by ID.
+    // Keep these identical to avoid duplicate Studio rows; retain stored score IDs.
     const scorer = createScorer({
-      id: `telegram-${delegate.id}`, name: `Telegram: ${delegate.name}`,
-      description: 'Evaluates the delivered Telegram reply and recorded application state with conversation history.',
+      id: `telegram-${delegate.id}`, name: `telegram-${delegate.id}`,
+      description: `LLM judge — ${delegate.name}. Evaluates delivered Telegram replies with conversation and application evidence.`,
       type: { input: deliveredEvidenceSchema, output: deliveredEvidenceSchema }, judge: delegate.judge,
     }).analyze(async ({ run }) => {
       const evidence = run.output;
