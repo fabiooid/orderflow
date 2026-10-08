@@ -1,4 +1,4 @@
-import { clientTier, tierPrices, type AppConfig } from '../config/schema.js';
+import type { AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
 import { clientSchema, draftSchema, preparedOrderSchema, type Client, type Issue, type OrderDraft, type OrderLine, type PreparedOrder, type Product, type VatValidation } from './types.js';
 import { asksForTester, isTester, matchProducts, namedAlternatives, normalize, sameClient, searchCatalogue } from './matching.js';
@@ -48,11 +48,23 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
       issues.push({ field, message: 'Delivery belongs in shippingPrice, not merchandise lines' });
       continue;
     }
-    const accepted = pick && (!isTester(pick) || asksForTester(line.query)) ? pick : undefined;
+    const accepted = pick && (!isTester(pick) || asksForTester(line.query) || normalize(pick.code) === normalize(line.query) || normalize(pick.name) === normalize(line.query)) ? pick : undefined;
     const matches = accepted || line.productId !== undefined ? [] : matchProducts(line.query, catalogue);
     const chosen = accepted ?? (matches.length === 1 ? matches[0] : undefined);
     if (chosen) {
-      selected.push({ product: chosen, quantity: line.quantity, netPrice: line.netPrice, index });
+      const documentPrice = line.documentPrice;
+      let netPrice = line.netPrice;
+      if (documentPrice) {
+        const same = documentPrice.basis === 'net' && documentPrice.amount === chosen.netPrice;
+        if (documentPrice.decision === 'catalogue' || (documentPrice.decision === 'pending' && same)) {
+          netPrice = undefined;
+        } else if (documentPrice.decision === 'document' && documentPrice.basis === 'net') {
+          netPrice = documentPrice.amount;
+        } else {
+          issues.push({ field: `${field}.documentPrice`, message: `Document: ${documentPrice.amount} EUR (${documentPrice.basis}); FiC: ${chosen.netPrice} EUR net. Choose catalogue prices or explicitly confirm a net document price.`, priceComparison: { document: documentPrice.amount, catalogue: chosen.netPrice, basis: documentPrice.basis } });
+        }
+      }
+      selected.push({ product: chosen, quantity: line.quantity, netPrice, index });
       continue;
     }
     const named = matches.length ? [] : namedAlternatives(line.query, catalogue);
@@ -61,16 +73,9 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
     issues.push({ field, message, candidates: candidates.map(p => ({ id: p.id, label: p.name })) });
   }
 
-  // An explicit tier (from an order form or the operator) wins over the client's configured tier.
-  const tierId = draft.priceTier ?? clientTier(config, client?.id)?.id;
-  const tier = tierId && tierId !== 'standard' ? config.priceTiers.find(t => t.id === tierId) : undefined;
-  if (tierId && tierId !== 'standard' && !tier) issues.push({ field: 'priceTier', message: `Unknown price tier ${tierId}; use standard prices or a configured tier` });
-  const prices = tier ? tierPrices(config, tier.id) : new Map<number, number>();
-  if (tier) for (const line of selected) {
-    if (line.netPrice === undefined && !prices.has(line.product.id)) {
-      issues.push({ field: `lines.${line.index}.netPrice`, message: `No ${tier.name} price for ${line.product.name}: confirm the standard price ${line.product.netPrice} ${config.currency} or state the price` });
-    }
-  }
+  // Legacy template prices are not a live price list. Always use fresh API prices
+  // unless this order explicitly supplies a unit price.
+  if (draft.priceTier && draft.priceTier !== 'standard') issues.push({ field: 'priceTier', message: 'Automatic price lists are not supported. Confirm standard API prices or supply explicit unit prices and clear the price-list selection.' });
 
   const delivery = draft.delivery ?? (client ? { country: client.country ?? '', address: [client.street, client.postalCode, client.city, client.country].join(', ') } : undefined);
   const rules = client && delivery ? config.vatRules.filter(r => (!r.billingCountries || r.billingCountries.includes(client.country ?? '')) && (!r.deliveryCountries || r.deliveryCountries.includes(delivery.country))).sort((a, b) => b.priority - a.priority) : [];
@@ -87,7 +92,7 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
 
   const makeLine = (product: Product, quantity: number, isShipping: boolean, netPrice?: number): OrderLine => ({
     productId: product.id, code: product.code, name: product.name, quantity,
-    netPrice: isShipping ? shippingPrice : netPrice ?? prices.get(product.id) ?? product.netPrice,
+    netPrice: isShipping ? shippingPrice : netPrice ?? product.netPrice,
     discountPercent: !isShipping || (draft.discountShipping ?? config.shipping.discountByDefault) ? draft.discountPercent : 0,
     vatId: rule.vatId, vatRate: rule.rate, nature: rule.nature, shipping: isShipping,
   });
@@ -100,6 +105,5 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
     lines: [...selected.map(({ product, quantity, netPrice }) => makeLine(product, quantity, false, netPrice)), makeLine(shipping, 1, true)],
     delivery, notes: [draft.notes, deliveryNote].filter(Boolean).join('\n'), date,
     paymentMethodId: config.payments.methodId, dueDate: due.toISOString().slice(0, 10),
-    ...(tier ? { priceTier: tier.id } : {}),
   }) };
 }

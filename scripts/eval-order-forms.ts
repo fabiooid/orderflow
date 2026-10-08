@@ -26,7 +26,7 @@ async function main() {
   });
   const data = await Promise.all(dataset.map(async item => {
     const file = await readFile(item.file);
-    const page = item.file.endsWith('.pdf') ? scannedPages(file)[item.page - 1] : file;
+    const page = item.file.toLowerCase().endsWith('.pdf') ? (await scannedPages(file))[item.page - 1] : file;
     if (!page) throw new Error(`${item.name}: no scanned page ${item.page}`);
     return { input: { page }, groundTruth: item.expected };
   }));
