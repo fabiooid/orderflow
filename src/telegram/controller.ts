@@ -6,6 +6,7 @@ import { TelegramStore, type Conversation, type PlanEffects, type ReplyPlan } fr
 import { MediaError, type MediaReader, type ReadMedia } from './media.js';
 import type { Keyboard } from './api.js';
 import { draftSchema, type SavedOrder } from '../domain/types.js';
+import { PreflightFailed } from '../storage/write-journal.js';
 
 export type { Intent } from './routing.js';
 export type ConversationEngine = ((text: string, previous: Conversation) => Promise<{ conversation: Conversation; text: string }>) & {
@@ -202,7 +203,11 @@ export class TelegramController {
       try {
         const saved = await this.saveOrder(previous);
         return { texts: [this.t(`Ordine ${saved.number} salvato in Fatture in Cloud. Il PDF segue in questo gruppo; nessun invio al cliente.`, `Order ${saved.number} saved in Fatture in Cloud. The PDF follows in this group; nothing was sent to the customer.`)], pdfOrderId: saved.id, order: { ...previous, status: 'saved', savedOrder: saved, revision: previous.revision + 1 } };
-      } catch {
+      } catch (error) {
+        if (error instanceof PreflightFailed) return say(error.needsReview
+          ? this.t('I dati sono cambiati. Nessun salvataggio tentato: rispondi per aggiornare il riepilogo prima di confermare.', 'Details changed. No save was attempted: reply to refresh the summary before confirming.')
+          : this.t('Controlli temporaneamente non disponibili. Nessun salvataggio tentato: puoi riprovare a confermare.', 'Checks are temporarily unavailable. No save was attempted: you can confirm again.'),
+          error.needsReview ? { ...previous, revision: previous.revision + 1, status: 'new', prepared: undefined, totals: undefined } : previous);
         return say(this.t('Salvataggio non confermato. Non creare una nuova richiesta: occorre verificare Fatture in Cloud prima di riprovare per evitare duplicati.', 'Save not confirmed. Do not start a new request: check Fatture in Cloud before retrying to avoid duplicates.'), { ...previous, status: 'saving' });
       }
     }
@@ -220,14 +225,16 @@ export class TelegramController {
   }
 
   private async customerAction(action: TargetedAction, previous: Conversation): Promise<Reply> {
+    if (previous.status === 'saving') return say(this.t('Creazione cliente da verificare in Fatture in Cloud. Modifiche e nuovi tentativi bloccati fino alla riconciliazione.', 'Customer creation needs checking in Fatture in Cloud. Edits and retries are blocked until reconciliation.'), previous);
     if (previous.status === 'reviewed') return say(this.t('Richiesta cliente conclusa. Usa /cliente per una nuova richiesta.', 'Customer request completed. Use /customer for a new one.'), previous);
     if (action.kind === 'edit') return this.process(action.text, previous);
     if (action.kind !== 'confirmCustomer') return say(this.t('Per i clienti usa /confermacliente sul riepilogo più recente.', 'For customers, use /confirmcustomer on the latest summary.'), previous);
     if (previous.status !== 'ready' || !this.createCustomer) return say(this.t('Creazione non disponibile: completa i dati e controlla il riepilogo.', 'Creation unavailable: complete the details and check the summary.'), previous);
     try {
       return say(await this.createCustomer(previous), { ...previous, status: 'reviewed', revision: previous.revision + 1 });
-    } catch {
-      return say(this.t('Creazione cliente non confermata. Non ripetere la richiesta: occorre verificare i permessi Clienti e controllare Fatture in Cloud prima di riprovare. Nessun ordine o fattura creato.', 'Customer creation was not confirmed. Do not repeat the request: check Clients permissions and reconcile Fatture in Cloud before retrying. No order or invoice created.'), previous);
+    } catch (error) {
+      if (error instanceof PreflightFailed) return say(this.t('Controlli temporaneamente non disponibili. Nessun salvataggio tentato: puoi riprovare a confermare.', 'Checks are temporarily unavailable. No save was attempted: you can confirm again.'), previous);
+      return say(this.t('Creazione cliente non confermata. Non ripetere la richiesta: controlla Fatture in Cloud prima di riprovare. Nessun ordine o fattura creato.', 'Customer creation was not confirmed. Do not repeat the request: reconcile Fatture in Cloud before retrying. No order or invoice created.'), { ...previous, status: 'saving' });
     }
   }
 
