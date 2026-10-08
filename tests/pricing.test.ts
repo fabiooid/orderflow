@@ -19,10 +19,10 @@ const tiered = (clientIds = [201]) => configSchema.parse({ ...structuredClone(ex
 const prepare = (input: Partial<ReturnType<typeof draft>>, config = tiered()) => prepareOrder(draftSchema.parse({ ...draft(), ...input }), config, new DemoConnector(), '2026-01-15');
 
 describe('price tiers', () => {
-  it('charges tier clients the tier price and marks the order', async () => {
+  it('uses API prices even for clients with legacy configured template prices', async () => {
     const result = await prepare({});
-    expect(result.ready && result.order.lines[0]).toMatchObject({ productId: 101, netPrice: 15 });
-    expect(result.ready && result.order.priceTier).toBe('trade');
+    expect(result.ready && result.order.lines[0]).toMatchObject({ productId: 101, netPrice: 12 });
+    expect(result.ready && result.order.priceTier).toBeUndefined();
     const other = await prepare({}, tiered([]));
     expect(other.ready && other.order.lines[0]?.netPrice).toBe(12);
     expect(other.ready && other.order.priceTier).toBeUndefined();
@@ -33,9 +33,9 @@ describe('price tiers', () => {
     const standard = await prepare({ priceTier: 'standard' });
     expect(standard.ready && standard.order.lines[0]?.netPrice).toBe(12);
   });
-  it('asks instead of guessing when the tier has no price for a product or the tier is unknown', async () => {
+  it('does not require template prices, but asks about explicitly requested unsupported price lists', async () => {
     const missing = await prepare({ lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }, { query: 'Linen candle 200 g', quantity: 1 }] });
-    expect(!missing.ready && missing.issues).toEqual([{ field: 'lines.1.netPrice', message: expect.stringContaining('No Trade price for Linen candle 200 g: confirm the standard price 20') }]);
+    expect(missing.ready && missing.order.lines[1]?.netPrice).toBe(20);
     const unknown = await prepare({ priceTier: 'wholesale' });
     expect(!unknown.ready && unknown.issues.map(i => i.field)).toEqual(['priceTier']);
   });

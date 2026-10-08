@@ -54,6 +54,9 @@ export function matchProducts(query: string, products: Product[]): Product[] {
 
 /** Products sharing any word with the query, best first. Loose on purpose: the agent decides which one was meant. */
 export function searchCatalogue(query: string, products: Product[]): Product[] {
+  if (!normalize(query)) return [];
+  const exact = products.filter(p => normalize(p.code) === normalize(query) || normalize(p.name) === normalize(query));
+  if (exact.length) return exact;
   const words = tokens(query);
   return eligible(query, products)
     .map(product => {

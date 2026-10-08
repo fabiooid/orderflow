@@ -1,4 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises';
+import { tracedConnector, traceOperation } from '../src/assistant/execution-trace.js';
 import type { OrderConnector } from '../src/connector/contract.js';
 import { orderCreator } from '../src/telegram/order.js';
 import { telegramTraces } from '../src/telegram/traces.js';
@@ -46,25 +47,25 @@ async function main() {
   try {
     await store.init();
     await traces.sync(store);
-    const connector = mode === 'demo' ? new DemoConnector() : fic();
+    const connector = tracedConnector(mode === 'demo' ? new DemoConnector() : fic());
     const engine = createConversationEngine(config, connector, storage, mode);
     engineShutdown = engine.shutdown;
     // Reading a scanned form takes about a minute: keep "typing…" visible meanwhile.
-    const typing = (read: MediaReader): MediaReader => async event => {
+    const typing = (read: MediaReader): MediaReader => async (event, locale) => {
       const show = () => { api.typing(config.telegram.groupId).catch(() => undefined); };
       show();
       const timer = setInterval(show, 4500);
-      try { return await read(event); } finally { clearInterval(timer); }
+      try { return await read(event, locale); } finally { clearInterval(timer); }
     };
-    const orderConnector: OrderConnector = mode === 'demo' ? connector : fic({ writesEnabled: config.orderSavingEnabled });
-    const controller = new TelegramController(config, me.username, store, engine, (text, reply, keyboard) => api.sendText(config.telegram.groupId, text, reply, keyboard), mode === 'read-only' ? customerCreator(config, fic({ clientWritesEnabled: true }), journal) : undefined,
+    const orderConnector: OrderConnector = mode === 'demo' ? connector : tracedConnector(fic({ writesEnabled: config.orderSavingEnabled }));
+    const controller = new TelegramController(config, me.username, store, engine, (text, reply, keyboard) => traceOperation('Telegram deliver text', () => api.sendText(config.telegram.groupId, text, reply, keyboard)), mode === 'read-only' ? customerCreator(config, tracedConnector(fic({ clientWritesEnabled: true })), journal) : undefined,
       mode === 'read-only' && config.orderSavingEnabled ? orderCreator(config, orderConnector, journal) : undefined,
-      async id => {
+      async (id, locale = config.locale) => {
         const saved = await orderConnector.getOrder(id);
         if (!saved.url) throw new Error('Saved order PDF not available; reconcile delivery without recreating order');
-        return api.sendOrderPdf(config.telegram.groupId, saved.url, `Ordine ${saved.number}`);
+        return traceOperation('Telegram deliver order PDF', () => api.sendOrderPdf(config.telegram.groupId, saved.url!, `${locale === 'it' ? 'Ordine' : 'Order'} ${saved.number}`), { orderId: id });
       }, {answer: id => api.answerCallback(id), clear: id => api.clearButtons(config.telegram.groupId, id)},
-      typing(engine.media((id, max) => api.download(id, max))));
+      typing(engine.media((id, max) => traceOperation('Telegram download media', () => api.download(id, max)))));
     console.log(`OrderFlow Telegram ${mode} running. Customer creation requires /confirmcustomer. Order saving: ${config.orderSavingEnabled ? 'confirmation required' : 'disabled'}. Stop with Ctrl+C.`);
     while (!stopping) {
       let updates: { update_id: number }[];
@@ -81,7 +82,11 @@ async function main() {
       }
       for (const [update, ...album] of groupAlbums(updates)) {
         if (stopping) break;
-        await controller.handle(update!, album);
+        await engine.traceTurn(update!.update_id, async () => {
+          await controller.handle(update!, album);
+          const entry = await store.update(update!.update_id);
+          return { orderId: entry?.plan.order?.orderId, revision: entry?.plan.order?.revision, state: entry?.plan.order?.status, delivered: entry?.done ?? false };
+        });
         try { await traces.sync(store, update!.update_id); } catch { console.warn('Trace export failed; Telegram state remains stored for later import.'); }
       }
     }

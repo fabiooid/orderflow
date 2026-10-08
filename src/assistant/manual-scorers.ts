@@ -9,6 +9,7 @@ import { delegated, evidenceInput, evidenceMessages, hasUserFollowup, messageTex
 export const DEFAULT_JUDGE_MODEL = 'openai/gpt-4.1-mini';
 const policy = `Evaluate internal staff assistance for a configurable Fatture in Cloud connector.
 Product/customer search tools ground identities. The customer-creation skill guides data collection.
+The read-only getCustomerOrderHistory tool can support customer-specific product clarifications and price comparisons. History is optional for ordinary catalogue questions; do not demand it on every turn. Historical prices are not defaults, and past purchases alone must not resolve an ambiguous current request without operator confirmation. Unavailable history is not proof that no previous orders exist.
 The APPLICATION validates drafts, checks duplicates, calculates totals and saves clients/orders only after explicit confirmation of the latest summary.
 The agent itself has search/skill tools, not creation tools. Do not demand a nonexistent create tool or penalize correctly handing off to the application.
 Studio chat cannot save records. Telegram uses the application confirmation flow. Natural-language messages can start or edit requests; slash commands are optional.

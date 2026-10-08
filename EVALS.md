@@ -159,3 +159,34 @@ A dataset lists real filled-in forms (file, page, expected product ID → quanti
 keep it out of git. Each run makes model calls. Run it after changing the reading
 prompt, the model or a template.
 
+## Before production: fictional acceptance conversations
+
+```sh
+npm run eval:acceptance -- --offline
+npm run eval:acceptance
+```
+
+Both use Mastra `runEvals` and the `acceptance-exact-order` deterministic scorer. The six cases cover Italian and English orders, a quantity correction, a custom unit price, discount excluding delivery, and missing delivery confirmation. Expected customer, products, quantities, net prices, discounts, VAT IDs, delivery country, totals and clarification fields are checked exactly. Score 1 means every checked field matches; 0 prints the mismatch. It is not a model judge's opinion.
+
+Offline mode supplies scripted extraction, so it checks application behavior only. The second command uses the actual agent and its tools against the fictional `DemoConnector` and makes paid model calls. Set `EVAL_AGENT_MODEL` to compare models. It ignores business configuration and never writes FIC records or messages Telegram. Each run uses a temporary memory database, preventing prior evaluations from influencing it.
+
+These cases do not certify media accuracy, Telegram routing, actual save permissions or every VAT scenario. The offline Vitest suite separately tests confirmation/revisions, duplicate prevention, alias persistence, PDF page rendering and recovery. `eval:orderforms` measures real document reading. A supervised live order remains the final integration check.
+
+Initial baseline, 7 October 2026: `openai/gpt-5-mini` passed five of six cases on the first full run. The custom-price case left the customer unresolved. An isolated retry passed, so the precise cause was not established. Existing-customer guidance was clarified, and the next full run passed six of six. Treat this as a small, nondeterministic baseline, not a reliability percentage. Failed runs now print the fictional extracted draft for diagnosis. Use `--case custom-price` to rerun one scenario.
+
+## Interpreting live traces
+
+New polling turns have a native Mastra **Telegram turn** parent span, with the Telegram update ID and final request ID/revision/state. Agent calls, preparation workflows, FIC reads/writes and Telegram delivery share its trace. Confirmed-save spans record the confirmed revision. SDK errors are sanitized and media bytes are omitted. Separate turns remain separate traces; use the request ID to follow an order across turns.
+
+Historical/imported transport records remain distinct and cannot reconstruct model calls or API operations that were never recorded. Their timestamps and duration are not evidence of historical execution timing.
+
+Traces explain what executed. Deterministic acceptance checks compare observable results with known answers. The existing model judges assess tool use, language consistency, verbosity, context and user-reported mistakes. A good judge score cannot prove a successful save, and an operator overriding a default is not automatically a mistake. Review a few scored conversations before treating aggregate judge scores as reliable.
+
+### Document provider comparison
+
+The document reader now exposes a provider boundary in `src/documents/contract.ts`.
+The existing order-form evaluation shares its recognition/cell-reading primitives but
+does not test the complete document provider. See [ADR 0001](docs/decisions/0001-document-reading.md#provider-benchmark-plan)
+for the planned held-out scan corpus, Azure comparison and separate measurements of
+silent errors, missed rows, operator effort, latency and cost. No comparative OCR
+accuracy is claimed by the offline regression suite.
