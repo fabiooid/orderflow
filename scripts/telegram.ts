@@ -51,19 +51,19 @@ async function main() {
     const engine = createConversationEngine(config, connector, storage, mode);
     engineShutdown = engine.shutdown;
     // Reading a scanned form takes about a minute: keep "typing…" visible meanwhile.
-    const typing = (read: MediaReader): MediaReader => async event => {
+    const typing = (read: MediaReader): MediaReader => async (event, locale) => {
       const show = () => { api.typing(config.telegram.groupId).catch(() => undefined); };
       show();
       const timer = setInterval(show, 4500);
-      try { return await read(event); } finally { clearInterval(timer); }
+      try { return await read(event, locale); } finally { clearInterval(timer); }
     };
     const orderConnector: OrderConnector = mode === 'demo' ? connector : tracedConnector(fic({ writesEnabled: config.orderSavingEnabled }));
     const controller = new TelegramController(config, me.username, store, engine, (text, reply, keyboard) => traceOperation('Telegram deliver text', () => api.sendText(config.telegram.groupId, text, reply, keyboard)), mode === 'read-only' ? customerCreator(config, tracedConnector(fic({ clientWritesEnabled: true })), journal) : undefined,
       mode === 'read-only' && config.orderSavingEnabled ? orderCreator(config, orderConnector, journal) : undefined,
-      async id => {
+      async (id, locale = config.locale) => {
         const saved = await orderConnector.getOrder(id);
         if (!saved.url) throw new Error('Saved order PDF not available; reconcile delivery without recreating order');
-        return traceOperation('Telegram deliver order PDF', () => api.sendOrderPdf(config.telegram.groupId, saved.url!, `Ordine ${saved.number}`), { orderId: id });
+        return traceOperation('Telegram deliver order PDF', () => api.sendOrderPdf(config.telegram.groupId, saved.url!, `${locale === 'it' ? 'Ordine' : 'Order'} ${saved.number}`), { orderId: id });
       }, {answer: id => api.answerCallback(id), clear: id => api.clearButtons(config.telegram.groupId, id)},
       typing(engine.media((id, max) => traceOperation('Telegram download media', () => api.download(id, max)))));
     console.log(`OrderFlow Telegram ${mode} running. Customer creation requires /confirmcustomer. Order saving: ${config.orderSavingEnabled ? 'confirmation required' : 'disabled'}. Stop with Ctrl+C.`);
