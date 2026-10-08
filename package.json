@@ -9,6 +9,7 @@
     "node": ">=22.13.0"
   },
   "scripts": {
+    "eval:matching": "node --env-file-if-exists=.env --import tsx scripts/eval-matching.ts",
     "check": "tsc --noEmit",
     "test": "vitest run",
     "demo": "node --import tsx scripts/demo.ts",
@@ -36,6 +37,7 @@
     "@mastra/libsql": "1.23.3",
     "@mastra/memory": "1.32.1",
     "@mastra/observability": "1.18.1",
+    "@typesafe-ai/sdk": "0.6.0",
     "decimal.js": "10.6.0",
     "sharp": "0.35.5",
     "zod": "4.6.5"
