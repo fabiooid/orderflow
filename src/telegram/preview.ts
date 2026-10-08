@@ -22,12 +22,20 @@ export function lineQuery(field: string, draft: OrderDraft) {
 export function askedText(issues: Issue[], draft: OrderDraft, it: boolean, wording: Record<string, string> = {}) {
   return issues.map(issue => {
     const query = lineQuery(issue.field, draft);
+    if (issue.priceComparison) {
+      const p = issue.priceComparison;
+      const basis = p.basis === 'net' ? (it ? 'netto' : 'net') : p.basis === 'gross' ? (it ? 'IVA inclusa' : 'VAT included') : (it ? 'base IVA non chiara' : 'VAT basis unclear');
+      return it
+        ? `Per ${query}: il modulo indica ${money(p.document, true)} (${basis}); FiC indica ${money(p.catalogue, true)} netto. Usiamo FiC oppure confermi il prezzo netto da applicare a questo ordine?`
+        : `For ${query}: the form shows ${money(p.document, false)} (${basis}); FiC shows ${money(p.catalogue, false)} net. Use FiC, or confirm the net price to apply to this order?`;
+    }
     const choices = (issue.candidates ?? []).slice(0, MAX_CHOICES).map(candidate => candidate.label);
     const list = choices.length ? `\n${choices.join('\n')}` : '';
     const written = wording[issue.field]?.trim();
     if (written) return `${written}${list}`;
     if (query && choices.length) return `${it ? `Per ${query}, quale prodotto scegli?` : `For ${query}, which product?`}${list}`;
     if (query && issue.field.endsWith('.quantity')) return it ? `Quanti pezzi per ${query}?` : `How many for ${query}?`;
+    if (query && issue.field.endsWith('.netPrice')) return it ? `Quale prezzo netto per ${query}?` : `What net price for ${query}?`;
     if (query) return it ? `Non trovo un prodotto per ${query}.` : `No product found for ${query}.`;
     if (issue.field === 'shippingPrice') return it ? 'Qual è il costo di consegna?' : 'What is the delivery price?';
     if (issue.field === 'client') return `${it ? 'Quale cliente?' : 'Which client?'}${list}`;
