@@ -291,3 +291,9 @@ Never paste tokens into Telegram, issues or pull requests.
 [MIT](LICENSE) © 2026 Fabio Vella. Third-party dependencies keep their own licenses.
 
 *Fatture in Cloud is a trademark of its respective owner. It is used here only to describe compatibility.*
+
+## JEV data selection
+
+The read-only JEV matching foundation is documented in [JEV.md](JEV.md), including
+configuration and `npm run eval:matching`. It is not yet connected to live order
+preparation. See [the implementation plan](JEV-IMPLEMENTATION-PLAN.md) for rollout.
