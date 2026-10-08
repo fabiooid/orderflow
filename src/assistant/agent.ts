@@ -1,4 +1,5 @@
 import { customerCreationSkill } from './skills/customer-creation.js';
+import { tracingContext } from './execution-trace.js';
 import { aliasMemory, sharedKnowledgeSchema } from './aliases.js';
 export { sharedKnowledgeSchema } from './aliases.js';
 import { customerOrderHistoryTool } from './customer-order-history.js';
@@ -82,6 +83,7 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
     const existing = await memory.getThreadById({ threadId: scope.thread });
     if (existing?.resourceId) scope.resource = existing.resourceId;
     const response = await agent.generate(text, {
+      tracingContext: tracingContext(),
       memory: scope, structuredOutput: { schema: extractionSchema }, maxSteps: 8,
       requestContext: evalContext('extraction'),
     });

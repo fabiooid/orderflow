@@ -2,11 +2,11 @@ import { translate, type AppConfig } from '../config/schema.js';
 import { parseCommand, startsOrder, type MessageEvent, type OrderLink } from './adapter.js';
 import type { Conversation } from './store.js';
 
-export type Intent = { action: 'continue' | 'order' | 'customer' | 'cancel' | 'answer'; text: string };
-export type IntentRouter = (text: string, senderId: string, active?: Conversation) => Promise<Intent>;
+export type Intent = { action: 'continue' | 'order' | 'customer' | 'cancel' | 'answer'; text: string; locale?: AppConfig['locale'] };
+export type IntentRouter = (text: string, senderId: string, active?: Conversation, locale?: AppConfig['locale']) => Promise<Intent>;
 
 /** Everything the controller can do in response to a message or button. */
-export type Action =
+export type Action = { locale?: AppConfig['locale'] } & (
   | { kind: 'start'; customer: boolean; text: string }
   | { kind: 'edit'; target: OrderLink; text: string }
   | { kind: 'confirmOrder' | 'confirmCustomer' | 'review' | 'reopen'; target: OrderLink }
@@ -16,7 +16,7 @@ export type Action =
   | { kind: 'prompt' }
   /** A button under that question; message is the original media message. */
   | { kind: 'pending'; message: number; accept: boolean }
-  | { kind: 'ignore' };
+  | { kind: 'ignore' });
 
 const commands: Record<string, 'start' | 'customer' | 'cancel' | 'confirmOrder' | 'confirmCustomer' | 'review' | 'reopen'> = {
   order: 'start', ordine: 'start', customer: 'customer', cliente: 'customer', cancel: 'cancel', annulla: 'cancel',
@@ -70,17 +70,18 @@ export async function routeMessage(event: MessageEvent, ctx: RoutingContext): Pr
   const selected = link ? linked : active;
   const target = selected && { orderId: selected.orderId, revision: selected.revision };
   if (ctx.model) {
-    const intent = await ctx.model(event.text, event.senderId, selected).catch((): Intent => ({ action: 'answer', text: translate(config,
+    const intent = await ctx.model(event.text, event.senderId, selected, config.locale).catch((): Intent => ({ action: 'answer', text: translate(config,
       'Non riesco a elaborare il messaggio. Riprova; la richiesta aperta non è stata modificata.',
       'Unable to process this message. Please retry; the open request is unchanged.') }));
-    switch (intent.action) {
+    const result = (): Action => { switch (intent.action) {
       case 'answer': return { kind: 'answer', text: intent.text };
       case 'cancel': return { kind: 'cancel', target };
       case 'order': case 'customer': return { kind: 'start', customer: intent.action === 'customer', text: intent.text };
       case 'continue': return target
         ? { kind: 'edit', target, text: intent.text }
         : { kind: 'answer', text: translate(config, 'Quale ordine o cliente vuoi preparare?', 'Which order or customer would you like to prepare?') };
-    }
+    } };
+    return { ...result(), ...(intent.locale ? { locale: intent.locale } : {}) };
   }
   if (target) return { kind: 'edit', target, text: event.text };
   const text = event.text.replace(mention, ' ').trim();

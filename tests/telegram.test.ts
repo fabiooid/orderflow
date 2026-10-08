@@ -45,7 +45,7 @@ it('gives the model the active request for plain follow-ups and maps its intents
   const active = conv('u1', 3);
   const model = vi.fn<IntentRouter>(async () => ({ action: 'continue', text: 'three bottles' }));
   expect(await routeMessage({ ...event(), text: 'make it three' }, ctx({ active, model }))).toEqual({ kind: 'edit', target: { orderId: 'u1', revision: 3 }, text: 'three bottles' });
-  expect(model.mock.calls[0]).toEqual(['make it three', '5', active]);
+  expect(model.mock.calls[0]).toEqual(['make it three', '5', active, 'it']);
   model.mockResolvedValueOnce({ action: 'cancel', text: '' });
   expect(await routeMessage({ ...event(), text: 'lascia stare' }, ctx({ active, model }))).toEqual({ kind: 'cancel', target: { orderId: 'u1', revision: 3 } });
   model.mockRejectedValueOnce(new Error('provider down'));
