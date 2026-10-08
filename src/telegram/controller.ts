@@ -11,6 +11,7 @@ import { PreflightFailed } from '../storage/write-journal.js';
 
 export type { Intent } from './routing.js';
 export type ConversationEngine = ((text: string, previous: Conversation) => Promise<{ conversation: Conversation; text: string }>) & {
+  language?: (text: string, fallback: AppConfig['locale']) => Promise<AppConfig['locale']>;
   route?: IntentRouter;
   record?: (id: number, plan: ReplyPlan) => Promise<void>;
 };
@@ -35,18 +36,20 @@ function withAlbum(event: MessageEvent, parts: MessageEvent[]): MessageEvent {
 
 export class TelegramController {
   private readonly policy: string;
+  private locale: AppConfig['locale'];
   constructor(private readonly config: AppConfig, private readonly username: string, private readonly store: TelegramStore,
     private readonly engine: ConversationEngine,
     private readonly send: (text: string, replyTo: number, keyboard?: Keyboard) => Promise<{ message_id: number }>,
     private readonly createCustomer?: (previous: Conversation) => Promise<string>,
     private readonly saveOrder?: (previous: Conversation) => Promise<SavedOrder>,
-    private readonly sendPdf?: (orderId: number) => Promise<{ message_id: number }>,
+    private readonly sendPdf?: (orderId: number, locale?: AppConfig['locale']) => Promise<{ message_id: number }>,
     private readonly buttons?: { answer: (id: string) => Promise<unknown>; clear: (messageId: number) => Promise<unknown> },
     private readonly media?: MediaReader) {
     this.policy = policyFingerprint(config);
+    this.locale = config.locale;
   }
 
-  private t(itText: string, en: string) { return translate(this.config, itText, en); }
+  private t(itText: string, en: string) { return translate({ locale: this.locale }, itText, en); }
 
   /**
    * Caller must serialize updates. Polling entry point uses an exclusive process lock.
@@ -56,6 +59,7 @@ export class TelegramController {
     const id = update.update_id;
     if (!Number.isSafeInteger(id) || id < 0) throw new Error('Invalid update identifier');
     let entry = await this.store.update(id);
+    this.locale = entry?.plan.locale ?? await this.store.locale() ?? this.config.locale;
     const callback = normalizeCallback(update, this.config);
     if (callback) await this.buttons?.answer(callback.id).catch(() => undefined);
     if (!entry) {
@@ -121,7 +125,7 @@ export class TelegramController {
           else {
             read = result?.read;
             if (read) event = { ...event, text: read.text };
-            action = await routeMessage(event, { config: this.config, botUsername: this.username, link, ...loaded, model: this.engine.route });
+            action = await routeMessage(event, { config: { ...this.config, locale: this.locale }, botUsername: this.username, link, ...loaded, model: this.engine.route });
           }
         }
         if (action.kind === 'prompt') effects.pending = { message: unread.messageId, value: { event: unread, target: loaded.active ? { orderId: loaded.active.orderId, revision: loaded.active.revision } : null, ...(read ? { read } : {}) } };
@@ -130,12 +134,16 @@ export class TelegramController {
         if (effects.absorbed?.length) await this.store.plan(id, { replyTo: event.messageId, texts: [] }, effects);
         await this.store.advance(id + 1); return;
       }
+      if (action.locale) this.locale = action.locale;
+      else if (event.text.trim().startsWith('/') && (action.kind === 'start' || action.kind === 'edit') && action.text && this.engine.language) {
+        this.locale = await this.engine.language(action.text, this.locale).catch(() => this.locale);
+      }
       const reply = await this.respond(action as Exclude<Action, { kind: 'ignore' | 'pending' }>, event, id, loaded);
       if (read?.echo && reply.texts.length) {
         const first = `${read.echo}\n\n${reply.texts[0]}`;
         reply.texts = first.length <= 4000 ? [first, ...reply.texts.slice(1)] : [...chunks(read.echo), ...reply.texts];
       }
-      await this.store.plan(id, { replyTo: event.messageId, ...reply, incomingText: event.text, senderId: event.senderId, receivedAt: new Date().toISOString() }, effects);
+      await this.store.plan(id, { replyTo: event.messageId, ...reply, locale: this.locale, incomingText: event.text, senderId: event.senderId, receivedAt: new Date().toISOString() }, effects);
       entry = (await this.store.update(id))!;
     }
     if (entry.sending) throw new Error(`Telegram delivery uncertain for update ${id}. Use telegram:recover after inspecting the group.`);
@@ -145,7 +153,7 @@ export class TelegramController {
       const sent = text
         ? await this.send(text, entry.plan.replyTo, entry.next === entry.plan.texts.length - 1 ? this.keyboard(entry.plan) : undefined)
         : this.sendPdf && entry.plan.pdfOrderId !== undefined
-          ? await this.sendPdf(entry.plan.pdfOrderId)
+          ? await this.sendPdf(entry.plan.pdfOrderId, this.locale)
           : undefined;
       if (!sent) throw new Error('PDF delivery is not available for this update');
       await this.store.sent(id, sent.message_id);
@@ -160,7 +168,7 @@ export class TelegramController {
   private async read(event: MessageEvent): Promise<{ read: ReadMedia } | { failed: Action }> {
     const fail = (text: string) => ({ failed: { kind: 'answer' as const, text } });
     if (!this.media) return fail(this.t('Allegati e note vocali non sono attivi in questa installazione.', 'Attachments and voice notes are not enabled in this deployment.'));
-    try { return { read: await this.media(event) }; }
+    try { return { read: await this.media(event, this.locale) }; }
     catch (error) {
       return fail(error instanceof MediaError ? error.message : this.t('Non sono riuscito a leggere l’allegato. Nessun dato salvato: invialo di nuovo o scrivi i dettagli.', 'I could not read the attachment. Nothing was saved: send it again or type the details.'));
     }
@@ -181,7 +189,8 @@ export class TelegramController {
         if (!previous || action.target.revision !== previous.revision) return say(this.t('Questo messaggio riguarda una versione precedente. Rispondi al riepilogo più recente.', 'This message refers to an older revision. Reply to the latest summary.'));
         if (previous.status === 'cancelled') return say(this.t('Richiesta annullata. Usa /ordine o /cliente per iniziarne una nuova.', 'This request was cancelled. Use /order or /customer to start a new one.'), previous);
         if (previous.policy !== this.policy) return say(this.t('La configurazione è cambiata. Inizia un nuovo ordine per ricalcolare i dati.', 'Configuration changed. Start a new order to recalculate its data.'));
-        return previous.kind === 'customer' ? this.customerAction(action, previous) : this.orderAction(action, previous);
+        const localized = { ...previous, locale: this.locale };
+        return previous.kind === 'customer' ? this.customerAction(action, localized) : this.orderAction(action, localized);
       }
     }
   }
@@ -246,7 +255,7 @@ export class TelegramController {
 
   private async process(text: string, previous: Conversation): Promise<Reply> {
     try {
-      const result = await this.engine(text, previous);
+      const result = await this.engine(text, { ...previous, locale: this.locale });
       return { texts: chunks(result.text), order: result.conversation };
     } catch {
       return say(this.t('Non sono riuscito a interpretare il messaggio. Nessun dato salvato. Rispondi a questo messaggio ripetendo i dettagli.', 'I could not interpret the message. Nothing was saved. Reply to this message with the details again.'), previous);

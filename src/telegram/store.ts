@@ -3,7 +3,7 @@ import type { OrderDraft, PreparedOrder, Totals, SavedOrder } from '../domain/ty
 import type { MessageEvent, OrderLink } from './adapter.js';
 import type { AppConfig } from '../config/schema.js';
 import type { ConnectorMode } from '../config/load.js';
-export type Conversation = { orderId: string; startedBy?: string; startedAt?: string; kind?: 'customer'; revision: number; runId?: string; status: 'new' | 'suspended' | 'ready' | 'reviewed' | 'saving' | 'saved' | 'cancelled'; prepared?: PreparedOrder; totals?: Totals; savedOrder?: SavedOrder; draft: OrderDraft; questions: string; policy: string };
+export type Conversation = { locale?: AppConfig['locale']; orderId: string; startedBy?: string; startedAt?: string; kind?: 'customer'; revision: number; runId?: string; status: 'new' | 'suspended' | 'ready' | 'reviewed' | 'saving' | 'saved' | 'cancelled'; prepared?: PreparedOrder; totals?: Totals; savedOrder?: SavedOrder; draft: OrderDraft; questions: string; policy: string };
 // Local state locations. Scopes include the mode so fictional state stays separate from account data.
 export const TELEGRAM_STATE_URL = 'file:.data/telegram.db';
 export const telegramScopePrefix = (config: AppConfig, mode: ConnectorMode) => `${config.deploymentId}:${config.telegram.groupId}:${mode}:`;
@@ -13,7 +13,7 @@ export const pollerLockPath = (config: AppConfig) => `.data/telegram-${config.de
 export function journalKey(config: AppConfig, conversationId: string) {
   return `${config.deploymentId}:${config.companyId}:${config.telegram.groupId}:${conversationId}`;
 }
-export type ReplyPlan ={ incomingText?: string; senderId?: string; receivedAt?: string; texts: string[]; pdfOrderId?: number; order?: Conversation; replyTo: number;
+export type ReplyPlan ={ locale?: AppConfig['locale']; incomingText?: string; senderId?: string; receivedAt?: string; texts: string[]; pdfOrderId?: number; order?: Conversation; replyTo: number;
   /** Original media message whose question the last text asks; it carries the yes/no buttons. */
   prompt?: { message: number; active: boolean } };
 /** Media waiting for an answer to "prepare an order from this?". `read` keeps text already extracted from it. */
@@ -30,6 +30,7 @@ export class TelegramStore {
       'CREATE TABLE IF NOT EXISTS tg_orders (scope TEXT, id TEXT, state TEXT NOT NULL, PRIMARY KEY(scope,id))',
       'CREATE TABLE IF NOT EXISTS tg_links (scope TEXT, message INTEGER, order_id TEXT, revision INTEGER, PRIMARY KEY(scope,message))',
       'CREATE TABLE IF NOT EXISTS tg_offsets (scope TEXT PRIMARY KEY, offset INTEGER NOT NULL)',
+      'CREATE TABLE IF NOT EXISTS tg_locale (scope TEXT PRIMARY KEY, locale TEXT NOT NULL)',
       'CREATE TABLE IF NOT EXISTS tg_pending (scope TEXT, message INTEGER, album TEXT, state TEXT NOT NULL, used INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(scope,message))',
     ], 'write');
   }
@@ -40,6 +41,10 @@ export class TelegramStore {
     return row ? { message: Number(row.message), value: JSON.parse(String(row.state)) } : undefined;
   }
   async offset() { return Number((await this.db.execute({ sql: 'SELECT offset FROM tg_offsets WHERE scope=?', args: [this.scope] })).rows[0]?.offset ?? 0); }
+  async locale(): Promise<AppConfig['locale'] | undefined> {
+    const value = (await this.db.execute({ sql: 'SELECT locale FROM tg_locale WHERE scope=?', args: [this.scope] })).rows[0]?.locale;
+    return value === 'it' || value === 'en' ? value : undefined;
+  }
   async advance(offset: number) { await this.db.execute({ sql: 'INSERT INTO tg_offsets VALUES (?,?) ON CONFLICT(scope) DO UPDATE SET offset=MAX(offset,excluded.offset)', args: [this.scope, offset] }); }
   // Earlier versions stored catalogue answers as conversations; they are never requests and are skipped here.
   async order(id: string): Promise<Conversation | undefined> {
@@ -66,6 +71,7 @@ export class TelegramStore {
   async plan(id: number, plan: ReplyPlan, effects: PlanEffects = {}) {
     const silent = !plan.texts.length && plan.pdfOrderId === undefined;
     const statements: Parameters<Client['batch']>[0] = [{ sql: 'INSERT INTO tg_updates(scope,id,plan,done) VALUES (?,?,?,?)', args: [this.scope, id, JSON.stringify(plan), silent ? 1 : 0] }];
+    if (plan.locale) statements.push({ sql: 'INSERT INTO tg_locale VALUES (?,?) ON CONFLICT(scope) DO UPDATE SET locale=excluded.locale', args: [this.scope, plan.locale] });
     // Album parts merged into this update are handled; they must not be answered again on replay.
     for (const part of effects.absorbed ?? []) statements.push({ sql: 'INSERT OR IGNORE INTO tg_updates(scope,id,plan,done) VALUES (?,?,?,1)', args: [this.scope, part, JSON.stringify({ texts: [], replyTo: plan.replyTo })] });
     if (effects.pending) {
