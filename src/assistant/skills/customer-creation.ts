@@ -14,6 +14,10 @@ Use searchClients with the supplied name or VAT number before proposing a new re
 Preserve the exact business name, including words such as "Cliente". For example,
 "Cliente Test: 5 saponi" names the client "Cliente Test".
 Select clientId only when the match is clear. Ask which business when multiple matches fit.
+For one clearly matching existing record, copy its returned id into clientId, keep
+clientQuery as that business name, and set the entire newClient object to null.
+Do not copy an existing API customer into newClient. Custom prices or discounts do
+not mean the customer is new, and changes to order lines must preserve its identity.
 For an order, reuse a clearly matching existing customer. In standalone customer collection,
 explain an existing match rather than proposing a duplicate. The application checks again before writing.
 Do not claim to update existing customer records: that capability is not connected.
@@ -35,7 +39,8 @@ An optional VAT number for customer creation does not waive an order's VAT-eligi
 ## Structured output
 
 Follow the supplied extraction schema. Place new-customer details in newClient.
-Keep clientQuery faithful to the supplied name or identifier. Do not invent clientId.
+Keep clientQuery faithful to the supplied name or identifier, without the order items,
+prices or surrounding request wording. Do not invent clientId.
 Use null for unknown optional values, not empty strings or fabricated defaults.
 For standalone customer creation, do not ask for products or quantities.
 When the customer belongs to an order, preserve the order lines and other draft fields.
