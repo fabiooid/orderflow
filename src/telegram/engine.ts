@@ -125,6 +125,9 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
     await ensureSharedThread();
     const requestContext = evalContext('routing');
     requestContext.set('telegramSenderId', senderId);
+    requestContext.set('aliasKnownPhrases', [active?.draft.clientQuery, ...active?.draft.lines.map(line => line.query) ?? []].filter(Boolean));
+    // Media-derived text is useful order data, but never an alias-teaching instruction.
+    if (!/\[(?:Contenuto|Content|Modulo|Order form|Dati|Additional|Nota vocale|Transcribed|Messaggio inoltrato|Message forwarded)/i.test(text)) requestContext.set('aliasOperatorText', text);
     requestContext.set('telegramGroupId', config.telegram.groupId);
     requestContext.set('activeOrderId', active?.orderId ?? null);
     const response = await agent.generate(JSON.stringify({
