@@ -1,0 +1,51 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { SpanType, type AnySpan, type ObservabilityInstance } from '@mastra/core/observability';
+import type { OrderConnector } from '../connector/contract.js';
+
+// Only context propagation lives here; Mastra owns spans, storage, export and UI.
+const active = new AsyncLocalStorage<AnySpan>();
+export const tracingContext = () => ({ currentSpan: active.getStore() });
+
+export async function traceOperation<T>(name: string, action: () => Promise<T>, metadata?: Record<string, unknown>): Promise<T> {
+  const parent = active.getStore();
+  if (!parent) return action();
+  const span = parent.createChildSpan({ type: SpanType.GENERIC, name, metadata });
+  try {
+    const result = await active.run(span, action);
+    span.end({ output: { completed: true } });
+    return result;
+  } catch (error) {
+    span.error({ error: new Error('Operation failed; consult durable application state before retrying'), endSpan: true });
+    throw error;
+  }
+}
+
+export async function traceTelegramTurn<T>(instance: ObservabilityInstance | undefined, updateId: number, action: () => Promise<T>): Promise<T> {
+  if (!instance) return action();
+  const span = instance.startSpan({ name: 'Telegram turn', type: SpanType.GENERIC, tags: ['telegram', 'live'], metadata: { updateId } });
+  try {
+    const result = await active.run(span, action);
+    if (result && typeof result === 'object' && 'orderId' in result && typeof result.orderId === 'string') {
+      span.update({ metadata: { updateId, orderId: result.orderId } });
+    }
+    span.end({ output: result });
+    return result;
+  } catch (error) {
+    span.error({ error: new Error('Telegram turn interrupted; inspect local write and delivery journals'), endSpan: true });
+    throw error;
+  }
+}
+
+/** Safe metadata only: never SDK requests/headers or PDF download URLs. */
+export function tracedConnector(connector: OrderConnector): OrderConnector {
+  return {
+    listProducts: () => traceOperation('FIC list products', () => connector.listProducts()),
+    listClients: () => traceOperation('FIC list clients', () => connector.listClients()),
+    listClientOrders: (id, limit) => traceOperation('FIC customer order history', () => connector.listClientOrders(id, limit), { clientId: id }),
+    calculateTotals: order => traceOperation('FIC calculate totals', () => connector.calculateTotals(order)),
+    createClient: client => traceOperation('FIC create customer', () => connector.createClient(client)),
+    createOrder: (order, totals) => traceOperation('FIC create order', () => connector.createOrder(order, totals), { documentType: 'order' }),
+    updateOrder: (id, order) => traceOperation('FIC update order', () => connector.updateOrder(id, order), { orderId: id }),
+    getOrder: id => traceOperation('FIC retrieve order PDF', () => connector.getOrder(id), { orderId: id }),
+  };
+}

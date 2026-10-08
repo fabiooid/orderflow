@@ -15,6 +15,14 @@ function sdk() {
 }
 
 describe('restricted SDK adapter', () => {
+  it('uses preflight totals during a journaled save without another remote read', async () => {
+    const ports = sdk();
+    ports.documents.getNewIssuedDocumentTotals.mockRejectedValue(new Error('Read unavailable'));
+    const connector = new FattureInCloudConnector(1, ports as unknown as SdkPorts, { writesEnabled: true });
+    await connector.createOrder(await prepared(), { net: 29.6, vat: 6.51, gross: 36.11 });
+    expect(ports.documents.getNewIssuedDocumentTotals).not.toHaveBeenCalled();
+    expect(ports.documents.createIssuedDocument.mock.calls[0]?.[1].data.payments_list[0].amount).toBe(36.11);
+  });
   it('rejects invoice payloads before any remote call', async () => {
     const ports = sdk();
     const connector = new FattureInCloudConnector(1, ports as unknown as SdkPorts, { writesEnabled: true });
