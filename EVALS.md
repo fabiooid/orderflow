@@ -8,7 +8,7 @@ retry orders, alter replies or send customer messages.
 ## Automatic scoring
 
 - `EVALS_ENABLED=true` enables attachments. Set `false` for manual-only operation.
-- `EVALS_SAMPLE_RATE=1` scores every eligible run; `0.1` samples 10%.
+- `EVALS_SAMPLE_RATE=0.1` is the default: each scorer samples 10% of eligible runs. Set `1` to score every eligible run. Manual evaluation remains available.
 - Restart the Telegram runner and reload Studio after changing these settings.
 - Tool accuracy and workflow adherence attach to actual model runs, including
   routing/extraction. Internal question-wording calls are excluded.
@@ -18,7 +18,7 @@ retry orders, alter replies or send customer messages.
   evidence step with native `scorers` attachments. It includes the last 100 stored
   group messages, operator IDs, the actual reply and available application state
   (draft, summary, saved-order identity, confirmed customer-save status).
-- Delivered-reply scores use `telegram-` IDs and `Telegram:` names so they can be
+- Delivered-reply scores use matching `telegram-` IDs and names (to avoid duplicate Studio listings) so they can be
   distinguished from model-run scores. These are the same criteria, not new metrics.
 - Application-outcome workflow adherence is distinct from model trajectory scoring:
   it sees the recorded outcome, not an invented trace of the API implementation.

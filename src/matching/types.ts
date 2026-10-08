@@ -24,8 +24,10 @@ export type SelectionResult = {
   status: 'matched' | 'ambiguous' | 'no-match' | 'unavailable';
   /** This is a read-only judgment, not permission to mutate a draft or learn an alias. */
   selectedId?: number;
+  clarificationIds?: number[];
   reason?: 'disabled' | 'incomplete-retrieval' | 'invalid-input' | 'invalid-response' | 'service-unavailable';
   evidence: {
+    groups?: { candidateIds: number[]; status: SelectionResult['status']; selectedId?: number; evidence: Omit<SelectionResult['evidence'], 'groups'> }[];
     requestHash: string;
     promptVersion: string;
     model?: string;
