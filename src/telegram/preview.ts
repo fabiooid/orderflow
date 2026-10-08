@@ -40,7 +40,15 @@ export function askedText(issues: Issue[], draft: OrderDraft, it: boolean, wordi
     if (issue.field === 'shippingPrice') return it ? 'Qual è il costo di consegna?' : 'What is the delivery price?';
     if (issue.field === 'client') return `${it ? 'Quale cliente?' : 'Which client?'}${list}`;
     if (issue.field === 'vat') return it ? 'Serve un controllo sull’IVA.' : 'A VAT check is needed.';
-    return `${issue.message}${list}`;
+    if (issue.field === 'priceTier') return it ? 'Quale listino prezzi vuoi usare?' : 'Which price list should be used?';
+    if (issue.field === 'lines') return it ? 'Quali prodotti e quantità vuoi ordinare?' : 'Which products and quantities would you like to order?';
+    if (issue.field.startsWith('client.')) {
+      const field = issue.field.slice('client.'.length);
+      const labels: Record<string, [string, string]> = { email: ['email', 'email'], phone: ['telefono', 'phone number'], vatNumber: ['partita IVA', 'VAT number'], taxCode: ['codice fiscale', 'tax code'], sdiCode: ['codice SDI', 'SDI code'] };
+      const label = labels[field]?.[it ? 0 : 1] ?? field;
+      return it ? `Indica ${label} del cliente.` : `Provide the customer's ${label}.`;
+    }
+    return it ? 'Servono ulteriori dettagli per completare l’ordine.' : 'More details are needed to complete the order.';
   }).join('\n\n');
 }
 
@@ -54,7 +62,7 @@ export function customerPreview(client: Client, it: boolean) {
     client.sdiCode ? `🔢 SDI ${client.sdiCode}` : '',
   ].filter(Boolean);
   if (tax.length) lines.push('', ...tax);
-  if (client.notes.trim()) lines.push('', '📝 Note', client.notes.trim());
+  if (client.notes.trim()) lines.push('', it ? '📝 Note' : '📝 Notes', client.notes.trim());
   lines.push('', ...(it
     ? ['Rispondi con le correzioni.', 'Usa il pulsante Conferma e salva (oppure /confermacliente)', '/annulla per annullare']
     : ['Reply with corrections.', 'Use Confirm and save (or /confirmcustomer)', '/cancel to cancel']));
@@ -81,8 +89,8 @@ export function orderPreview(order: PreparedOrder, totals: Totals, it: boolean, 
     lines.push(`${line.quantity} × ${line.name} — ${money(line.netPrice, it)}${discount}`);
   }
   if (review.tierName) lines.push('', `🏷️ ${it ? 'Prezzi' : 'Prices'}: ${it ? 'listino' : 'price list'} ${review.tierName}`);
-  lines.push('', it ? '💶 Totali' : '💶 Totals', `${it ? 'Imponibile' : 'Net'} ${money(totals.net, it)}`, `IVA ${rates.join(', ')} ${money(totals.vat, it)}`, `${it ? 'Totale' : 'Total'} ${money(totals.gross, it)}`);
-  if (order.notes.trim()) lines.push('', '📝 Note', order.notes.trim());
+  lines.push('', it ? '💶 Totali' : '💶 Totals', `${it ? 'Imponibile' : 'Net'} ${money(totals.net, it)}`, `${it ? 'IVA' : 'VAT'} ${rates.join(', ')} ${money(totals.vat, it)}`, `${it ? 'Totale' : 'Total'} ${money(totals.gross, it)}`);
+  if (order.notes.trim()) lines.push('', it ? '📝 Note' : '📝 Notes', order.notes.trim());
   const checks = [
     ...(review.warnings ?? []),
     ...(review.discrepancies ?? []).map(d => it

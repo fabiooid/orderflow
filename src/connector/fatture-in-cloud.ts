@@ -3,7 +3,7 @@ import {
   type Client as FicClient, type IssuedDocument,
 } from '@fattureincloud/fattureincloud-ts-sdk';
 import { z } from 'zod';
-import { clientSchema, preparedOrderSchema, productSchema, totalsSchema, type Client, type ClientOrder, type PreparedOrder, type Product, type SavedOrder } from '../domain/types.js';
+import { clientSchema, preparedOrderSchema, productSchema, totalsSchema, type Client, type ClientOrder, type PreparedOrder, type Product, type SavedOrder, type Totals } from '../domain/types.js';
 import type { OrderConnector } from './contract.js';
 
 export type SdkPorts = {
@@ -126,9 +126,9 @@ export class FattureInCloudConnector implements OrderConnector {
     return totalsSchema.parse({ net: data.data?.amount_net, vat: data.data?.amount_vat, gross: data.data?.amount_gross });
   }
 
-  async createOrder(input: PreparedOrder) {
+  async createOrder(input: PreparedOrder, validatedTotals?: Totals) {
     this.#assertWrites();
-    const data = await this.#orderPayload(preparedOrderSchema.parse(input));
+    const data = await this.#orderPayload(preparedOrderSchema.parse(input), validatedTotals);
     const response = await this.#sdk.documents.createIssuedDocument(this.#companyId, { data });
     return saved(response.data.data);
   }
@@ -148,6 +148,27 @@ export class FattureInCloudConnector implements OrderConnector {
     return saved(response.data.data);
   }
 
+  /** Read-only recovery check. Fail closed if the remote document differs from the confirmed payload. */
+  async verifySavedOrder(id: number, expected: PreparedOrder, totals: Totals): Promise<SavedOrder> {
+    positiveId.parse(id);
+    const remote = (await this.#sdk.documents.getIssuedDocument(this.#companyId, id, undefined, 'detailed')).data.data;
+    const result = saved(remote);
+    const wanted = toFicOrder(expected);
+    const same = (a: unknown, b: unknown) => (a ?? '') === (b ?? '');
+    const entityFields = ['name', 'address_street', 'address_city', 'address_postal_code', 'vat_number'] as const;
+    const lines = remote?.items_list ?? [];
+    if (!remote || remote.e_invoice || remote.use_gross_prices || remote.date !== wanted.date || remote.currency?.id !== wanted.currency?.id
+      || !same(remote.notes, wanted.notes) || !remote.entity || countryIso(remote.entity) !== expected.client.country
+      || (expected.client.id !== undefined && remote.entity.id !== expected.client.id)
+      || entityFields.some(field => !same(remote.entity?.[field], wanted.entity?.[field]))
+      || lines.length !== expected.lines.length
+      || lines.some((line, i) => { const target = expected.lines[i]!; return line.product_id !== target.productId || line.qty !== target.quantity || line.net_price !== target.netPrice || (line.discount ?? 0) !== target.discountPercent || line.vat?.id !== target.vatId; })
+      || remote.amount_net !== totals.net || remote.amount_vat !== totals.vat || remote.amount_gross !== totals.gross
+      || !same(remote.payment_method?.id, expected.paymentMethodId)
+      || remote.payments_list?.length !== 1 || remote.payments_list[0]?.due_date !== expected.dueDate || remote.payments_list[0]?.amount !== totals.gross) throw new Error('Remote order differs from the confirmed order; manual investigation required');
+    return result;
+  }
+
   async listClientOrders(clientId: number, limit: number): Promise<ClientOrder[]> {
     positiveId.parse(clientId);
     // The API accepts 5 to 100 results per page.
@@ -161,8 +182,8 @@ export class FattureInCloudConnector implements OrderConnector {
     }));
   }
 
-  async #orderPayload(order: PreparedOrder) {
-    const totals = await this.calculateTotals(order);
+  async #orderPayload(order: PreparedOrder, validatedTotals?: Totals) {
+    const totals = validatedTotals ? totalsSchema.parse(validatedTotals) : await this.calculateTotals(order);
     const data = toFicOrder(order);
     data.payments_list = [{ amount: totals.gross, due_date: order.dueDate, status: 'not_paid' }];
     return data;
