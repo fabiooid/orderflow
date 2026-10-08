@@ -17,7 +17,7 @@ export type ReplyPlan ={ incomingText?: string; senderId?: string; receivedAt?: 
   /** Original media message whose question the last text asks; it carries the yes/no buttons. */
   prompt?: { message: number; active: boolean } };
 /** Media waiting for an answer to "prepare an order from this?". `read` keeps text already extracted from it. */
-export type Pending = { event: MessageEvent; read?: { text: string; echo?: string } };
+export type Pending = { event: MessageEvent; target?: OrderLink | null; read?: { text: string; echo?: string } };
 export type PlanEffects = { pending?: { message: number; value: Pending }; consume?: number; absorbed?: number[] };
 
 /** Durable transport state; Mastra continues to own workflow and conversation memory. */

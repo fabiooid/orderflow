@@ -1,4 +1,5 @@
 import { customerDetails } from './customer.js';
+import { tracingContext, traceTelegramTurn } from '../assistant/execution-trace.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { MAX_CHOICES } from '../domain/matching.js';
@@ -18,8 +19,10 @@ import { clientTier } from '../config/schema.js';
 import type { MastraDBMessage } from '@mastra/core/agent';
 import { evalContext, liveEvalSettings } from '../assistant/live-evals.js';
 import { createDeliveredReplyWorkflow } from './evaluation.js';
-import { createMediaAgents, createMediaReader, modelReader, modelVision, voiceTranscriber, workflowFormPages, type Download, type MediaReader } from './media.js';
-import { createOrderFormWorkflow } from './order-forms.js';
+import { createMediaAgents, createMediaReader, modelReader, modelVision, voiceTranscriber, type Download, type MediaReader } from './media.js';
+import { documentTemplates } from './order-forms.js';
+import { createDocumentWorkflow, workflowTemplatePages } from '../documents/workflow.js';
+import { createVisionDocumentProvider } from '../documents/reader.js';
 import { omitMedia } from '../assistant/omit-media.js';
 
 const wordingSchema = z.object({ questions: z.array(z.object({ field: z.string(), text: z.string() }).strict()) }).strict();
@@ -29,7 +32,7 @@ function plainQuestions(issues: Issue[]) {
 }
 
 /** Sequential runner reuses Mastra persistence; model receives latest structured draft + questions explicitly. */
-export function createConversationEngine(config: AppConfig, connector: OrderConnector, storage: LibSQLStore, mode: 'demo' | 'read-only', testExtractor?: Extractor, rewriteQuestions?: (issues: Issue[], operatorText: string) => Promise<Record<string, string>>): ConversationEngine & { shutdown: () => Promise<void>; media: (download: Download) => MediaReader } {
+export function createConversationEngine(config: AppConfig, connector: OrderConnector, storage: LibSQLStore, mode: 'demo' | 'read-only', testExtractor?: Extractor, rewriteQuestions?: (issues: Issue[], operatorText: string) => Promise<Record<string, string>>): ConversationEngine & { traceTurn: <T>(id: number, action: () => Promise<T>) => Promise<T>; shutdown: () => Promise<void>; media: (download: Download) => MediaReader } {
   const live = testExtractor ? { enabled: false, rate: 0 } : liveEvalSettings();
   const { agent, memory, scorers, extract: agentExtract } = createOrderAgent(config, connector, storage, live);
   const extract = testExtractor ?? agentExtract;
@@ -38,12 +41,11 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
   const observability = new Observability({ configs: { default: { serviceName: "orderflow-telegram", exporters: [new MastraStorageExporter()], spanOutputProcessors: [omitMedia] } } });
   const deliveredReply = createDeliveredReplyWorkflow(scorers, live);
   const { mediaReader, formReader } = createMediaAgents(config);
-  const readOrderForm = createOrderFormWorkflow(config.orderForms, modelVision(formReader));
+  const readOrderForm = createDocumentWorkflow(documentTemplates(config.orderForms), modelVision(formReader));
   const mastra = new Mastra({ observability, storage, agents: { orderAssistant: agent, mediaReader, formReader }, workflows: { prepareOrder: workflow, deliveredReply, readOrderForm }, scorers: Object.fromEntries(Object.values(scorers).map(scorer => [scorer.id, scorer])) });
   /** Media reading through the registered agents and workflow, so it shows up in traces like the rest of the turn. */
   const media = (download: Download) => createMediaReader(config, connector, download, {
-    read: modelReader(mediaReader),
-    forms: workflowFormPages(mastra.getWorkflow('readOrderForm'), config.orderForms),
+    documents: createVisionDocumentProvider({ read: modelReader(mediaReader), templates: workflowTemplatePages(mastra.getWorkflow('readOrderForm')) }),
     ...(config.transcription ? { transcribe: voiceTranscriber(mediaReader) } : {}),
   });
   const it = config.locale === 'it';
@@ -70,8 +72,8 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
     const runId = resumeId ?? randomUUID();
     const run = await mastra.getWorkflow('prepareOrder').createRun({ runId });
     const outcome = resumeId
-      ? await run.resume({ step: 'prepare-order', resumeData: { draft: extracted } })
-      : await run.start({ inputData: { orderId: previous.orderId, text, date: new Date().toISOString().slice(0, 10) } });
+      ? await run.resume({ tracingContext: tracingContext(), step: 'prepare-order', resumeData: { draft: extracted } })
+      : await run.start({ tracingContext: tracingContext(), inputData: { orderId: previous.orderId, text, date: new Date().toISOString().slice(0, 10) } });
     const revision = previous.revision + 1;
     if (outcome.status === 'suspended') {
       const step = outcome.steps['prepare-order'];
@@ -83,7 +85,7 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
           task: 'Word these order questions for the operator. Follow the question-wording rules. Return one question per field.',
           operatorMessage: operatorText,
           questions: issues.map(i => ({ field: i.field, about: lineQuery(i.field, suspended.draft) ?? null, problem: i.message })),
-        }), { memory: { resource: config.deploymentId, thread: `${config.deploymentId}:wording:${previous.orderId}` }, maxSteps: 1, structuredOutput: { schema: wordingSchema }, requestContext: evalContext('wording') });
+        }), { tracingContext: tracingContext(), memory: { resource: config.deploymentId, thread: `${config.deploymentId}:wording:${previous.orderId}` }, maxSteps: 1, structuredOutput: { schema: wordingSchema }, requestContext: evalContext('wording') });
         return Object.fromEntries(response.object.questions.map(q => [q.field, q.text]));
       });
       let written: Record<string, string> = {};
@@ -123,7 +125,7 @@ Return answer for catalogue questions, unrelated conversation, ambiguity, or req
 If asked to save or confirm, direct the operator to the latest confirmation button. Never claim a write occurred. No slash command is needed to start or edit.
 Do not infer a new request from an old conversation. When a request is active, a catalogue question must leave it unchanged.
 For continue/order/customer, text must restate the current operator's requested facts and corrections using history only to resolve references (such as 'the larger one'); never invent facts. For cancel, text can be empty.`
-    }), {memory:{...shared,options:{readOnly:true,messageHistory:{maxTokens:12000},lastMessages:100}},requestContext,maxSteps:5,structuredOutput:{schema:intentSchema}});
+    }), {tracingContext: tracingContext(),memory:{...shared,options:{readOnly:true,messageHistory:{maxTokens:12000},lastMessages:100}},requestContext,maxSteps:5,structuredOutput:{schema:intentSchema}});
     return response.object;
   };
   const record: NonNullable<ConversationEngine['record']> = async (id, plan) => {
@@ -161,7 +163,7 @@ For continue/order/customer, text must restate the current operator's requested 
     if (canEvaluate && plan.incomingText) {
       try {
         const run = await mastra.getWorkflow('deliveredReply').createRun({ runId: `telegram-eval-${id}` });
-        await run.start({ inputData: {
+        await run.start({ tracingContext: tracingContext(), inputData: {
           input: { inputMessages: [messages[0]!], rememberedMessages: history, systemMessages: [], taggedSystemMessages: {} },
           output: [messages[1]!],
           // An observed application outcome, not a reconstructed model/tool trace.
@@ -170,5 +172,12 @@ For continue/order/customer, text must restate the current operator's requested 
       } catch { console.warn('Live evaluation dispatch failed; the delivered reply and business state are unchanged.'); }
     }
   };
-  return Object.assign(handle, { record, media, ...(testExtractor ? {} : {route}), shutdown: () => mastra.shutdown({ drainTimeout: 30000 }) });
+  const shutdown = async () => {
+    // Mastra 1.71 closes storage before shutting down exporters. Drain workers and
+    // flush while storage is still open, so the final turns/scores are retained.
+    await mastra.stopWorkers({ drainTimeout: 30000 });
+    await observability.flush();
+    await mastra.shutdown({ drainTimeout: 30000 });
+  };
+  return Object.assign(handle, { record, media, traceTurn: <T>(id: number, action: () => Promise<T>) => traceTelegramTurn(observability.getDefaultInstance(), id, action), ...(testExtractor ? {} : {route}), shutdown });
 }

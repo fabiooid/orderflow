@@ -1,3 +1,4 @@
+import { tracingContext } from './execution-trace.js';
 import { customerCreationSkill } from './skills/customer-creation.js';
 import { buildSystemPrompt } from './system-prompt.js';
 import { extractionSchema, parseExtraction } from './extraction-schema.js';
@@ -72,6 +73,7 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
   });
   const extract: Extractor = async (text, orderId) => {
     const response = await agent.generate(text, {
+      tracingContext: tracingContext(),
       memory: memoryScope(config, orderId), structuredOutput: { schema: extractionSchema }, maxSteps: 8,
       requestContext: evalContext('extraction'),
     });
