@@ -162,6 +162,8 @@ npm run telegram:start        # start the poller (Ctrl+C to stop gracefully)
 
 Talk to the bot naturally in the configured group. The group has one active request at a time; finish or cancel it before you start another. Slash commands are optional shortcuts:
 
+The router resolves the reply language from substantive operator messages and explicit preferences. The selected language is stored for application summaries, buttons and subsequent confirmations. Commands with descriptive text use a separate language-resolution call; bare commands keep the current language. Attachment approval buttons are bound to the request and revision shown when the question was asked; resend an attachment if that context has changed.
+
 | Command | Alias | Action |
 | --- | --- | --- |
 | `/ordine` | `/order` | Start preparing an order |

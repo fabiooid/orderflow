@@ -1,4 +1,4 @@
-import type { AppConfig } from '../config/schema.js';
+import { translate, type AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
 import { clientSchema, type OrderDraft } from '../domain/types.js';
 import { sameClient } from '../domain/matching.js';
@@ -7,11 +7,11 @@ import { journalKey, type Conversation } from './store.js';
 
 export function customerDetails(draft: OrderDraft, config: AppConfig) {
   const parsed = clientSchema.safeParse(draft.newClient);
-  if (!parsed.success) return { error: 'Completa nome, indirizzo, città, CAP e paese; verifica il formato di email e codice SDI.' } as const;
+  if (!parsed.success) return { error: translate(config, 'Completa nome, indirizzo, città, CAP e paese; verifica il formato di email e codice SDI.', 'Complete name, street, city, postal code and country; check the email and SDI formats.') } as const;
   const client = parsed.data;
   const missing = config.clients.requiredFields.filter(field => !client[field]);
-  if (config.clients.sdiCountries.includes(client.country) && !client.sdiCode) return { error: 'Manca il codice SDI.' } as const;
-  if (missing.length) return { error: `Dati mancanti: ${missing.join(', ')}. Non inventare identificativi fiscali.` } as const;
+  if (config.clients.sdiCountries.includes(client.country) && !client.sdiCode) return { error: translate(config, 'Manca il codice SDI.', 'SDI code is missing.') } as const;
+  if (missing.length) return { error: translate(config, `Dati mancanti: ${missing.join(', ')}. Non inventare identificativi fiscali.`, `Missing details: ${missing.join(', ')}. Do not invent tax identifiers.`) } as const;
   return { client } as const;
 }
 
@@ -22,16 +22,17 @@ export function customerCreator(config: AppConfig, connector: Pick<OrderConnecto
     const details = customerDetails(conversation.draft, config);
     if (!details.client) throw new Error('Customer details are incomplete');
     const client = details.client;
+    const locale = { locale: conversation.locale ?? config.locale };
     const key = `${journalKey(config, conversation.orderId)}:customer`;
     const prior = await journal.replay<string>(key, client);
     if (prior) return prior.result;
     let matches;
     try { matches = (await connector.listClients()).filter(c => sameClient(c, client)); }
     catch { throw new PreflightFailed(); }
-    if (matches.length) return `Cliente già presente: ${matches.map(c => `${c.name} (ID ${c.id})`).join(', ')}. Nessun duplicato creato.`;
+    if (matches.length) return translate(locale, `Cliente già presente: ${matches.map(c => `${c.name} (ID ${c.id})`).join(', ')}. Nessun duplicato creato.`, `Customer already exists: ${matches.map(c => `${c.name} (ID ${c.id})`).join(', ')}. No duplicate created.`);
     return journal.once(key, client, async () => {
       const saved = await connector.createClient(client);
-      return `Cliente creato: ${saved.name} (ID ${saved.id}). Nessun ordine o fattura creato; nessuna email inviata.`;
+      return translate(locale, `Cliente creato: ${saved.name} (ID ${saved.id}). Nessun ordine o fattura creato; nessuna email inviata.`, `Customer created: ${saved.name} (ID ${saved.id}). No order or invoice created; no email sent.`);
     });
   };
 }

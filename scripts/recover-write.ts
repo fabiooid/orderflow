@@ -37,7 +37,7 @@ async function main() {
         const expected = clientSchema.parse(conversation.kind === 'customer' ? conversation.draft.newClient : conversation.prepared?.client);
         const client = (await connector.listClients()).find(c => c.id === remote);
         if (!client || Object.entries(expected).some(([field, value]) => (client[field as keyof typeof client] ?? '') !== (value ?? ''))) throw new Error('Remote customer differs from the confirmed details');
-        const it = config.locale === 'it';
+        const it = (conversation.locale ?? config.locale) === 'it';
         const message = it ? `Cliente creato: ${client.name} (ID ${client.id}). Nessun ordine o fattura creato; nessuna email inviata.` : `Customer created: ${client.name} (ID ${client.id}). No order or invoice created; no email sent.`;
         if (action === 'client-found' && conversation.kind !== 'customer') {
           await journal.resolve(`${key}:client`, expected, client, evidence);
