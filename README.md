@@ -45,6 +45,8 @@ Operators can also send **voice notes**, **photos and screenshots**, **PDFs** an
 
 It can also create new customers (with duplicate checks) and answer catalogue questions, such as `@your_bot quali varianti di Sapone Zenzero abbiamo?`
 
+The agent can consult a resolved customer's recent orders through the read-only `getCustomerOrderHistory` tool in Telegram and Studio (five orders by default, at most twenty). It uses history to ask better product/size questions and compare past prices, citing the order number and date. Previous prices and discounts never become automatic defaults. A failed lookup is reported as unavailable rather than as an empty order history.
+
 ## Design principles
 
 - **Orders only.** The public connector and agent tools contain no invoice, proforma, customer-email, document-conversion or delete operations. Configuration cannot turn them on.
@@ -90,6 +92,12 @@ Clients in a tier get the tier's prices; a product without a tier price is asked
 When a photo or scanned image arrives, OrderFlow turns it upright, recognises the form, enlarges small scans and reads it **twice** at full image detail. The two readings are compared by product: agreed quantities are used and disagreements become questions. Another reading preserves customer details, delivery instructions, visible unit prices and notes. PDFs are always rendered as complete pages (including text, images and overlays), with or without templates; the limit is ten pages per request and 2400 pixels on the longest PDF-page edge. JPEG, PNG, WebP, static GIF and TIFF are normalized into page images; multi-page TIFF is supported. Animated images are rejected. Overlong readings are rejected instead of silently truncated. Two readings can still make the same mistake; check the summary against the original. `npm run eval:orderforms` measures accuracy on forms with known answers (see [EVALS.md](EVALS.md)).
 
 Document reading lives in `src/documents` behind a replaceable `DocumentProvider`. It returns page text and raw template-cell observations; OrderFlow resolves catalogue IDs afterwards. The current provider uses direct vision and always marks its output as requiring review. See [ADR 0001](docs/decisions/0001-document-reading.md) for the boundary, limitations and planned comparison with a document-AI provider.
+
+### Alias learning
+
+Operators can teach product names and shop/business-name aliases in ordinary messages. The agent's `rememberAlias` tool verifies that the target exists, records the exact operator quote and identity, and persists the mapping in Mastra resource-scoped working memory. Shared Telegram routing and new order threads use the same resource; older order threads retain their history and searches still consult shared aliases. There are no aliases embedded in the source code.
+
+Learning requires an explicit correction or teaching statement, not merely order confirmation. Attachments and forwarded text cannot authorize learning. Conflicting mappings remain candidates for clarification; operators can explicitly ask to forget a mapping. Prices, tax rules and delivery defaults are not learned. Recognizing a teaching statement is model behavior, so review early learning traces during the pilot.
 
 ### Try the assistant in Mastra Studio
 
@@ -254,9 +262,10 @@ OrderFlow is in **foundation / pre-pilot** stage.
 - [x] Live turn tracing across model/workflow/API/delivery operations
 - [x] Fictional acceptance scenarios with optional live-model extraction
 
+- [x] Confirmed product/customer alias learning in Mastra memory
+
 **Not yet done**
 
-- [ ] Approved-alias management and automatic learning
 - [ ] First confirmed order against a live account (user acceptance testing)
 - [ ] Automatic recovery of failed PDF deliveries (manual delivery recovery is available)
 - [ ] Shipping notes for existing customers
