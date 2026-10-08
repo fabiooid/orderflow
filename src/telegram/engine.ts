@@ -1,3 +1,4 @@
+import { explicitChoice, confirmedChoices } from '../matching/resolver.js';
 import { customerDetails } from './customer.js';
 import { tracingContext, traceTelegramTurn } from '../assistant/execution-trace.js';
 import { randomUUID } from 'node:crypto';
@@ -31,12 +32,12 @@ function plainQuestions(issues: Issue[]) {
 }
 
 /** Sequential runner reuses Mastra persistence; model receives latest structured draft + questions explicitly. */
-export function createConversationEngine(config: AppConfig, connector: OrderConnector, storage: LibSQLStore, mode: 'demo' | 'read-only', testExtractor?: Extractor, rewriteQuestions?: (issues: Issue[], operatorText: string) => Promise<Record<string, string>>): ConversationEngine & { traceTurn: <T>(id: number, action: () => Promise<T>) => Promise<T>; shutdown: () => Promise<void>; media: (download: Download) => MediaReader } {
+export function createConversationEngine(config: AppConfig, connector: OrderConnector, storage: LibSQLStore, mode: 'demo' | 'read-only', testExtractor?: Extractor, rewriteQuestions?: (issues: Issue[], operatorText: string) => Promise<Record<string, string>>, matchingOptions?: Parameters<typeof createOrderAgent>[4]): ConversationEngine & { traceTurn: <T>(id: number, action: () => Promise<T>) => Promise<T>; shutdown: () => Promise<void>; media: (download: Download) => MediaReader } {
   const live = testExtractor ? { enabled: false, rate: 0 } : liveEvalSettings();
-  const { agent, memory, scorers, extract: agentExtract } = createOrderAgent(config, connector, storage, live);
+  const { agent, memory, scorers, matching, extract: agentExtract } = createOrderAgent(config, connector, storage, live, matchingOptions);
   const extract = testExtractor ?? agentExtract;
   let extracted: OrderDraft = draftSchema.parse({});
-  const workflow = createOrderWorkflow(config, connector, async () => extracted);
+  const workflow = createOrderWorkflow(config, connector, async () => extracted, undefined, matching);
   const observability = new Observability({ configs: { default: { serviceName: "orderflow-telegram", exporters: [new MastraStorageExporter()], spanOutputProcessors: [omitMedia] } } });
   const deliveredReply = createDeliveredReplyWorkflow(scorers, live);
   const { mediaReader, formReader } = createMediaAgents(config);
@@ -53,27 +54,39 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
     const previous = order.client.id ? await connector.listClientOrders(order.client.id, 5).catch(() => []) : [];
     return { warnings, discrepancies: priceDiscrepancies(order, previous) };
   };
-  const handle: ConversationEngine = async (text, previous) => {
+  const handle: ConversationEngine = async (text, previous, source) => {
+    const latestOperatorText = source?.operatorText ?? text;
+    const sourceText = matching.mode !== 'on' ? latestOperatorText : [previous.sourceText, latestOperatorText].filter(Boolean).join('\n');
+    if (matching.mode === 'on' && sourceText.length > 12000) throw new Error('Order context too long; start a new request');
     const locale = previous.locale ?? config.locale;
     const it = locale === 'it';
-    extracted = await extract(JSON.stringify({ currentDraft: previous.draft, pendingQuestions: previous.questions, operatorMessage: text, task: previous.kind === 'customer' ? 'Collect newClient details only; no products or order required.' : 'Prepare order' }), previous.orderId);
+    extracted = matching.mode === 'on' && explicitChoice(latestOperatorText) ? structuredClone(previous.draft) : await extract(JSON.stringify({ currentDraft: previous.draft, pendingQuestions: previous.questions, operatorMessage: text, originalOperatorText: source?.operatorText ?? text, task: previous.kind === 'customer' ? 'Collect newClient details only; no products or order required.' : 'Prepare order' }), previous.orderId);
     if (previous.kind === 'customer') {
-      const details = customerDetails(extracted, { ...config, locale });
+      const resolution = await matching.resolve({ ...extracted, lines: [] }, { orderId: previous.orderId, revision: previous.revision + 1, operatorText: sourceText, confirmedChoices: previous.confirmedChoices, latestOperatorText });
+      if (resolution.issues.length) return {
+        conversation: { ...previous, revision: previous.revision + 1, sourceText, matchingDecisions: resolution.decisions, confirmedChoices: confirmedChoices(resolution.decisions), draft: resolution.draft, status: 'suspended', questions: plainQuestions(resolution.issues) },
+        text: askedText(resolution.issues, resolution.draft, it),
+      };
+      if (matching.mode === 'on' && resolution.draft.clientId) return {
+        conversation: { ...previous, revision: previous.revision + 1, sourceText, matchingDecisions: resolution.decisions, confirmedChoices: confirmedChoices(resolution.decisions), draft: resolution.draft, status: 'reviewed', prepared: undefined, totals: undefined, questions: '' },
+        text: it ? `Cliente esistente selezionato: ${resolution.draft.clientQuery} (ID ${resolution.draft.clientId}). Nessun nuovo cliente creato.` : `Existing customer selected: ${resolution.draft.clientQuery} (ID ${resolution.draft.clientId}). No new customer created.`,
+      };
+      const details = customerDetails(resolution.draft, { ...config, locale });
       const c = details.client;
       const questions = details.error ?? '';
       const summary = c ? customerPreview(c, it) : `${questions}\n\n${it ? 'Rispondi con i dati mancanti. /annulla per annullare.' : 'Reply with the missing details. /cancel to cancel.'}`;
-      return { conversation: { ...previous, revision: previous.revision + 1, draft: extracted, status: c ? 'ready' as const : 'suspended' as const, questions }, text: summary };
+      return { conversation: { ...previous, revision: previous.revision + 1, draft: extracted, sourceText, matchingDecisions: resolution.decisions, confirmedChoices: confirmedChoices(resolution.decisions), status: c ? 'ready' as const : 'suspended' as const, questions }, text: summary };
     }
     const resumeId = previous.status === 'suspended' ? previous.runId : undefined;
     const runId = resumeId ?? randomUUID();
     const run = await mastra.getWorkflow('prepareOrder').createRun({ runId });
     const outcome = resumeId
-      ? await run.resume({ tracingContext: tracingContext(), step: 'prepare-order', resumeData: { draft: extracted } })
-      : await run.start({ tracingContext: tracingContext(), inputData: { orderId: previous.orderId, text, date: new Date().toISOString().slice(0, 10) } });
+      ? await run.resume({ tracingContext: tracingContext(), step: 'prepare-order', resumeData: { draft: extracted, operatorText: sourceText, confirmedChoices: previous.confirmedChoices, latestOperatorText, revision: previous.revision + 1 } })
+      : await run.start({ tracingContext: tracingContext(), inputData: { orderId: previous.orderId, text, operatorText: sourceText, confirmedChoices: previous.confirmedChoices, latestOperatorText, revision: previous.revision + 1, date: new Date().toISOString().slice(0, 10) } });
     const revision = previous.revision + 1;
     if (outcome.status === 'suspended') {
       const step = outcome.steps['prepare-order'];
-      const suspended = step && 'suspendPayload' in step ? step.suspendPayload as { issues: Issue[]; draft: OrderDraft } : undefined;
+      const suspended = step && 'suspendPayload' in step ? step.suspendPayload as { issues: Issue[]; draft: OrderDraft; decisions: import('../matching/resolver.js').Decision[] } : undefined;
       if (!suspended) throw new Error('Missing persisted clarification data');
       const questions = plainQuestions(suspended.issues);
       const rewrite = rewriteQuestions ?? (testExtractor ? undefined : async (issues: Issue[], operatorText: string) => {
@@ -90,12 +103,12 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
         catch { /* Fall back to the application's own wording. */ }
       }
       const wording = askedText(suspended.issues, suspended.draft, it, written);
-      return { conversation: { ...previous, revision, runId, status: 'suspended', prepared: undefined, totals: undefined, draft: suspended.draft, questions }, text: `${it ? 'Servono alcuni dettagli:' : 'Please clarify:'}\n${wording}\n\n${it ? 'Rispondi a questo messaggio. /annulla per annullare.' : 'Reply to this message. /cancel to cancel.'}` };
+      return { conversation: { ...previous, revision, runId, status: 'suspended', prepared: undefined, totals: undefined, draft: suspended.draft, sourceText, matchingDecisions: suspended.decisions, confirmedChoices: confirmedChoices(suspended.decisions), questions }, text: `${it ? 'Servono alcuni dettagli:' : 'Please clarify:'}\n${wording}\n\n${it ? 'Rispondi a questo messaggio. /annulla per annullare.' : 'Reply to this message. /cancel to cancel.'}` };
     }
     if (outcome.status !== 'success') throw new Error('Order preparation failed; no order saved');
-    const { order, totals } = outcome.result;
+    const { order, totals, draft: resolvedDraft, decisions } = outcome.result;
     return {
-      conversation: { ...previous, revision, runId, status: 'ready', prepared: order, totals, draft: extracted, questions: '' },
+      conversation: { ...previous, revision, runId, status: 'ready', prepared: order, totals, draft: resolvedDraft, sourceText, matchingDecisions: decisions, confirmedChoices: confirmedChoices(decisions), questions: '' },
       text: orderPreview(order, totals, it, config.orderSavingEnabled && mode !== 'demo', await review(order, it)),
     };
   };
@@ -120,6 +133,7 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
     await ensureSharedThread();
     const requestContext = evalContext('routing');
     requestContext.set('telegramSenderId', senderId);
+    requestContext.set('matchingOperatorText', text);
     requestContext.set('aliasKnownPhrases', [active?.draft.clientQuery, ...active?.draft.lines.map(line => line.query) ?? []].filter(Boolean));
     // Media-derived text is useful order data, but never an alias-teaching instruction.
     if (!/\[(?:Contenuto|Content|Modulo|Order form|Dati|Additional|Nota vocale|Transcribed|Messaggio inoltrato|Message forwarded)/i.test(text)) requestContext.set('aliasOperatorText', text);
@@ -189,5 +203,5 @@ For continue/order/customer, text must restate the current operator's requested 
     await observability.flush();
     await mastra.shutdown({ drainTimeout: 30000 });
   };
-  return Object.assign(handle, { record, media, traceTurn: <T>(id: number, action: () => Promise<T>) => traceTelegramTurn(observability.getDefaultInstance(), id, action), ...(testExtractor ? {} : {route, language}), shutdown });
+  return Object.assign(handle, { ...(matching.mode === 'on' ? { matchingPolicy: matching.policy } : {}), record, media, traceTurn: <T>(id: number, action: () => Promise<T>) => traceTelegramTurn(observability.getDefaultInstance(), id, action), ...(testExtractor ? {} : {route, language}), shutdown });
 }

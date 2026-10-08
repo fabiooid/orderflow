@@ -94,12 +94,16 @@ Selecting an order does not itself mean copying every line. Resolve whether the 
 
 ## Implementation sequence
 
-Implementation status: phase 1's SDK adapter, strict selection contracts, bounded transport,
-product/client projections, configuration, offline tests and fictional read-only evaluation
-command are implemented. See `JEV.md`. Workflow activation, independent-question batching,
-real-record coverage measurements and phases 2–4 remain pending. `JEV_MODE=on` does not yet
-change Telegram or Studio matching.
-
+Implementation status (8 October 2026): phases 1 and 2 are connected for product/client
+identities in Telegram and Studio, including native workflow resolution, re-resolution
+on resume, independent-question batching, explicit operator choices, mode isolation,
+application-owned evidence and guarded alias learning. `JEV_MODE=on` now changes
+workflow matching; the default remains `off`. Fictional integrated smoke: 10/10.
+Every revision reads fresh data; only explicit operator choices are reused, after checking query and identity hashes. Form canonical
+names are validated against current records; ambiguous mappings require explicit
+operator selection. Paginated historical-order selection/reuse (phase 3), large-set
+retrieval, semantic browsing and realistic-data calibration/rollout (phase 4) remain
+pending.
 1. **Foundation and repeatable read-only evaluation.** Add the shared result contracts, injectable TypeSafe SDK adapter, configuration for `off`, `shadow`, and `on`, and explicit read-only connection/evaluation scripts. Unit tests remain offline. The earlier test-registration mismatch has already been fixed. Deliverable: validated Jev requests and reproducible product/client fixtures without changing application decisions; extend fixtures for history in phase 3.
 2. **Product and client resolution.** Add candidate construction, Jev selection, alias handling, and application-owned decision evidence. Integrate the resolution step into new and resumed workflows and adapt conversational tools. Preserve form mappings and explicit operator choices. Deliverable: Jev decides product/client identities; ambiguity produces existing clarification UI.
 3. **Previous-order selection.** Add paginated scoped retrieval, history request/evidence schemas, Jev order/line selection, and current-catalogue revalidation for reuse. Deliverable: requests can locate older orders and distinguish an incomplete search from no match.

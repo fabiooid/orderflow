@@ -294,6 +294,4 @@ Never paste tokens into Telegram, issues or pull requests.
 
 ## JEV data selection
 
-The read-only JEV matching foundation is documented in [JEV.md](JEV.md), including
-configuration and `npm run eval:matching`. It is not yet connected to live order
-preparation. See [the implementation plan](JEV-IMPLEMENTATION-PLAN.md) for rollout.
+JEV product/customer identity resolution is shared by Telegram and Studio. `JEV_MODE=off` preserves legacy matching, `shadow` records judgments without applying them, and `on` applies validated selections before preparation and on clarification resumes. See [JEV.md](JEV.md) for configuration, explicit choices and `npm run eval:matching:workflow`; [the implementation plan](JEV-IMPLEMENTATION-PLAN.md) tracks historical-order selection and rollout.

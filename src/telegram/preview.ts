@@ -22,6 +22,11 @@ export function lineQuery(field: string, draft: OrderDraft) {
 export function askedText(issues: Issue[], draft: OrderDraft, it: boolean, wording: Record<string, string> = {}) {
   return issues.map(issue => {
     const query = lineQuery(issue.field, draft);
+    if (issue.matchingStatus === 'unavailable') return it ? 'Il controllo dell’identità non è disponibile. Riprova o indica il codice esatto.' : 'Identity matching is unavailable. Retry or specify the exact code.';
+    if (issue.matchingStatus && issue.candidates?.length) {
+      const target = issue.field === 'client' ? (it ? 'cliente' : 'client') : `${it ? 'riga' : 'line'} ${Number(issue.field.split('.')[1]) + 1}`;
+      return `${it ? 'Quale identità per' : 'Which identity for'} ${query ?? (it ? 'il cliente' : 'the client')}?\n${issue.candidates.map(c => `${c.id}: ${c.label}`).join('\n')}\n${it ? 'Rispondi' : 'Reply'}: ${target}: ID`;
+    }
     if (issue.priceComparison) {
       const p = issue.priceComparison;
       const basis = p.basis === 'net' ? (it ? 'netto' : 'net') : p.basis === 'gross' ? (it ? 'IVA inclusa' : 'VAT included') : (it ? 'base IVA non chiara' : 'VAT basis unclear');

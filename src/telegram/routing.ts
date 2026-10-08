@@ -1,3 +1,4 @@
+import { explicitChoice } from '../matching/resolver.js';
 import { translate, type AppConfig } from '../config/schema.js';
 import { parseCommand, startsOrder, type MessageEvent, type OrderLink } from './adapter.js';
 import type { Conversation } from './store.js';
@@ -69,6 +70,7 @@ export async function routeMessage(event: MessageEvent, ctx: RoutingContext): Pr
   if (!addressed) return unaddressed;
   const selected = link ? linked : active;
   const target = selected && { orderId: selected.orderId, revision: selected.revision };
+  if (target && explicitChoice(event.text)) return { kind: 'edit', target, text: event.text };
   if (ctx.model) {
     const intent = await ctx.model(event.text, event.senderId, selected, config.locale).catch((): Intent => ({ action: 'answer', text: translate(config,
       'Non riesco a elaborare il messaggio. Riprova; la richiesta aperta non è stata modificata.',

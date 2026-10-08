@@ -36,3 +36,22 @@ it('learns product and client aliases in Mastra memory and uses them in fresh ag
     expect(await tools.rememberAlias!.execute!({ ...product, quote: 'No, I meant the 250 ml bottle.' }, ctx)).toEqual({ status: 'remembered' });
   } finally { await storage.close(); }
 });
+
+it('enabled Jev cannot learn an alias from its prediction or a model-supplied target alone', async () => {
+  const storage = new LibSQLStore({ id: 'jev-alias-guard', url: ':memory:' });
+  try {
+    const { matchingConfigSchema } = await import('../src/matching/config.js');
+    const tools = await createOrderAgent(config(), new DemoConnector(), storage, { enabled: false, rate: 0 }, {
+      config: matchingConfigSchema.parse({ mode: 'on' }), selectMany: async () => [],
+    }).agent.listTools();
+    const requestContext = new RequestContext();
+    requestContext.set('telegramSenderId', 'operator-1');
+    const input = { kind: 'product', phrase: 'little pebble', targetId: 101, action: 'remember', quote: 'Remember little pebble' } as const;
+    requestContext.set('aliasOperatorText', input.quote);
+    const ctx = { requestContext, observe: noopObserve };
+    expect(await tools.rememberAlias!.execute!(input, ctx)).toEqual({ status: 'not-authorized' });
+    requestContext.set('aliasOperatorText', 'Remember little pebble means DEMO-A');
+    expect(await tools.rememberAlias!.execute!({ ...input, quote: 'Remember little pebble means DEMO-A', targetId: 102 }, ctx)).toEqual({ status: 'not-authorized' });
+    expect(await tools.rememberAlias!.execute!({ ...input, quote: 'Remember little pebble means DEMO-A' }, ctx)).toEqual({ status: 'remembered' });
+  } finally { await storage.close(); }
+});

@@ -11,7 +11,7 @@ export const sharedKnowledgeSchema = z.object({
 }).strict();
 
 /** Mastra owns persistence and injection. This tool bounds writes to matching hints. */
-export function aliasMemory(memory: Memory, resourceId: string, connector: OrderConnector) {
+export function aliasMemory(memory: Memory, resourceId: string, connector: OrderConnector, requireExplicitIdentity = false) {
   const threadId = `${resourceId}:alias-learning`;
   const read = async () => {
     const raw = await memory.getWorkingMemory({ threadId, resourceId });
@@ -29,6 +29,14 @@ export function aliasMemory(memory: Memory, resourceId: string, connector: Order
       const prior = context?.requestContext?.get('aliasKnownPhrases');
       const knownPhrase = Array.isArray(prior) && prior.some(value => typeof value === 'string' && normalize(value) === normalize(input.phrase));
       if (typeof source !== 'string' || typeof operator !== 'string' || !operator || !source.includes(input.quote) || (!normalize(input.quote).includes(normalize(input.phrase)) && !knownPhrase)) return { status: 'not-authorized' as const };
+      if (requireExplicitIdentity && input.action === 'remember') {
+        // Neither a Jev prediction nor a model-emitted ID authorizes learning.
+        if (!/\b(remember|alias|call|called|means?|ricorda|chiama|significa|intendo)\b/i.test(source)) return { status: 'not-authorized' as const };
+        const records = input.kind === 'product' ? await connector.listProducts() : await connector.listClients();
+        const named = records.filter(record => [record.name, 'code' in record ? record.code : record.vatNumber ?? '']
+          .some(value => normalize(value) && ` ${normalize(source)} `.includes(` ${normalize(value)} `)));
+        if (named.length !== 1 || named[0]!.id !== input.targetId) return { status: 'not-authorized' as const };
+      }
       const write = async () => {
         if (input.action === 'remember') {
           const records = input.kind === 'product' ? await connector.listProducts() : await connector.listClients();

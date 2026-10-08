@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "license": "MIT",
   "private": true,
-  "description": "OrderFlow — conversational business document assistant for Fatture in Cloud",
+  "description": "OrderFlow \u2014 conversational business document assistant for Fatture in Cloud",
   "type": "module",
   "engines": {
     "node": ">=22.13.0"
@@ -28,7 +28,8 @@
     "orderform:import": "node --env-file-if-exists=.env --import tsx scripts/order-form-import.ts",
     "pricetier:suggest": "node --env-file-if-exists=.env --import tsx scripts/price-tier-suggest.ts",
     "eval:orderforms": "node --env-file-if-exists=.env --import tsx scripts/eval-order-forms.ts",
-    "eval:acceptance": "node --env-file-if-exists=.env --import tsx scripts/eval-acceptance.ts"
+    "eval:acceptance": "node --env-file-if-exists=.env --import tsx scripts/eval-acceptance.ts",
+    "eval:matching:workflow": "node --env-file-if-exists=.env --import tsx scripts/eval-matching-workflow.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "2.0.133",
