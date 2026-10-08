@@ -2,7 +2,7 @@ import type { AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
 import { clientSchema, type OrderDraft } from '../domain/types.js';
 import { sameClient } from '../domain/matching.js';
-import type { WriteJournal } from '../storage/write-journal.js';
+import { PreflightFailed, type WriteJournal } from '../storage/write-journal.js';
 import { journalKey, type Conversation } from './store.js';
 
 export function customerDetails(draft: OrderDraft, config: AppConfig) {
@@ -22,10 +22,14 @@ export function customerCreator(config: AppConfig, connector: Pick<OrderConnecto
     const details = customerDetails(conversation.draft, config);
     if (!details.client) throw new Error('Customer details are incomplete');
     const client = details.client;
-    // Journal covers the duplicate lookup too: a replay after a successful write returns the saved result.
-    return journal.once(`${journalKey(config, conversation.orderId)}:customer`, client, async () => {
-      const matches = (await connector.listClients()).filter(c => sameClient(c, client));
-      if (matches.length) return `Cliente già presente: ${matches.map(c => `${c.name} (ID ${c.id})`).join(', ')}. Nessun duplicato creato.`;
+    const key = `${journalKey(config, conversation.orderId)}:customer`;
+    const prior = await journal.replay<string>(key, client);
+    if (prior) return prior.result;
+    let matches;
+    try { matches = (await connector.listClients()).filter(c => sameClient(c, client)); }
+    catch { throw new PreflightFailed(); }
+    if (matches.length) return `Cliente già presente: ${matches.map(c => `${c.name} (ID ${c.id})`).join(', ')}. Nessun duplicato creato.`;
+    return journal.once(key, client, async () => {
       const saved = await connector.createClient(client);
       return `Cliente creato: ${saved.name} (ID ${saved.id}). Nessun ordine o fattura creato; nessuna email inviata.`;
     });
