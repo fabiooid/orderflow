@@ -24,7 +24,7 @@ it('retains a completed customer when an explicitly approved absent order is ret
   const connector = new DemoConnector();
   const order = await prepared(); delete order.client.id; order.client.name = 'Fictional new business'; order.client.vatNumber = 'ANOTHER-FICTIONAL-VAT';
   const totals = await connector.calculateTotals(order);
-  const conversation: Conversation = { orderId: 'recovery', revision: 1, status: 'ready', draft: draft(), prepared: order, totals, policy: '', questions: '' };
+  const conversation: Conversation = { orderId: 'recovery', revision: 1, status: 'ready', draft: draft(), prepared: order, totals, policy: '' };
   const journal = new WriteJournal(':memory:'); await journal.init();
   const create = vi.spyOn(connector, 'createOrder').mockRejectedValueOnce(new Error('timeout before remote save'));
   const customer = vi.spyOn(connector, 'createClient');

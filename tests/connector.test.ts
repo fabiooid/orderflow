@@ -15,6 +15,15 @@ function sdk() {
 }
 
 describe('restricted SDK adapter', () => {
+  it('creates a customer from a name alone and maps PEC to certified_email', async () => {
+    const ports = sdk();
+    ports.clients.createClient.mockResolvedValue({ data: { data: { id: 7, name: 'Scemo chi legge', certified_email: 'a@pec.it', address_street: '', country_iso: '' } } });
+    const connector = new FattureInCloudConnector(1, ports as unknown as SdkPorts, { clientWritesEnabled: true });
+    const saved = await connector.createClient({ name: 'Scemo chi legge', certifiedEmail: 'a@pec.it', notes: '' });
+    expect(ports.clients.createClient.mock.calls[0]?.[1].data).toMatchObject({ name: 'Scemo chi legge', certified_email: 'a@pec.it', country: undefined });
+    expect(saved).toMatchObject({ id: 7, name: 'Scemo chi legge', certifiedEmail: 'a@pec.it' });
+    expect(saved.street).toBeUndefined();
+  });
   it('uses preflight totals during a journaled save without another remote read', async () => {
     const ports = sdk();
     ports.documents.getNewIssuedDocumentTotals.mockRejectedValue(new Error('Read unavailable'));
@@ -66,6 +75,16 @@ describe('restricted SDK adapter', () => {
     expect(ports.products.listProducts.mock.calls[1]![4]).toBe(2);
     ports.products.listProducts.mockResolvedValue({ data: { data: [{ id: 3, name: 'Missing price' }, { id: 4, name: 'Null price', net_price: null }, { id: 5, name: 'Free sample', net_price: 0 }] } });
     expect(await connector.listProducts()).toEqual([expect.objectContaining({ id: 5, netPrice: 0 })]);
+  });
+  it('keeps page order when later pages are fetched concurrently', async () => {
+    const ports = sdk();
+    ports.products.listProducts.mockImplementation(async (_c: number, _f: unknown, _s: string, _q: unknown, page: number) => {
+      await new Promise(resolve => setTimeout(resolve, 7 - page));
+      return { data: { last_page: 6, data: [{ id: page, name: `P${page}`, code: String(page), net_price: 1 }] } };
+    });
+    const connector = new FattureInCloudConnector(1, ports as unknown as SdkPorts);
+    expect((await connector.listProducts()).map(p => p.id)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(ports.products.listProducts).toHaveBeenCalledTimes(6);
   });
   it('rejects arbitrary email or unsupported document fields', async () => {
     const order = await prepared();

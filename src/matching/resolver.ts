@@ -11,11 +11,13 @@ import { createJevBatchSelector, sdkTransport } from './jev-client.js';
 import type { Candidate, SelectionRequest, SelectionResult } from './types.js';
 
 export const confirmedChoiceSchema = z.object({ field: z.string(), id: z.number().int().positive(), queryHash: z.string(), identityHash: z.string() });
+export type ConfirmedChoice = z.infer<typeof confirmedChoiceSchema>;
 export const resolutionContextSchema = z.object({
   orderId: z.string(), revision: z.number().int().nonnegative().default(0),
   operatorText: z.string().max(12000),
-  latestOperatorText: z.string().max(12000).optional(),
   confirmedChoices: z.array(confirmedChoiceSchema).max(101).optional(),
+  /** A candidate the operator picked with a button in this turn: the only way an ID enters from outside the resolver. */
+  choice: z.object({ field: z.string().regex(/^(?:client|lines\.\d+)$/), id: z.number().int().positive() }).optional(),
 });
 export type ResolutionContext = z.infer<typeof resolutionContextSchema>;
 export const decisionSchema = z.object({
@@ -35,17 +37,11 @@ const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(valu
 const snapshotHash = (candidates: Candidate[]) => hash([...candidates].sort((a, b) => a.id - b.id));
 const identityHash = (candidate: Candidate) => { const { aliases: _aliases, ...identity } = candidate; return hash(identity); };
 const has = (text: string, value: string) => !!normalize(value) && ` ${normalize(text)} `.includes(` ${normalize(value)} `);
-/** Deliberate operator choice, parsed from the original current message, never model output. */
-export function explicitChoice(text: string) {
-  const match = /^(?:client|cliente)\s*:\s*(\d+)\s*$/i.exec(text.trim());
-  if (match) return { field: 'client', id: Number(match[1]) };
-  const line = /^(?:line|riga)\s+(\d+)\s*:\s*(\d+)\s*$/i.exec(text.trim());
-  return line && Number(line[1]) > 0 ? { field: `lines.${Number(line[1]) - 1}`, id: Number(line[2]) } : undefined;
-}
-const units: Record<string, number> = { ml: 1, cl: 10, l: 1000, g: 1, gr: 1, kg: 1000, mm: 1, cm: 10 };
+const units: Record<string, number> = { ml: 1, cl: 10, l: 1000, lt: 1000, litro: 1000, litri: 1000, g: 1, gr: 1, kg: 1000, mm: 1, cm: 10 };
 function sizes(text: string) {
-  return [...text.toLowerCase().matchAll(/(\d+(?:[.,]\d+)?)\s*(ml|cl|kg|gr|cm|mm|l|g)\b/g)]
-    .map(([, n, unit]) => `${['ml', 'cl', 'l'].includes(unit!) ? 'volume' : ['mm', 'cm'].includes(unit!) ? 'length' : 'weight'}:${Number(n!.replace(',', '.')) * units[unit!]!}`);
+  // Catalogue names write litres as "5lt"; documents as "5 L" or "5 litri".
+  return [...text.toLowerCase().matchAll(/(\d+(?:[.,]\d+)?)\s*(ml|cl|kg|gr|cm|mm|litri|litro|lt|l|g)\b/g)]
+    .map(([, n, unit]) => `${['ml', 'cl', 'l', 'lt', 'litro', 'litri'].includes(unit!) ? 'volume' : ['mm', 'cm'].includes(unit!) ? 'length' : 'weight'}:${Number(n!.replace(',', '.')) * units[unit!]!}`);
 }
 
 /** Fetch complete records, judge identities, and apply only validated IDs. No writes or model-authored evidence. */
@@ -60,8 +56,13 @@ export function createIdentityResolver(app: AppConfig, connector: OrderConnector
     const original = draftSchema.parse(input);
     if (config.mode === 'off') return { draft: original, issues: [], decisions: [] };
     resolutionContextSchema.parse(context);
-    const choice = explicitChoice(context.latestOperatorText ?? context.operatorText);
+    const choice = context.choice;
     const draft = structuredClone(original), issues: Issue[] = [], decisions: Decision[] = [];
+    // A named customer that is a different company from the new-client details (often billing details read from a
+    // document) replaces them, like a product correction. Otherwise their VAT number would confine the search to the
+    // document's company, and a no-match could create that company instead.
+    const named = draft.clientQuery, proposed = draft.newClient?.name;
+    if (named && proposed && !has(named, proposed) && !has(proposed, named) && has(context.operatorText, named)) delete draft.newClient;
     let products, clients, aliases: AliasData;
     try {
       [products, clients, aliases] = await Promise.all([connector.listProducts(), connector.listClients(), options.aliases?.() ?? { aliases: [], clientAliases: [] }]);
@@ -145,9 +146,13 @@ export function createIdentityResolver(app: AppConfig, connector: OrderConnector
           line.productId = selectedId;
         }
       } else if (!(item.field === 'client' && draft.newClient && status === 'no-match')) {
+        // A no-match judged every candidate unfit, so none of them is offered as a choice.
+        const offered = status === 'no-match' ? [] : result?.clarificationIds ? result.clarificationIds.flatMap(id => item.candidates.filter(c => c.id === id)) : item.candidates;
         issues.push({ field: item.field, matchingStatus: status,
-          message: status === 'unavailable' ? 'Identity matching unavailable or candidate set too large. Retry or specify an exact code.' : 'Clarify the exact identity; provide the customer city, VAT number, or a more specific name. No record has been selected.',
-          candidates: (result?.clarificationIds ? result.clarificationIds.flatMap(id => item.candidates.filter(c => c.id === id)) : item.candidates).slice(0, 10).map(c => ({ id: c.id, label: [c.code, c.name, c.city, c.country, c.vatNumber].filter(Boolean).join(' — ') })) });
+          message: status === 'unavailable' ? 'Identity matching unavailable or candidate set too large. Retry or specify an exact code.'
+            : status === 'no-match' ? 'No existing record matches. Check the spelling, or provide details to create a new record. No record has been selected.'
+            : 'Clarify the exact identity; provide the customer city, VAT number, or a more specific name. No record has been selected.',
+          candidates: offered.slice(0, 10).map(c => ({ id: c.id, label: [c.code, c.name, c.city, c.country, c.vatNumber].filter(Boolean).join(' — ') })) });
       }
     }
     return { draft: config.mode === 'shadow' ? original : draft, issues, decisions };

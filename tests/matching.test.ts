@@ -30,6 +30,15 @@ describe('read-only JEV selection boundary', () => {
       expect(await createJevSelector(config, async () => raw)(request)).toMatchObject({ status: 'unavailable', reason: 'invalid-response' });
     }
   });
+  it('accepts 2-decimal rounding drift but rejects distributions that do not sum to 1', async () => {
+    const withProbabilities = (probabilities: Record<string, number>) => ({ ...response('no_match'),
+      answers: { selection: { ...response('no_match').answers.selection, confidence: 0.66, probabilities } } });
+    // Observed live: rounded probabilities summing to 0.99 (0.98999… in floating point).
+    const rounded = { candidate_0: 0.11, candidate_1: 0.11, candidate_2: 0.11, candidate_3: 0, ambiguous: 0, no_match: 0.66 };
+    expect((await createJevSelector(config, async () => withProbabilities(rounded))(request)).status).toBe('no-match');
+    const skewed = { candidate_0: 0.05, candidate_1: 0.05, candidate_2: 0, candidate_3: 0, ambiguous: 0, no_match: 0.66 };
+    expect(await createJevSelector(config, async () => withProbabilities(skewed))(request)).toMatchObject({ status: 'unavailable', reason: 'invalid-response' });
+  });
   it('does not call the service for incomplete, oversized or duplicate candidate sets', async () => {
     const transport = vi.fn();
     const select = createJevSelector(config, transport);

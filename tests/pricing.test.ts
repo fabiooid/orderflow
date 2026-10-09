@@ -84,15 +84,11 @@ describe('previous orders', () => {
     ]);
     expect(found).toEqual([{ name: 'Amber hand wash 250 ml', now: 10.8, before: 9.6, order: { number: '8', date: '2025-12-01' } }]);
   });
-  it('shows the price list and differences in the summary without blocking it', async () => {
+  it('shows price differences from earlier orders in the summary without blocking it', async () => {
     const order = await prepared();
-    const text = orderPreview(order, { net: 1, vat: 1, gross: 2 }, true, true, {
-      tierName: 'Trade', warnings: ['Prezzi Trade, ma il cliente non è nella lista Trade'],
-      discrepancies: [{ name: 'Delivery', now: 15, before: 12, order: { number: '77', date: '2026-01-10' } }],
-    });
-    expect(text).toContain('🏷️ Prezzi: listino Trade');
-    expect(text).toContain('⚠️ Da verificare\n• Prezzi Trade, ma il cliente non è nella lista Trade\n• Delivery: ora €15,00, ordine precedente €12,00 (#77, 10/01/2026)');
-    expect(text).toContain('Conferma e salva');
+    const text = orderPreview(order, { net: 1, vat: 1, gross: 2 }, true, [{ name: 'Delivery', now: 15, before: 12, order: { number: '77', date: '2026-01-10' } }]);
+    expect(text).toContain('⚠️ Da verificare\n• Delivery: ora €15,00, ordine precedente €12,00 (#77, 10/01/2026)');
+    expect(text).toContain('💶 Totali');
   });
   it('reads a client\'s orders from Fatture in Cloud with a filter, never other clients\' orders', async () => {
     const listIssuedDocuments = vi.fn().mockResolvedValue({ data: { data: [
