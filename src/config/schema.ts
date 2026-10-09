@@ -56,7 +56,6 @@ export const configSchema = z.object({
   priceBasis: z.literal('net'),
   telegram: z.object({
     groupId: z.string().regex(/^-\d+$/),
-    command: z.string().regex(/^[a-z][a-z0-9_]{0,31}$/),
     access: z.literal('all-group-members'),
     respondToAllMessages: z.boolean().default(false),
   }).strict(),

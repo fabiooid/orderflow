@@ -1,6 +1,6 @@
 import type { AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
-import { preparedOrderSchema, totalsSchema } from '../domain/types.js';
+import { clientSchema, preparedOrderSchema, totalsSchema } from '../domain/types.js';
 import { sameClient } from '../domain/matching.js';
 import { PreflightFailed, type WriteJournal } from '../storage/write-journal.js';
 import type { SavedOrder, Totals } from '../domain/types.js';
@@ -25,7 +25,7 @@ export function orderCreator(config: AppConfig, connector: OrderConnector, journ
   return journal.once(key, {order, expected}, async () => {
    let client = order.client;
    if (!client.id) {
-    client = await journal.once(`${key}:client`, client, () => connector.createClient(client));
+    client = await journal.once(`${key}:client`, client, async () => clientSchema.parse(await connector.createClient(client)));
    }
    return journal.once(`${key}:save`, {...order, client}, () => connector.createOrder({...order, client}, actual));
   });

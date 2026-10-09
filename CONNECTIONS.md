@@ -20,7 +20,7 @@ For the account token, plan for products read access, client access, order-only 
 
 Create a dedicated internal group and add the bot and the operators. The bot must be allowed to send text and documents. Administrator status is not required when ordinary group permissions allow this.
 
-With other pollers stopped, send `/order@YOUR_BOT_USERNAME` in the group, then run:
+With other pollers stopped, mention the bot in the group (for example `@YOUR_BOT_USERNAME ciao`), then run:
 
 ```sh
 npm run telegram:discover
@@ -28,7 +28,7 @@ npm run telegram:discover
 
 Copy the intended group ID into `telegram.groupId`. Discovery lists group names/IDs from pending messages but does not send messages or acknowledge updates. If a webhook exists, do not replace it automatically: use a dedicated bot or deliberately remove the previous integration yourself.
 
-Privacy mode can remain enabled. Start orders with the configured command, and **reply to the bot's latest message** for follow-ups. Unrelated messages are ignored. Any human group member can contribute; anonymous sender identities and other bots are ignored.
+Privacy mode can remain enabled: mention the bot to start, and **reply to the bot's latest message** for follow-ups (with an open request, plain messages reach the bot too). To have the bot read every message, disable privacy mode with BotFather and set `respondToAllMessages: true`. Unrelated messages are ignored. Any human group member can contribute; anonymous sender identities and other bots are ignored.
 
 With privacy mode enabled, the bot never receives photos, voice notes or forwarded messages sent on their own, only those that reply to it or mention it in a caption. To let operators drop media straight into the group, turn privacy off in BotFather (`/setprivacy`) or make the bot an administrator, then remove the bot from the group and add it again. `connections:check` reports this as `MANUAL` while privacy mode hides messages.
 
@@ -59,9 +59,9 @@ Use `CONNECTOR_MODE=demo` with the example product and tax settings to start aga
 npm run telegram:start
 ```
 
-Example input: `/order Two Amber hand wash 250 ml for Example Studio, 10% discount, delivery 8 euros`.
+Example input: `@YOUR_BOT_USERNAME order two Amber hand wash 250 ml for Example Studio, 10% discount, delivery 8 euros`.
 
-Ask for “Amber 250” to exercise ambiguous variant clarification. Reply with the exact variant and delivery charge. A colleague can answer too. Start a second order, then reply to the first to check isolation. `/review` marks a completed preview reviewed; `/reopen` permits subsequent changes. Old-revision replies are rejected.
+Ask for “Amber 250” to exercise variant clarification: pick the variant with its button, then give the delivery charge. A colleague can answer too. Starting a second request while one is open lists the open requests with a cancel button. In preview mode the **👀 Segna come controllato** button marks a complete preview reviewed; replying with changes reopens it. Replies to an older revision are rejected.
 
 Then set `CONNECTOR_MODE=read-only`, restore the real account mappings, run the checks, and restart the runner. It uses the real catalogue and client data but **never creates or modifies records**. It returns a clearly labelled preview, not a saved-order claim or a fabricated PDF.
 
@@ -79,7 +79,7 @@ npm run telegram:pdf -- --order DOCUMENT_ID
 
 Use the API document ID, not its printed order number. The command reads the order, rejects non-order documents, retrieves its current PDF URL and sends an attachment to the configured group. It does not create/update orders or email customers. Inspect Telegram before retrying if delivery is not confirmed. This command is an explicit sending action; `connections:check` never invokes it.
 
-Automatic save → PDF → update requires the next account-write milestone. Voice notes, screenshots and review buttons are also not wired yet; this runner is text-only and uses reply commands.
+Saved orders are not updated automatically; post-save changes are made manually in Fatture in Cloud.
 
 ## Failure and restart checks
 
@@ -99,15 +99,15 @@ npm run telegram:recover -- UPDATE_ID not-delivered
 
 Recovery changes only local delivery state. Restart the runner to continue. Group supergroup message links end with their message ID. For groups where this is unavailable, inspect the Bot API result/logging locally before choosing recovery; never guess an ID.
 
-The local poller lock prevents a second process. A lock from an exited process can be reclaimed; do not delete `.data/` to fix uncertain remote outcomes. A crash during extraction/preparation may rerun read/model work, but no remote order writes occur in these modes.
+The local poller lock prevents a second process. A lock from an exited process can be reclaimed; do not delete `.data/` to fix uncertain remote outcomes. A crash during an agent turn may rerun read/model work, but no remote order writes occur in these modes.
 
 ## Verification performed without credentials
 
-Automated tests use fictional records and injected transports/model extraction. They cover read-only health checks, secret redaction, PDF transport, group restrictions, interleaved orders, stale review actions, duplicate updates, uncertain-delivery recovery, and a real Mastra suspend/resume cycle. They do not claim a successful live Telegram, model or Fatture in Cloud session.
+Automated tests use fictional records, injected transports and a scripted stand-in for the agent. They cover read-only health checks, secret redaction, PDF transport, group restrictions, interleaved orders, stale buttons, candidate picks, duplicate updates and uncertain-delivery recovery. They do not claim a successful live Telegram, model or Fatture in Cloud session.
 
 ### Manual VIES checks and Telegram traces
 
-EU rules with `requireValidVat` pause until a manual VIES result is supplied (or an injected validator returns valid). The structured draft stores the checked country, VAT number and result. A confirmation for a different VAT identity cannot unlock the order. Model extraction must only record an explicit operator confirmation; validate this with live conversation evaluations before enabling saves.
+EU rules with `requireValidVat` pause until a manual VIES result is supplied (or an injected validator returns valid). The structured draft stores the checked country, VAT number and result. A confirmation for a different VAT identity cannot unlock the order. The agent must only record an explicit operator confirmation; validate this with live conversation evaluations before enabling saves.
 
 The Telegram engine now exports Mastra traces into its own persistent LibSQL storage (`.data/telegram-<deploymentId>-<mode>.db`). Studio in read-only mode uses this same database so Telegram traces and threads are visible; demo mode remains separate. Existing live agent traces have been verified in storage.
 
@@ -115,16 +115,16 @@ Fatture in Cloud's default VAT entry may have ID `0`; this is supported. Account
 
 ### Customer creation from Telegram
 
-In account (`CONNECTOR_MODE=read-only`) mode, `/customer` starts a customer-only conversation. Reply to the latest summary with `/confirmcustomer` to explicitly authorize creation. This is the sole enabled write in this mode; order creation and updates remain disabled. Required customer fields are deployment-configured and still apply to test records. No fake VAT or SDI identifiers are generated. Duplicate names or VAT numbers return existing records instead of creating another.
+In account (`CONNECTOR_MODE=read-only`) mode, ask the bot to create a customer (for example “crea il cliente Bottega Verde, Via Roma 1, Bergamo”). Press **✅ Conferma e salva** under the latest customer summary to authorize creation. This is the sole enabled write in this mode; order creation and updates remain disabled. Required customer fields are deployment-configured and still apply to test records. No fake VAT or SDI identifiers are generated. Duplicate names or VAT numbers return existing records instead of creating another.
 
 Customer writes use `.data/customer-writes.db` for durable retry protection. If a write is uncertain, stop and reconcile the customer in Fatture in Cloud before retrying; do not start another request to bypass the journal. No customer emails are sent. Demo mode cannot create real customers.
 
 
 ### Natural catalogue questions
 
-Mention the configured bot in the approved group, for example `@your_bot quali varianti di Sapone Zenzero abbiamo?`. The shared Mastra agent answers using product-search tools and conversation memory. Reply to its answer for follow-up questions. Unaddressed group chatter remains ignored. Catalogue conversations cannot create customers or save orders; use `/customer` and `/order` for those workflows. Product search returns names, codes, descriptions and net prices to the configured model provider.
+Mention the configured bot in the approved group, for example `@your_bot quali varianti di Sapone Zenzero abbiamo?`. The shared Mastra agent answers using product-search tools and conversation memory. Reply to its answer for follow-up questions. Unaddressed group chatter remains ignored. Answering a question never changes the open request; orders and customers are saved only with their confirmation buttons. Product search returns names, codes, descriptions and net prices to the configured model provider.
 
-Italian commands are supported alongside the English aliases: `/cliente` (`/customer`), `/ordine` (`/order`), and `/confermacliente` (`/confirmcustomer`). Confirmation must be a reply to the latest customer summary. Commands also support the `@bot_username` suffix.
+There are no slash commands: write to the bot naturally, and confirm with the buttons under the latest summary.
 
 ### Telegram message traces
 
@@ -135,6 +135,6 @@ Open Studio in read-only mode and use its Traces view. Agent traces contain actu
 
 ### Confirmed order saving
 
-Set `orderSavingEnabled: true` for an account deployment to enable `/confermaordine` (`/confirmorder`). Start with `/ordine`, resolve missing information, and review the complete text summary. Reply to the latest summary with the confirmation command to save exactly that prepared snapshot. Any edit produces a new revision and invalidates older confirmations. The bot then retrieves the saved Order PDF and sends it only to the configured group. No invoice or customer-email operation is exposed.
+Set `orderSavingEnabled: true` for an account deployment to enable the **✅ Conferma e salva** button on order summaries. Ask for an order, resolve missing information, and review the complete summary. The button under the latest summary saves exactly that prepared snapshot. Any edit produces a new revision and invalidates older confirmations. The bot then retrieves the saved Order PDF and sends it only to the configured group. No invoice or customer-email operation is exposed.
 
 The durable write journal prevents duplicate orders on replay. Uncertain saves freeze editing and require reconciliation. PDF delivery uses the existing transport journal: a failed or uncertain document send never recreates the Order; inspect the group before `telegram:recover`. Post-save order edits are currently handled manually in Fatture in Cloud. Existing conversations prepared before this configuration change must be restarted.

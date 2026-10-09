@@ -1,5 +1,4 @@
-import { MAX_CHOICES } from '../domain/matching.js';
-import type { Client, Issue, OrderDraft, PreparedOrder, Totals } from '../domain/types.js';
+import type { Client, Issue, NewCustomer, OrderDraft, PreparedOrder, Totals } from '../domain/types.js';
 import type { Discrepancy } from '../domain/history.js';
 
 const rule = '━━━━━━━━━━━━━━━━';
@@ -9,58 +8,91 @@ function money(amount: number, it: boolean) {
   return `€${it ? text.replace('.', ',') : text}`;
 }
 
-function place(client: Pick<Client, 'street' | 'postalCode' | 'city' | 'province' | 'country'>) {
-  return [client.street, [client.postalCode, client.city].join(' '), client.province, client.country].filter(Boolean).join(', ');
+function place(client: Partial<Pick<NewCustomer, 'street' | 'postalCode' | 'city' | 'province' | 'country'>>) {
+  return [client.street, [client.postalCode, client.city].filter(Boolean).join(' '), client.province, client.country].filter(Boolean).join(', ');
 }
 
-export function lineQuery(field: string, draft: OrderDraft) {
-  const index = /^lines\.(\d+)/.exec(field);
-  return index ? draft.lines[Number(index[1])]?.query : undefined;
+/** The line an issue or choice field such as `lines.2` or `lines.2.quantity` refers to. */
+export const lineIndex = (field: string) => { const match = /^lines\.(\d+)/.exec(field); return match ? Number(match[1]) : undefined; };
+
+/** One short label per open point: the agent asks the actual questions, the template only marks what is missing. */
+function openPoint(issue: Issue, draft: OrderDraft, it: boolean) {
+  const index = lineIndex(issue.field);
+  const query = index === undefined ? undefined : draft.lines[index]?.query;
+  if (query !== undefined) {
+    if (issue.field.endsWith('.quantity')) return it ? `quantità per ${query}` : `quantity for ${query}`;
+    if (issue.priceComparison) return it ? `prezzo di ${query}` : `price of ${query}`;
+    return it ? `prodotto per ${query}` : `product for ${query}`;
+  }
+  if (issue.field === 'client' || issue.field.startsWith('client.')) {
+    const field = issue.field.slice('client.'.length);
+    return issue.field === 'client' ? (it ? 'cliente' : 'customer') : `${it ? 'cliente' : 'customer'}: ${fieldLabel(field, it).toLowerCase()}`;
+  }
+  const labels: Record<string, [string, string]> = {
+    shippingPrice: ['costo di consegna', 'delivery charge'], 'delivery.country': ['paese di consegna', 'delivery country'],
+    vat: ['controllo IVA', 'VAT check'], priceTier: ['listino prezzi', 'price list'], lines: ['prodotti e quantità', 'products and quantities'],
+  };
+  return labels[issue.field]?.[it ? 0 : 1] ?? (it ? 'altri dettagli' : 'other details');
 }
 
-/** Each question stays with its own product and its own choices, whoever wrote the wording. */
-export function askedText(issues: Issue[], draft: OrderDraft, it: boolean, wording: Record<string, string> = {}) {
-  return issues.map(issue => {
-    const query = lineQuery(issue.field, draft);
-    if (issue.matchingStatus === 'unavailable') return it ? 'Il controllo dell’identità non è disponibile. Riprova o indica il codice esatto.' : 'Identity matching is unavailable. Retry or specify the exact code.';
-    if (issue.field === 'client' && issue.matchingStatus === 'ambiguous' && !issue.candidates?.length) return it ? 'Quale cliente intendi? Indica città, partita IVA o un nome più preciso.' : 'Which customer do you mean? Provide the city, VAT number, or a more specific name.';
-    if (issue.matchingStatus && issue.candidates?.length) {
-      const target = issue.field === 'client' ? (it ? 'cliente' : 'client') : `${it ? 'riga' : 'line'} ${Number(issue.field.split('.')[1]) + 1}`;
-      return `${it ? 'Quale identità per' : 'Which identity for'} ${query ?? (it ? 'il cliente' : 'the client')}?\n${issue.candidates.map(c => `${c.id}: ${c.label}`).join('\n')}\n${it ? 'Rispondi' : 'Reply'}: ${target}: ID`;
-    }
-    if (issue.priceComparison) {
-      const p = issue.priceComparison;
-      const basis = p.basis === 'net' ? (it ? 'netto' : 'net') : p.basis === 'gross' ? (it ? 'IVA inclusa' : 'VAT included') : (it ? 'base IVA non chiara' : 'VAT basis unclear');
-      return it
-        ? `Per ${query}: il modulo indica ${money(p.document, true)} (${basis}); FiC indica ${money(p.catalogue, true)} netto. Usiamo FiC oppure confermi il prezzo netto da applicare a questo ordine?`
-        : `For ${query}: the form shows ${money(p.document, false)} (${basis}); FiC shows ${money(p.catalogue, false)} net. Use FiC, or confirm the net price to apply to this order?`;
-    }
-    const choices = (issue.candidates ?? []).slice(0, MAX_CHOICES).map(candidate => candidate.label);
-    const list = choices.length ? `\n${choices.join('\n')}` : '';
-    const written = wording[issue.field]?.trim();
-    if (written) return `${written}${list}`;
-    if (query && choices.length) return `${it ? `Per ${query}, quale prodotto scegli?` : `For ${query}, which product?`}${list}`;
-    if (query && issue.field.endsWith('.quantity')) return it ? `Quanti pezzi per ${query}?` : `How many for ${query}?`;
-    if (query && issue.field.endsWith('.netPrice')) return it ? `Quale prezzo netto per ${query}?` : `What net price for ${query}?`;
-    if (query) return it ? `Non trovo un prodotto per ${query}.` : `No product found for ${query}.`;
-    if (issue.field === 'shippingPrice') return it ? 'Qual è il costo di consegna?' : 'What is the delivery price?';
-    if (issue.field === 'client') return `${it ? 'Quale cliente?' : 'Which client?'}${list}`;
-    if (issue.field === 'vat') return it ? 'Serve un controllo sull’IVA.' : 'A VAT check is needed.';
-    if (issue.field === 'priceTier') return it ? 'Quale listino prezzi vuoi usare?' : 'Which price list should be used?';
-    if (issue.field === 'lines') return it ? 'Quali prodotti e quantità vuoi ordinare?' : 'Which products and quantities would you like to order?';
-    if (issue.field.startsWith('client.')) {
-      const field = issue.field.slice('client.'.length);
-      const labels: Record<string, [string, string]> = { email: ['email', 'email'], phone: ['telefono', 'phone number'], vatNumber: ['partita IVA', 'VAT number'], taxCode: ['codice fiscale', 'tax code'], sdiCode: ['codice SDI', 'SDI code'] };
-      const label = labels[field]?.[it ? 0 : 1] ?? field;
-      return it ? `Indica ${label} del cliente.` : `Provide the customer's ${label}.`;
-    }
-    return it ? 'Servono ulteriori dettagli per completare l’ordine.' : 'More details are needed to complete the order.';
-  }).join('\n\n');
+/** Fields whose identity the operator can pick with a button under the draft. */
+export const pickable = (issue: Issue) => (issue.field === 'client' || /^lines\.\d+$/.test(issue.field)) && !!issue.candidates?.length;
+
+/** An order still being completed: what is known so far, with ❓ where something is missing. */
+export function orderDraft(draft: OrderDraft, issues: Issue[], it: boolean, client?: Client) {
+  const open = new Set(issues.map(issue => issue.field));
+  const lines = [it ? '📝 Bozza ordine' : '📝 Draft order', rule, ''];
+  if (client) lines.push(`🏪 ${client.name}`, ...(client.vatNumber ? [`🧾 ${it ? 'P. IVA' : 'VAT'} ${client.vatNumber}`] : []), `📍 ${place(client)}`);
+  else {
+    const name = draft.newClient?.name ?? draft.clientQuery.trim();
+    lines.push(`🏪 ${name ? `${name}${draft.newClient ? (it ? ' (nuovo)' : ' (new)') : ''} ❓` : '❓'}`);
+  }
+  lines.push('', it ? '🧴 Prodotti' : '🧴 Products');
+  if (!draft.lines.length) lines.push('❓');
+  for (const [index, line] of draft.lines.entries()) {
+    const unsure = [...open].some(field => field === `lines.${index}` || field === `lines.${index}.documentPrice`);
+    const quantity = line.quantity === undefined ? '❓' : String(line.quantity);
+    const price = line.netPrice === undefined ? '' : ` — ${money(line.netPrice, it)}`;
+    lines.push(`${quantity} × ${line.query}${price}${unsure ? ' ❓' : ''}`);
+  }
+  lines.push('', `🚚 ${it ? 'Consegna' : 'Delivery'}: ${draft.shippingPrice === undefined ? '❓' : draft.shippingPrice === 0 ? (it ? 'nessuna' : 'none') : money(draft.shippingPrice, it)}`);
+  if (draft.delivery) lines.push(`📦 ${it ? 'Spedire a' : 'Ship to'}: ${draft.delivery.address}${draft.delivery.country ? `, ${draft.delivery.country}` : ' ❓'}`);
+  if (draft.discountPercent > 0) lines.push(`💸 ${it ? 'Sconto' : 'Discount'} ${draft.discountPercent}%`);
+  if (draft.notes.trim()) lines.push('', it ? '📝 Note' : '📝 Notes', draft.notes.trim());
+  const points = [...new Set(issues.map(issue => openPoint(issue, draft, it)))];
+  if (points.length) lines.push('', `❓ ${it ? 'Da completare' : 'To complete'}: ${points.join(' · ')}`);
+  return lines.join('\n');
 }
 
-export function customerPreview(client: Client, it: boolean) {
-  const lines = [it ? '👤 Nuovo cliente' : '👤 New customer', rule, '', `🏪 ${client.name}`, '', `📍 ${place(client)}`];
-  const contact = [client.email ? `✉️ ${client.email}` : '', client.phone ? `📞 ${client.phone}` : ''].filter(Boolean);
+const fieldLabels: Record<string, [string, string]> = {
+  name: ['Nome', 'Name'], street: ['Via', 'Street'], postalCode: ['CAP', 'Postal code'], city: ['Città', 'City'], country: ['Paese', 'Country'],
+  vatNumber: ['Partita IVA', 'VAT number'], taxCode: ['Codice fiscale', 'Tax code'], sdiCode: ['Codice SDI', 'SDI code'],
+  certifiedEmail: ['PEC', 'PEC (certified email)'], phone: ['Telefono', 'Phone'], email: ['Email', 'Email'],
+};
+const fieldLabel = (field: string, it: boolean) => fieldLabels[field]?.[it ? 0 : 1] ?? field;
+
+/** Details Fatture in Cloud accepts but does not require. SDI and PEC apply to Italian customers, assumed when no country is given. */
+export function optionalCustomerFields(client: Partial<NewCustomer>, it: boolean) {
+  const italian = !client.country || client.country === 'IT';
+  const fields: string[] = (['street', 'postalCode', 'city', 'country'] as const).filter(field => !client[field]).map(field => fieldLabel(field, it));
+  if (!client.vatNumber && !client.taxCode) fields.push(`${fieldLabel('vatNumber', it)} / ${fieldLabel('taxCode', it).toLowerCase()}`);
+  if (italian && !client.sdiCode) fields.push(fieldLabel('sdiCode', it));
+  if (italian && !client.certifiedEmail) fields.push(fieldLabel('certifiedEmail', it));
+  if (!client.phone) fields.push(fieldLabel('phone', it));
+  if (!client.email) fields.push(fieldLabel('email', it));
+  return fields;
+}
+
+/** A customer request that matched an existing customer: nothing is created. */
+export function existingCustomer(client: { id: number; name: string }, it: boolean) {
+  return it ? `Cliente già presente: ${client.name} (ID ${client.id}). Nessun nuovo cliente creato.` : `Customer already exists: ${client.name} (ID ${client.id}). No new customer created.`;
+}
+
+/** A new customer: complete and ready to confirm, or a draft with the details still missing. */
+export function customerPreview(client: Partial<NewCustomer>, it: boolean, missing: string[] = []) {
+  const address = place(client);
+  const lines = [it ? '👤 Nuovo cliente' : '👤 New customer', rule, '', `🏪 ${client.name ?? '❓'}`, ...(address ? ['', `📍 ${address}`] : [])];
+  const contact = [client.email ? `✉️ ${client.email}` : '', client.certifiedEmail ? `📨 PEC ${client.certifiedEmail}` : '', client.phone ? `📞 ${client.phone}` : ''].filter(Boolean);
   if (contact.length) lines.push('', ...contact);
   const tax = [
     client.vatNumber ? `🧾 ${it ? 'P. IVA' : 'VAT'} ${client.vatNumber}` : '',
@@ -68,22 +100,25 @@ export function customerPreview(client: Client, it: boolean) {
     client.sdiCode ? `🔢 SDI ${client.sdiCode}` : '',
   ].filter(Boolean);
   if (tax.length) lines.push('', ...tax);
-  if (client.notes.trim()) lines.push('', it ? '📝 Note' : '📝 Notes', client.notes.trim());
-  lines.push('', ...(it
-    ? ['Rispondi con le correzioni.', 'Usa il pulsante Conferma e salva (oppure /confermacliente)', '/annulla per annullare']
-    : ['Reply with corrections.', 'Use Confirm and save (or /confirmcustomer)', '/cancel to cancel']));
+  if (client.notes?.trim()) lines.push('', it ? '📝 Note' : '📝 Notes', client.notes.trim());
+  if (missing.length) {
+    lines.push('', `❓ ${it ? 'Da completare' : 'To complete'}: ${missing.map(field => fieldLabel(field, it).toLowerCase()).join(' · ')}`);
+    return lines.join('\n');
+  }
+  const optional = optionalCustomerFields(client, it);
+  if (optional.length) lines.push('', it ? '➕ Facoltativi, puoi aggiungere:' : '➕ Optional, you can add:', ...optional.map(field => `• ${field}`));
+  if (!client.street || !client.city || !client.postalCode || !client.country) lines.push('', it ? 'ℹ️ Per fare un ordine servono indirizzo e paese.' : 'ℹ️ Orders need the address and country.');
   return lines.join('\n');
 }
 
-/** Things the operator should look at before confirming; they never block saving. */
-export type Review = { tierName?: string; discrepancies?: Discrepancy[]; warnings?: string[] };
 
 function day(date: string, it: boolean) {
   const [y, m, d] = date.split('-');
   return y && m && d ? (it ? `${d}/${m}/${y}` : date) : date;
 }
 
-export function orderPreview(order: PreparedOrder, totals: Totals, it: boolean, canSave: boolean, review: Review = {}) {
+/** A complete order ready to confirm. Price differences from earlier orders are shown to check; they never block saving. */
+export function orderPreview(order: PreparedOrder, totals: Totals, it: boolean, discrepancies: Discrepancy[] = []) {
   const goods = order.lines.filter(line => !line.shipping);
   const shipping = order.lines.filter(line => line.shipping);
   const rates = [...new Set(order.lines.map(line => `${line.vatRate}%${line.nature ? ` ${line.nature}` : ''}`))];
@@ -94,19 +129,11 @@ export function orderPreview(order: PreparedOrder, totals: Totals, it: boolean, 
     const discount = line.discountPercent > 0 ? ` — ${line.discountPercent}% ${it ? 'sconto' : 'discount'}` : '';
     lines.push(`${line.quantity} × ${line.name} — ${money(line.netPrice, it)}${discount}`);
   }
-  if (review.tierName) lines.push('', `🏷️ ${it ? 'Prezzi' : 'Prices'}: ${it ? 'listino' : 'price list'} ${review.tierName}`);
   lines.push('', it ? '💶 Totali' : '💶 Totals', `${it ? 'Imponibile' : 'Net'} ${money(totals.net, it)}`, `${it ? 'IVA' : 'VAT'} ${rates.join(', ')} ${money(totals.vat, it)}`, `${it ? 'Totale' : 'Total'} ${money(totals.gross, it)}`);
   if (order.notes.trim()) lines.push('', it ? '📝 Note' : '📝 Notes', order.notes.trim());
-  const checks = [
-    ...(review.warnings ?? []),
-    ...(review.discrepancies ?? []).map(d => it
+  const checks = discrepancies.map(d => it
       ? `${d.name}: ora ${money(d.now, it)}, ordine precedente ${money(d.before, it)} (#${d.order.number}, ${day(d.order.date, it)})`
-      : `${d.name}: now ${money(d.now, it)}, previous order ${money(d.before, it)} (#${d.order.number}, ${day(d.order.date, it)})`),
-  ];
+      : `${d.name}: now ${money(d.now, it)}, previous order ${money(d.before, it)} (#${d.order.number}, ${day(d.order.date, it)})`);
   if (checks.length) lines.push('', it ? '⚠️ Da verificare' : '⚠️ To check', ...checks.map(c => `• ${c}`));
-  const actions = it
-    ? ['Rispondi con le modifiche.', canSave ? 'Usa Conferma e salva per ricevere il PDF (oppure /confermaordine)' : '/review per segnare il controllo', '/annulla per annullare']
-    : ['Reply with changes.', canSave ? 'Use Confirm and save to receive the PDF (or /confirmorder)' : '/review to mark it checked', '/cancel to cancel'];
-  lines.push('', ...actions);
   return lines.join('\n');
 }

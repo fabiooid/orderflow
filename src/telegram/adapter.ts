@@ -90,25 +90,14 @@ export function groupAlbums<T>(updates: T[]): T[][] {
   return groups;
 }
 
-export function startsOrder(text: string) {
-  return /^(?:(?:per favore|please)\s+)?(?:crea|creare|prepara|vorrei creare|vorrei fare|create|prepare|make)\s+(?:(?:un|un nuovo|a|a new|an)\s+)?(?:ordine|order)\b/i.test(text.trim());
-}
-
-/** Commands addressed to another bot are not commands for this one. */
-export function parseCommand(text: string, botUsername: string) {
-  const token = text.split(/\s/, 1)[0]!;
-  const at = token.indexOf('@');
-  const name = token.slice(1, at < 0 ? undefined : at);
-  if (!token.startsWith('/') || !name || (at >= 0 && token.slice(at + 1) !== botUsername)) return undefined;
-  return { name, text: text.slice(token.length).trim() };
-}
-
 export type OrderLink = { orderId: string; revision: number };
 
-const callbackActions = { save: 'confirmOrder', customer: 'confirmCustomer', cancel: 'cancel' } as const;
-/** Command equivalents, recorded as the button press's incoming text. */
-const callbackLabels = { save: '/confermaordine', customer: '/confermacliente', cancel: '/annulla' } as const;
+const callbackActions = { save: 'confirmOrder', customer: 'confirmCustomer', review: 'review', cancel: 'cancel', cancelall: 'cancelAll' } as const;
+/** What a button press is recorded as in the conversation: the button's own label. */
+const callbackLabels = { save: '✅ Conferma e salva', customer: '✅ Conferma e salva', review: '👀 Controllato', cancel: '❌ Annulla', cancelall: '🗑 Annulla tutte' } as const;
 export const callbackData = (action: keyof typeof callbackActions, link: OrderLink) => `${action}:${link.orderId}:${link.revision}`;
+/** A candidate button under a draft: the request revision, the field it settles and the record picked. */
+export const pickData = (link: OrderLink, field: string, id: number) => `pick:${link.orderId}:${link.revision}:${field}:${id}`;
 
 /** Callback payload is a revision-bound capability, checked against our stored message link. */
 export function normalizeCallback(input: unknown, config: AppConfig) {
@@ -126,7 +115,13 @@ export function normalizeCallback(input: unknown, config: AppConfig) {
     const event: MessageEvent = { ...base, text: accept ? '✅' : '✖️' };
     return { id: q.id, messageId: q.message.message_id, event, action: { kind: 'pending', message: Number(media[1]), accept } as const };
   }
-  const match = /^(save|customer|cancel):([a-zA-Z0-9_-]+):(\d+)$/.exec(q.data);
+  const pick = /^pick:([a-zA-Z0-9_-]+):(\d+):(client|lines\.\d+):(\d+)$/.exec(q.data);
+  if (pick) {
+    const target: OrderLink = { orderId: pick[1]!, revision: Number(pick[2]) };
+    const choice = { field: pick[3]!, id: Number(pick[4]) };
+    return { id: q.id, messageId: q.message.message_id, target, event: { ...base, text: `👉 ${choice.field}: ${choice.id}` }, action: { kind: 'pick', target, choice } as const };
+  }
+  const match = /^(save|customer|review|cancel|cancelall):([a-zA-Z0-9_-]+):(\d+)$/.exec(q.data);
   if (!match) return undefined;
   const button = match[1] as keyof typeof callbackActions;
   const target: OrderLink = { orderId: match[2]!, revision: Number(match[3]) };

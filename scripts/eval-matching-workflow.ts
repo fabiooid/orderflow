@@ -1,10 +1,8 @@
 import { readFile } from 'node:fs/promises';
-import { Mastra } from '@mastra/core';
-import { LibSQLStore } from '@mastra/libsql';
 import { configSchema } from '../src/config/schema.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { draftSchema } from '../src/domain/types.js';
-import { createOrderWorkflow } from '../src/assistant/workflow.js';
+import { createDraftApi } from '../src/assistant/drafts.js';
 import { createIdentityResolver } from '../src/matching/resolver.js';
 import { loadMatchingConfig } from '../src/matching/config.js';
 import { matchingFixtures } from '../src/matching/fixtures.js';
@@ -26,23 +24,15 @@ async function main() {
     const draft = draftSchema.parse({ clientQuery: fixture.request.kind === 'client' ? query : 'Example Studio',
       lines: [{ query: fixture.request.kind === 'product' ? query : 'Amber hand wash 250 ml', quantity: 2 }], shippingPrice: 8 });
     const text = `Prepare an order for ${draft.clientQuery}: ${draft.lines[0]!.query}, two pieces; delivery eight euros.`;
-    const storage = new LibSQLStore({ id: `jev-eval-${fixture.name}`, url: ':memory:' });
-    try {
-      const workflow = createOrderWorkflow(app, connector, async () => draft, undefined, createIdentityResolver(app, connector, { config: matching }));
-      const mastra = new Mastra({ storage, workflows: { prepareOrder: workflow } });
-      const run = await mastra.getWorkflow('prepareOrder').createRun();
-      const outcome = await run.start({ inputData: { orderId: `eval-${fixture.name}`, text, date: '2026-10-08' } });
-      let actual: number | string = outcome.status;
-      if (outcome.status === 'success') actual = fixture.request.kind === 'client' ? outcome.result.order.client.id ?? 'missing-client' : outcome.result.order.lines[0]!.productId;
-      else if (outcome.status === 'suspended') {
-        const step = outcome.steps['prepare-order'];
-        const payload = step && 'suspendPayload' in step ? step.suspendPayload as { decisions: { field: string; status: string }[] } : undefined;
-        actual = payload?.decisions.find(d => d.field === (fixture.request.kind === 'client' ? 'client' : 'lines.0'))?.status ?? 'missing-decision';
-      }
-      const ok = actual === fixture.expected && connector.createCalls === 0;
-      passed += Number(ok);
-      console.log(JSON.stringify({ case: fixture.name, expected: fixture.expected, actual, passed: ok }));
-    } finally { await storage.close(); }
+    const drafts = createDraftApi(app, connector, createIdentityResolver(app, connector, { config: matching }));
+    const outcome = await drafts.order(draft, { orderId: `eval-${fixture.name}`, revision: 1, operatorText: text }, '2026-10-08');
+    const field = fixture.request.kind === 'client' ? 'client' : 'lines.0';
+    const actual: number | string = outcome.status === 'ready'
+      ? fixture.request.kind === 'client' ? outcome.order.client.id ?? 'missing-client' : outcome.order.lines[0]!.productId
+      : outcome.decisions.find(d => d.field === field)?.status ?? 'missing-decision';
+    const ok = actual === fixture.expected && connector.createCalls === 0;
+    passed += Number(ok);
+    console.log(JSON.stringify({ case: fixture.name, expected: fixture.expected, actual, passed: ok }));
   }
   console.log(JSON.stringify({ passed, total: matchingFixtures.length }));
   if (passed !== matchingFixtures.length) process.exitCode = 1;

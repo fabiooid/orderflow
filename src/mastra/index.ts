@@ -10,8 +10,6 @@ import { telegramMemoryUrl } from '../telegram/store.js';
 import { FattureInCloudConnector } from '../connector/fatture-in-cloud.js';
 import { DemoConnector } from '../connector/demo.js';
 import { createOrderAgent } from '../assistant/agent.js';
-import { createOrderWorkflow } from '../assistant/workflow.js';
-import { exactOrderScorer } from '../assistant/scorers.js';
 import { liveEvalSettings } from '../assistant/live-evals.js';
 import { createDeliveredReplyWorkflow } from '../telegram/evaluation.js';
 import { createMediaAgents, modelVision } from '../telegram/media.js';
@@ -36,14 +34,14 @@ const storageUrl = configuredUrl.startsWith('file:') && !configuredUrl.startsWit
 const storage = new LibSQLStore({ id: 'assistant-storage', url: storageUrl });
 const connector = mode === 'read-only' ? FattureInCloudConnector.fromToken(config.companyId, process.env.FIC_ACCESS_TOKEN ?? '') : new DemoConnector();
 const live = liveEvalSettings();
-const { agent, extract, matching, scorers: manualScorers } = createOrderAgent(config, connector, storage, live);
-const workflow = createOrderWorkflow(config, connector, extract, undefined, matching);
+// Studio chat uses the same order and customer APIs as Telegram; they validate only, and Studio has no save buttons.
+const { agent, scorers: manualScorers } = createOrderAgent(config, connector, storage, live);
 const deliveredReply = createDeliveredReplyWorkflow(manualScorers, live);
 // The media readers and the order-form workflow can be tried and inspected in Studio too.
 const { mediaReader, formReader } = createMediaAgents(config);
 const readOrderForm = createOrderFormWorkflow(config.orderForms, modelVision(formReader));
 export const mastra = new Mastra({
   observability: new Observability({ configs: { default: { serviceName: 'orderflow', exporters: [new MastraStorageExporter()], spanOutputProcessors: [omitMedia] } } }),
-  storage, agents: { orderAssistant: agent, mediaReader, formReader }, workflows: { prepareOrder: workflow, deliveredReply, readOrderForm },
-  scorers: Object.fromEntries([exactOrderScorer, ...Object.values(orderFormScorers), ...Object.values(manualScorers)].map(scorer => [scorer.id, scorer])),
+  storage, agents: { orderAssistant: agent, mediaReader, formReader }, workflows: { deliveredReply, readOrderForm },
+  scorers: Object.fromEntries([...Object.values(orderFormScorers), ...Object.values(manualScorers)].map(scorer => [scorer.id, scorer])),
 });

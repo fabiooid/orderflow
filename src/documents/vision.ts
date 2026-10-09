@@ -1,6 +1,7 @@
 import type { Agent } from '@mastra/core/agent';
 import type { z } from 'zod';
 import { tracingContext } from '../assistant/execution-trace.js';
+import { reasoning } from '../assistant/reasoning.js';
 import type { Read, Vision } from './contract.js';
 
 export const READER_INSTRUCTIONS = `You transcribe files that internal staff forwarded to an order assistant: screenshots of customer chats or emails, photos, scans and PDFs.
@@ -24,7 +25,7 @@ export function modelReader(agent: Agent): Read {
       ...files.map(f => f.mimeType === 'application/pdf'
         ? { type: 'file' as const, data: f.data, mediaType: f.mimeType, filename: 'document.pdf' }
         : { type: 'image' as const, image: f.data, mediaType: f.mimeType, providerOptions: detail }),
-    ] }], { tracingContext: tracingContext() });
+    ] }], { tracingContext: tracingContext(), providerOptions: reasoning('low') });
     if (response.finishReason === 'length') throw new Error('Incomplete document reading');
     return response.text.trim();
   };
@@ -33,7 +34,7 @@ export function modelReader(agent: Agent): Read {
 /** Structured answers about images, used to identify and read order forms. */
 export function modelVision(agent: Agent): Vision {
   return async <T extends z.ZodType>(images: Buffer[], prompt: string, schema: T) => {
-    const response = await agent.generate([{ role: 'user', content: [{ type: 'text', text: prompt }, ...images.map(image => ({ type: 'image' as const, image, mediaType: 'image/png', providerOptions: detail }))] }], { tracingContext: tracingContext(), structuredOutput: { schema } });
+    const response = await agent.generate([{ role: 'user', content: [{ type: 'text', text: prompt }, ...images.map(image => ({ type: 'image' as const, image, mediaType: 'image/png', providerOptions: detail }))] }], { tracingContext: tracingContext(), providerOptions: reasoning('low'), structuredOutput: { schema } });
     if (response.finishReason === 'length') throw new Error('Incomplete document reading');
     return schema.parse(response.object) as z.infer<T>;
   };

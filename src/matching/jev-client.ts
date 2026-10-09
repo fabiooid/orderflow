@@ -65,9 +65,11 @@ export function createJevSelector(config: MatchingConfig, transport?: JudgmentTr
       const answer = parsedResponse.data.answers.selection;
       const keys = Object.keys(options);
       const values = Object.values(answer.probabilities);
+      // Probabilities arrive rounded to 2 decimals; each non-zero value can drift the sum by up to 0.005.
+      const tolerance = Math.max(0.01, 0.005 * values.filter(p => p > 0).length) + 1e-9;
       if (!keys.includes(answer.choice) || keys.length !== values.length ||
           keys.some(key => !Object.hasOwn(answer.probabilities, key)) ||
-          Math.abs(values.reduce((sum, p) => sum + p, 0) - 1) > 0.01 ||
+          Math.abs(values.reduce((sum, p) => sum + p, 0) - 1) > tolerance ||
           answer.probabilities[answer.choice]! < Math.max(...values)) {
         return result('unavailable', 'invalid-response');
       }

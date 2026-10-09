@@ -10,12 +10,14 @@ retry orders, alter replies or send customer messages.
 - `EVALS_ENABLED=true` enables attachments. Set `false` for manual-only operation.
 - `EVALS_SAMPLE_RATE=0.1` is the default: each scorer samples 10% of eligible runs. Set `1` to score every eligible run. Manual evaluation remains available.
 - Restart the Telegram runner and reload Studio after changing these settings.
-- Tool accuracy and workflow adherence attach to actual model runs, including
-  routing/extraction. Internal question-wording calls are excluded.
+- Tool accuracy and workflow adherence attach to every agent run, including each
+  Telegram turn.
 - Studio conversational runs also have the four text/conversation checks.
-- Telegram text/conversation checks run on the **delivered reply**, not internal
-  routing/extraction JSON. The `telegram-delivered-reply` workflow has a single
-  evidence step with native `scorers` attachments. It includes the last 100 stored
+- Telegram text/conversation checks run on the **delivered reply** as the conversation
+  remembers it: the agent's own words, with application-written text (drafts, summaries,
+  confirmations) reduced to a labelled `[Application message: …]` first line. The full
+  draft or summary is in the evidence metadata. The `telegram-delivered-reply` workflow has a single
+  evidence step with native `scorers` attachments. It includes the configured `memory.lastMessages` stored
   group messages, operator IDs, the actual reply and available application state
   (draft, summary, saved-order identity, confirmed customer-save status).
 - Delivered-reply scores use matching `telegram-` IDs and names (to avoid duplicate Studio listings) so they can be
@@ -33,10 +35,11 @@ If Telegram times out on this machine's dual-stack network, the verified startup
 node --dns-result-order=ipv4first --env-file-if-exists=.env --import tsx scripts/telegram.ts
 ```
 
-There are two Mastra workflows: `prepare-order` extracts, validates, calculates and
-suspends/resumes for missing details; `telegram-delivered-reply` exposes delivered
-conversation evidence to native background scorers. Customer/order saving remains
-in the existing confirmation-controlled application code.
+Each Telegram message is one agent turn. The agent calls the order and customer APIs
+(`prepare-order`, `prepare-customer`), which validate, resolve identities and calculate
+totals but never write; their trace spans are `Resolve identities` and `Prepare order`.
+The `telegram-delivered-reply` workflow exposes delivered conversation evidence to native
+background scorers. Saving stays in the button-confirmed application code.
 
 ## Deployment limitation: best-effort scoring
 
@@ -114,7 +117,7 @@ events nor assumes that a trace includes the whole request.
 Choose a later conversational agent trace that contains the relevant remembered
 history for context/correction checks. Without a user follow-up after an assistant
 reply those checks return **not scorable**, without spending on the judge. Missing
-user/assistant text and structured extraction outputs are also skipped by style
+user/assistant text and structured outputs are also skipped by style
 checks. Imported Telegram placeholders cannot recover the original conversation.
 New delivered-reply evaluations include application summaries and available save
 state. Older imported placeholders still cannot recover absent data. Tool/API
@@ -176,13 +179,24 @@ npm run eval:acceptance -- --offline
 npm run eval:acceptance
 ```
 
-Both use Mastra `runEvals` and the `acceptance-exact-order` deterministic scorer. The six cases cover Italian and English orders, a quantity correction, a custom unit price, discount excluding delivery, and missing delivery confirmation. Expected customer, products, quantities, net prices, discounts, VAT IDs, delivery country, totals and clarification fields are checked exactly. Score 1 means every checked field matches; 0 prints the mismatch. It is not a model judge's opinion.
+Both replay the messages through the real Telegram controller and engine (`src/evals/acceptance.ts`, run by the shared harness in `src/evals/harness.ts`) and compare the outcome exactly. The six cases cover Italian and English orders, a quantity correction, a custom unit price, discount excluding delivery, and missing delivery confirmation. Expected customer, products, quantities, net prices, discounts, VAT IDs, delivery country, totals and clarification fields are checked exactly. Score 1 means every checked field matches; 0 prints the mismatch. It is not a model judge's opinion.
 
-Offline mode supplies scripted extraction, so it checks application behavior only. The second command uses the actual agent and its tools against the fictional `DemoConnector` and makes paid model calls. Set `EVAL_AGENT_MODEL` to compare models. It ignores business configuration and never writes FIC records or messages Telegram. Each run uses a temporary memory database, preventing prior evaluations from influencing it.
+Offline mode replaces the model with each case's scripted drafts, so it checks application behavior only. The second command uses the actual agent against the fictional `DemoConnector` and makes paid model calls. With `JEV_MODE=on` the order API resolves identities as in Telegram, so JEV calls are made too. Set `EVAL_AGENT_MODEL` to compare models. It ignores business configuration and never writes FIC records or messages Telegram. Each run uses a temporary memory database, preventing prior evaluations from influencing it.
 
-These cases do not certify media accuracy, Telegram routing, actual save permissions or every VAT scenario. The offline Vitest suite separately tests confirmation/revisions, duplicate prevention, alias persistence, PDF page rendering and recovery. `eval:orderforms` measures real document reading. A supervised live order remains the final integration check.
+These cases do not certify media accuracy, conversational understanding, actual save permissions or every VAT scenario. The offline Vitest suite separately tests confirmation/revisions, duplicate prevention, alias persistence, PDF page rendering and recovery. `eval:orderforms` measures real document reading. A supervised live order remains the final integration check.
 
-Initial baseline, 7 October 2026: `openai/gpt-5-mini` passed five of six cases on the first full run. The custom-price case left the customer unresolved. An isolated retry passed, so the precise cause was not established. Existing-customer guidance was clarified, and the next full run passed six of six. Treat this as a small, nondeterministic baseline, not a reliability percentage. Failed runs now print the fictional extracted draft for diagnosis. Use `--case custom-price` to rerun one scenario.
+Initial baseline, 7 October 2026: `openai/gpt-5-mini` passed five of six cases on the first full run. The custom-price case left the customer unresolved. An isolated retry passed, so the precise cause was not established. Existing-customer guidance was clarified, and the next full run passed six of six. Treat this as a small, nondeterministic baseline, not a reliability percentage. Failed runs print the fictional draft for diagnosis. Use `--case custom-price` to rerun one scenario.
+
+## Conversations with the live agent
+
+```sh
+npm run eval:conversations
+npm run eval:conversations -- --case pick-size-with-button
+```
+
+Replays multi-turn group conversations, modelled on real failures, through the real controller, engine and agent with fictional data (`src/evals/conversations.ts`). Both suites share one harness: `--case <id>` runs one case, `--offline` uses scripted drafts where a case has them, and up to four cases run at once. Cases cover an email screenshot whose customer the operator overrides, "this order but change the client", an unnamed change (the agent must ask), cancelling in words, creating and editing a customer, an existing customer, a candidate picked with a button, a price correction, a catalogue question mid-order, an off-topic message and an English request. Each case checks the resulting request deterministically: customer, lines and no give-up reply. Notes and delivery are left to the agent's judgement, since the operator reviews them in the draft. Model charges apply; nothing is written or sent.
+
+On 9 October 2026, `openai/gpt-5-mini` passed 14 of 14 after the prompt and API fixes it prompted. Like the acceptance cases, it is a small nondeterministic sample.
 
 ## Interpreting live traces
 
@@ -197,7 +211,7 @@ These sources describe different execution contexts; seeing all three is expecte
 and does not by itself indicate duplicate processing or duplicate scoring. Demo
 Studio uses its separate configured database.
 
-New polling turns have a native Mastra **Telegram turn** parent span, with the Telegram update ID and final request ID/revision/state. Agent calls, preparation workflows, FIC reads/writes and Telegram delivery share its trace. Confirmed-save spans record the confirmed revision. SDK errors are sanitized and media bytes are omitted. Separate turns remain separate traces; use the request ID to follow an order across turns.
+New polling turns have a native Mastra **Telegram turn** parent span. Its metadata carries status labels for filtering: `updateId`, `orderId`, `revision`, `state` (`new`, `suspended`, `ready`, `reviewed`, `saving`, `saved`, `cancelled`), `activeOrderId` (the open request when the update arrived, also on refusals), `cancelled` (how many other requests the turn voided) and `delivered`. Agent calls, preparation workflows, FIC reads/writes and Telegram delivery share its trace. Confirmed-save spans record the confirmed revision. SDK errors are sanitized and media bytes are omitted. Separate turns remain separate traces; use the request ID to follow an order across turns.
 
 Historical/imported transport records remain distinct and cannot reconstruct model calls or API operations that were never recorded. Their timestamps and duration are not evidence of historical execution timing.
 
@@ -215,8 +229,7 @@ accuracy is claimed by the offline regression suite.
 ### JEV workflow integration
 
 `JEV_MODE=on npm run eval:matching:workflow` sends fictional product/customer cases
-through the same native resolution and preparation workflow used by Telegram and
-Studio. Extraction is scripted; JEV calls are real and billed normally. No FIC or
+through the same order API used by Telegram and Studio. Drafts are scripted; JEV calls are real and billed normally. No FIC or
 Telegram access or writes occur. Ten cases passed on 8 October 2026; this is smoke
 evidence, not held-out calibration. `npm test` covers authoritative IDs, explicit
-choices, shadow/off, resume, original routing text, alias guards, and failures.
+button choices, shadow/off, re-resolution, operator-text evidence, alias guards, and failures.

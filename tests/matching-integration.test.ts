@@ -1,13 +1,10 @@
 import { expect, it, vi } from 'vitest';
-import { Mastra } from '@mastra/core';
-import { LibSQLStore } from '@mastra/libsql';
 import { createIdentityResolver, type SelectMany } from '../src/matching/resolver.js';
 import { matchingConfigSchema } from '../src/matching/config.js';
 import { createJevBatchSelector } from '../src/matching/jev-client.js';
 import type { SelectionResult } from '../src/matching/types.js';
 import { DemoConnector } from '../src/connector/demo.js';
-import { createOrderWorkflow } from '../src/assistant/workflow.js';
-import { createOrderAgent } from '../src/assistant/agent.js';
+import { createDraftApi } from '../src/assistant/drafts.js';
 import { config, draft } from './helpers.js';
 
 const on = matchingConfigSchema.parse({ mode: 'on' });
@@ -124,44 +121,30 @@ it('new clients require a complete no-match; semantic duplicate or outage preven
   expect(missing.issues).toEqual([]);
 });
 
-it('the shared native workflow re-resolves resumes and never calculates totals for unresolved identities', async () => {
+it('the order API re-resolves every call and never calculates totals for unresolved identities', async () => {
   const connector = new DemoConnector(); const totals = vi.spyOn(connector, 'calculateTotals');
   const select = vi.fn<SelectMany>().mockImplementationOnce(async requests => requests.map(() => result('ambiguous'))).mockImplementation(successful);
-  const storage = new LibSQLStore({ id: 'jev-workflow', url: ':memory:' });
-  const matching = resolver(connector, select);
-  const workflow = createOrderWorkflow(config(), connector, async () => ({ ...draft(), clientId: 202 }), undefined, matching);
-  const mastra = new Mastra({ storage, workflows: { prepareOrder: workflow } });
-  try {
-    const run = await mastra.getWorkflow('prepareOrder').createRun();
-    const first = await run.start({ inputData: { orderId: 'test', text: context.operatorText, date: '2026-10-08' } });
-    expect(first.status).toBe('suspended'); expect(totals).not.toHaveBeenCalled();
-    const next = await run.resume({ step: 'prepare-order', resumeData: { draft: { ...draft(), clientId: 202 }, operatorText: 'Use the small amber wash for the example shop', revision: 2 } });
-    expect(next.status).toBe('success');
-    if (next.status === 'success') {
-      expect(next.result.order.client.id).toBe(201);
-      expect(next.result.order.lines[0]?.productId).toBe(101);
-      expect(next.result.decisions).toHaveLength(2);
-    }
-    expect(select).toHaveBeenCalledTimes(2); expect(connector.createCalls).toBe(0);
-  } finally { await storage.close(); }
+  const drafts = createDraftApi(config(), connector, resolver(connector, select));
+  const first = await drafts.order({ ...draft(), clientId: 202 }, context, '2026-10-08');
+  expect(first.status).toBe('needs'); expect(totals).not.toHaveBeenCalled();
+  const next = await drafts.order({ ...draft(), clientId: 202 }, { ...context, operatorText: 'Use the small amber wash for the example shop', revision: 2 }, '2026-10-08');
+  expect(next.status).toBe('ready');
+  if (next.status === 'ready') {
+    expect(next.order.client.id).toBe(201);
+    expect(next.order.lines[0]?.productId).toBe(101);
+    expect(next.decisions).toHaveLength(2);
+  }
+  expect(select).toHaveBeenCalledTimes(2); expect(connector.createCalls).toBe(0);
 });
 
-it('Studio and Telegram agent expose authoritative lookup tools only in on mode', async () => {
-  const storage = new LibSQLStore({ id: 'jev-tools', url: ':memory:' });
-  try {
-    const agent = createOrderAgent(config(), new DemoConnector(), storage, { enabled: false, rate: 0 }, { config: on, selectMany: successful }).agent;
-    expect(Object.keys(await agent.listTools())).toEqual(expect.arrayContaining(['resolveProduct', 'resolveClient']));
-  } finally { await storage.close(); }
-});
-
-it('explicit operator choices bypass the model but remain limited to current records', async () => {
+it('operator button choices bypass the model but remain limited to current records', async () => {
   const connector = new DemoConnector(); const select = vi.fn(successful);
   const input = { ...draft(), lines: [{ query: 'wash', productId: 102, quantity: 2, documentPrice: { amount: 9, basis: 'net' as const, decision: 'document' as const } }] };
   const r = resolver(connector, select);
-  const resolved = await r.resolve(input, { ...context, latestOperatorText: 'line 1: 101' });
+  const resolved = await r.resolve(input, { ...context, choice: { field: 'lines.0', id: 101 } });
   expect(resolved.draft.lines[0]).toMatchObject({ productId: 101, quantity: 2, documentPrice: { decision: 'pending' } });
   expect(resolved.decisions[1]?.source).toBe('operator');
-  const missing = await r.resolve(input, { ...context, latestOperatorText: 'line 1: 999999' });
+  const missing = await r.resolve(input, { ...context, choice: { field: 'lines.0', id: 999999 } });
   expect(missing.issues.some(i => i.field === 'lines.0')).toBe(true);
   expect(missing.draft.lines[0]?.productId).toBeUndefined();
 });
@@ -181,10 +164,10 @@ it('an explicit code cannot silently turn into a different size or a tester', as
 it('keeps explicit choices stable through quantity/price changes and invalidates changed identity data', async () => {
   const { confirmedChoices } = await import('../src/matching/resolver.js');
   const connector = new DemoConnector(); const select = vi.fn(successful); const r = resolver(connector, select);
-  const first = await r.resolve({ ...draft(), lines: [{ query: 'wash', quantity: 2 }] }, { ...context, latestOperatorText: 'line 1: 101' });
+  const first = await r.resolve({ ...draft(), lines: [{ query: 'wash', quantity: 2 }] }, { ...context, choice: { field: 'lines.0', id: 101 } });
   const choices = confirmedChoices(first.decisions);
   connector.products[0]!.netPrice = 99;
-  const next = await r.resolve({ ...first.draft, lines: [{ ...first.draft.lines[0]!, quantity: 3 }] }, { ...context, revision: 2, operatorText: 'Make it three', latestOperatorText: 'Make it three', confirmedChoices: choices });
+  const next = await r.resolve({ ...first.draft, lines: [{ ...first.draft.lines[0]!, quantity: 3 }] }, { ...context, revision: 2, operatorText: 'Make it three', confirmedChoices: choices });
   expect(next.draft.lines[0]).toMatchObject({ productId: 101, quantity: 3 });
   expect(next.decisions[1]?.source).toBe('operator');
   expect(select.mock.calls.at(-1)![0].some(r => r.kind === 'product')).toBe(false);
@@ -197,19 +180,13 @@ it('does not calculate totals when fresh preparation data differs from the judge
   const connector = new DemoConnector(); const products = await connector.listProducts();
   vi.spyOn(connector, 'listProducts').mockResolvedValueOnce(products).mockResolvedValue([...products, { id: 993, code: 'OTHER', name: 'Another plausible amber wash', description: '', netPrice: 10 }]);
   const totals = vi.spyOn(connector, 'calculateTotals');
-  const storage = new LibSQLStore({ id: 'jev-snapshot-race', url: ':memory:' });
-  try {
-    const workflow = createOrderWorkflow(config(), connector, async () => draft(), undefined, resolver(connector));
-    const mastra = new Mastra({ storage, workflows: { prepareOrder: workflow } });
-    const run = await mastra.getWorkflow('prepareOrder').createRun();
-    expect((await run.start({ inputData: { orderId: 'freshness', text: context.operatorText, date: '2026-10-08' } })).status).toBe('suspended');
-    expect(totals).not.toHaveBeenCalled();
-  } finally { await storage.close(); }
+  expect((await createDraftApi(config(), connector, resolver(connector)).order(draft(), { ...context, orderId: 'freshness' }, '2026-10-08')).status).toBe('needs');
+  expect(totals).not.toHaveBeenCalled();
 });
 
 it('an explicit ID disambiguates duplicate canonical product names', async () => {
   const connector = new DemoConnector(); connector.products.push({ ...connector.products[0]!, id: 994, code: 'DUPLICATE' });
-  const resolved = await resolver(connector).resolve(draft(), { ...context, operatorText: 'Amber hand wash 250 ml', latestOperatorText: 'line 1: 994' });
+  const resolved = await resolver(connector).resolve(draft(), { ...context, operatorText: 'Amber hand wash 250 ml', choice: { field: 'lines.0', id: 994 } });
   expect(resolved.draft.lines[0]?.productId).toBe(994);
   expect(resolved.decisions[1]?.source).toBe('operator');
 });
@@ -226,4 +203,29 @@ it('excludes a matching VAT record when its city contradicts the requested catal
   expect(select.mock.calls[0]![0][0]!.candidates).toEqual([]);
   expect(resolved.decisions[0]?.status).toBe('no-match');
   expect(resolved.draft.clientId).toBeUndefined();
+});
+
+it('lets the named customer replace a different company read from a document, like a product correction', async () => {
+  const connector = new DemoConnector();
+  connector.clients.push({ id: 300, name: 'Purani Srl', country: 'IT', street: 'Via del Tiziano 13', city: 'San Benedetto del Tronto', postalCode: '63074', vatNumber: '02553330446', notes: '' });
+  const selectMany = vi.fn<SelectMany>(async requests => requests.map(r => result('matched', r.kind === 'client' ? 201 : 101)));
+  const purani = { name: 'Purani Srl', country: 'IT', street: 'Via del Tiziano 13', city: 'San Benedetto del Tronto', postalCode: '63074', vatNumber: '02553330446' };
+  const input = { ...draft(), clientQuery: 'Example Studio', newClient: purani, lines: [] };
+  const resolved = await resolver(connector, selectMany).resolve(input, { ...context, operatorText: 'Order for Example Studio\n[Content read from attachments]\nPurani Srl P.IVA 02553330446' });
+  expect(resolved.issues).toEqual([]);
+  expect(resolved.draft.clientId).toBe(201);
+  expect(resolved.draft.newClient).toBeUndefined();
+  // The same company under a shorter name keeps its document details.
+  const same = await resolver(connector, selectMany).resolve({ ...input, clientQuery: 'Purani' }, { ...context, operatorText: 'Order for Purani' });
+  expect(same.draft.newClient?.vatNumber).toBe('02553330446');
+});
+
+it('reads catalogue litres written as "5lt" so a "5 L" request keeps them as candidates', async () => {
+  const connector = new DemoConnector();
+  connector.products.push({ id: 500, code: 'MS037', name: 'Vetiver di Java Gel Doccia 5lt', description: '', netPrice: 88 },
+    { id: 501, code: 'MS023', name: 'Vetiver di Java Gel Doccia 500ml', description: '', netPrice: 16 });
+  const selectMany = vi.fn<SelectMany>(async requests => requests.map(r => result('matched', r.kind === 'client' ? 201 : 500)));
+  await resolver(connector, selectMany).resolve({ ...draft(), clientId: 201, lines: [{ query: 'Refill 5 L Gel Doccia Vetiver di Java', quantity: 1 }] }, context);
+  const product = selectMany.mock.calls[0]![0].find(r => r.kind === 'product')!;
+  expect(product.candidates.map(c => c.id)).toEqual([500]);
 });
