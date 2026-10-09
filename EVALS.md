@@ -1,7 +1,7 @@
 # OrderFlow evaluations
 
 The six scorer definitions support manual and native Mastra live evaluation.
-Automatic evaluation is enabled by default at 100% of eligible runs. Mastra handles
+Automatic evaluation is enabled by default with each scorer sampling 10% of eligible runs. Mastra handles
 sampling, asynchronous execution and score storage; evaluations never gate saves,
 retry orders, alter replies or send customer messages.
 
@@ -37,6 +37,16 @@ There are two Mastra workflows: `prepare-order` extracts, validates, calculates 
 suspends/resumes for missing details; `telegram-delivered-reply` exposes delivered
 conversation evidence to native background scorers. Customer/order saving remains
 in the existing confirmation-controlled application code.
+
+## Deployment limitation: best-effort scoring
+
+Pending evaluations are held in process memory, without a durable retry queue.
+A crash can therefore leave eligible runs without scores, and restarting does not
+backfill them automatically. Missing scores can also reflect sampling or insufficient
+evidence; they are not passing results. Persisted evidence can be evaluated manually
+when sufficient context was recorded. Do not replay Telegram updates or business
+writes merely to recover missing scores. Durable score dispatch/retry remains a
+future deployment improvement, separate from the existing write-recovery journal.
 
 ## Judge configuration
 
@@ -175,6 +185,17 @@ These cases do not certify media accuracy, Telegram routing, actual save permiss
 Initial baseline, 7 October 2026: `openai/gpt-5-mini` passed five of six cases on the first full run. The custom-price case left the customer unresolved. An isolated retry passed, so the precise cause was not established. Existing-customer guidance was clarified, and the next full run passed six of six. Treat this as a small, nondeterministic baseline, not a reliability percentage. Failed runs now print the fictional extracted draft for diagnosis. Use `--case custom-price` to rerun one scenario.
 
 ## Interpreting live traces
+
+In read-only account mode, Studio and the Telegram runner share the configured
+Telegram memory database, but report under three service names:
+
+- `orderflow`: agent/workflow executions initiated from Studio.
+- `orderflow-telegram`: live Telegram turns and their model, workflow and API spans.
+- `orderflow-telegram-messages`: recorded/imported transport-message traces.
+
+These sources describe different execution contexts; seeing all three is expected
+and does not by itself indicate duplicate processing or duplicate scoring. Demo
+Studio uses its separate configured database.
 
 New polling turns have a native Mastra **Telegram turn** parent span, with the Telegram update ID and final request ID/revision/state. Agent calls, preparation workflows, FIC reads/writes and Telegram delivery share its trace. Confirmed-save spans record the confirmed revision. SDK errors are sanitized and media bytes are omitted. Separate turns remain separate traces; use the request ID to follow an order across turns.
 

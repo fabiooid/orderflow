@@ -1,7 +1,6 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { chdir } from 'node:process';
 import { describe, expect, it, vi } from 'vitest';
 import example from '../config/example.json';
 import { loadConfig } from '../src/config/load.js';
@@ -57,21 +56,11 @@ describe('price tiers', () => {
   });
   it('loads project-relative order forms when Studio changes the working directory', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'forms-'));
-    const previous = process.env.MASTRA_PROJECT_ROOT;
-    const cwd = process.cwd();
     try {
-      await writeFile(join(dir, 'package.json'), JSON.stringify({ name: 'orderflow' }));
       await writeFile(join(dir, 'form.json'), JSON.stringify(tradeForm));
       await writeFile(join(dir, 'config.json'), JSON.stringify({ ...example, priceTiers: [{ id: 'trade', name: 'H', clientIds: [] }], orderForms: ['form.json'] }));
-      process.env.MASTRA_PROJECT_ROOT = join(dir, '.mastra');
-      chdir(tmpdir());
-      expect((await loadConfig(join(dir, 'config.json'))).orderForms[0]?.id).toBe('trade-list');
-    } finally {
-      chdir(cwd);
-      if (previous === undefined) delete process.env.MASTRA_PROJECT_ROOT;
-      else process.env.MASTRA_PROJECT_ROOT = previous;
-      await rm(dir, { recursive: true, force: true });
-    }
+      expect((await loadConfig('config.json', dir)).orderForms[0]?.id).toBe('trade-list');
+    } finally { await rm(dir, { recursive: true, force: true }); }
   });
 });
 
