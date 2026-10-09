@@ -23,6 +23,7 @@ export function askedText(issues: Issue[], draft: OrderDraft, it: boolean, wordi
   return issues.map(issue => {
     const query = lineQuery(issue.field, draft);
     if (issue.matchingStatus === 'unavailable') return it ? 'Il controllo dell’identità non è disponibile. Riprova o indica il codice esatto.' : 'Identity matching is unavailable. Retry or specify the exact code.';
+    if (issue.field === 'client' && issue.matchingStatus === 'ambiguous' && !issue.candidates?.length) return it ? 'Quale cliente intendi? Indica città, partita IVA o un nome più preciso.' : 'Which customer do you mean? Provide the city, VAT number, or a more specific name.';
     if (issue.matchingStatus && issue.candidates?.length) {
       const target = issue.field === 'client' ? (it ? 'cliente' : 'client') : `${it ? 'riga' : 'line'} ${Number(issue.field.split('.')[1]) + 1}`;
       return `${it ? 'Quale identità per' : 'Which identity for'} ${query ?? (it ? 'il cliente' : 'the client')}?\n${issue.candidates.map(c => `${c.id}: ${c.label}`).join('\n')}\n${it ? 'Rispondi' : 'Reply'}: ${target}: ID`;

@@ -1,5 +1,5 @@
-import { withCompleteClientSearch } from './client-search.js';
 import { createHash } from 'node:crypto';
+import { withCompleteClientSearch } from './client-search.js';
 import { z } from 'zod';
 import type { AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
@@ -22,8 +22,8 @@ export const decisionSchema = z.object({
   field: z.string(), status: z.enum(['matched', 'ambiguous', 'no-match', 'unavailable']),
   selectedId: z.number().optional(), queryHash: z.string().optional(), identityHash: z.string().optional(), inputHash: z.string(), candidateHash: z.string(), snapshotHash: z.string().optional(),
   source: z.enum(['exact', 'operator', 'jev']), model: z.string().optional(), confidence: z.number().optional(),
-  requestHash: z.string().optional(), promptVersion: z.string().optional(), reason: z.string().optional(),
-  searchGroups: z.array(z.object({ candidateIds: z.array(z.number()), status: z.enum(['matched', 'ambiguous', 'no-match', 'unavailable']), selectedId: z.number().optional(), evidence: z.unknown() })).optional(),
+  strategy: z.string().optional(), requestHash: z.string().optional(), promptVersion: z.string().optional(), reason: z.string().optional(),
+  searchGroups: z.array(z.object({ candidateCount: z.number().optional(), candidateHash: z.string().optional(), reason: z.string().optional(), status: z.enum(['matched', 'ambiguous', 'no-match', 'unavailable']), selectedId: z.number().optional(), evidence: z.unknown() })).optional(),
   probabilities: z.record(z.string(), z.number()).optional(), elapsedMs: z.number().optional(),
 });
 export type Decision = z.infer<typeof decisionSchema>;
@@ -54,7 +54,7 @@ export function createIdentityResolver(app: AppConfig, connector: OrderConnector
 } = {}) {
   const config = options.config ?? loadMatchingConfig();
   const selectMany = withCompleteClientSearch(options.selectMany ?? createJevBatchSelector(config,
-    config.mode === 'off' ? undefined : sdkTransport(config, process.env.TYPESAFE_API_KEY ?? '')));
+    config.mode === 'off' ? undefined : sdkTransport(config, process.env.TYPESAFE_API_KEY ?? '')), config.largeClientSearch);
 
   async function resolve(input: OrderDraft, context: ResolutionContext): Promise<Resolution> {
     const original = draftSchema.parse(input);
@@ -133,7 +133,7 @@ export function createIdentityResolver(app: AppConfig, connector: OrderConnector
         queryHash: hash(normalize(item.field === 'client' ? draft.clientQuery : item.query)), identityHash: status === 'matched' ? identityHash(item.candidates.find(c => c.id === selectedId)!) : undefined,
         source: item.operator && item.exact ? 'operator' : item.exact ? 'exact' : 'jev', model: result?.evidence.model,
         confidence: result?.evidence.confidence, requestHash: result?.evidence.requestHash, promptVersion: result?.evidence.promptVersion,
-        searchGroups: result?.evidence.groups, probabilities: result?.evidence.probabilities, elapsedMs: result?.evidence.elapsedMs, reason: result?.reason });
+        strategy: result?.evidence.strategy, searchGroups: result?.evidence.groups, probabilities: result?.evidence.probabilities, elapsedMs: result?.evidence.elapsedMs, reason: result?.reason });
       if (config.mode === 'shadow') continue;
       if (item.field === 'client') delete draft.clientId;
       else delete draft.lines[Number(item.field.split('.')[1])]!.productId;
@@ -146,13 +146,13 @@ export function createIdentityResolver(app: AppConfig, connector: OrderConnector
         }
       } else if (!(item.field === 'client' && draft.newClient && status === 'no-match')) {
         issues.push({ field: item.field, matchingStatus: status,
-          message: status === 'unavailable' ? 'Identity matching unavailable or candidate set too large. Retry or specify an exact code.' : 'Clarify the exact identity; no record has been selected.',
+          message: status === 'unavailable' ? 'Identity matching unavailable or candidate set too large. Retry or specify an exact code.' : 'Clarify the exact identity; provide the customer city, VAT number, or a more specific name. No record has been selected.',
           candidates: (result?.clarificationIds ? result.clarificationIds.flatMap(id => item.candidates.filter(c => c.id === id)) : item.candidates).slice(0, 10).map(c => ({ id: c.id, label: [c.code, c.name, c.city, c.country, c.vatNumber].filter(Boolean).join(' — ') })) });
       }
     }
     return { draft: config.mode === 'shadow' ? original : draft, issues, decisions };
   }
-  return { mode: config.mode, policy: `jev-identities-v1:${config.model}`, resolve };
+  return { mode: config.mode, policy: `jev-identities-v2:${config.model}:large-clients=${config.largeClientSearch}`, resolve };
 }
 export type IdentityResolver = ReturnType<typeof createIdentityResolver>;
 
