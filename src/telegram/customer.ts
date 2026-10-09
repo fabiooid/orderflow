@@ -1,19 +1,9 @@
 import { translate, type AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
-import { clientSchema, type OrderDraft } from '../domain/types.js';
+import { customerDetails } from '../domain/customer.js';
 import { sameClient } from '../domain/matching.js';
 import { PreflightFailed, type WriteJournal } from '../storage/write-journal.js';
 import { journalKey, type Conversation } from './store.js';
-
-export function customerDetails(draft: OrderDraft, config: AppConfig) {
-  const parsed = clientSchema.safeParse(draft.newClient);
-  if (!parsed.success) return { error: translate(config, 'Completa nome, indirizzo, città, CAP e paese; verifica il formato di email e codice SDI.', 'Complete name, street, city, postal code and country; check the email and SDI formats.') } as const;
-  const client = parsed.data;
-  const missing = config.clients.requiredFields.filter(field => !client[field]);
-  if (config.clients.sdiCountries.includes(client.country) && !client.sdiCode) return { error: translate(config, 'Manca il codice SDI.', 'SDI code is missing.') } as const;
-  if (missing.length) return { error: translate(config, `Dati mancanti: ${missing.join(', ')}. Non inventare identificativi fiscali.`, `Missing details: ${missing.join(', ')}. Do not invent tax identifiers.`) } as const;
-  return { client } as const;
-}
 
 /** No order or invoice capability is used by this operation. */
 export function customerCreator(config: AppConfig, connector: Pick<OrderConnector, 'listClients' | 'createClient'>, journal: WriteJournal) {

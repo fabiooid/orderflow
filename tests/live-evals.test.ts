@@ -26,13 +26,12 @@ vi.mock('../src/assistant/manual-scorers.js', async () => {
 });
 afterEach(() => { vi.unstubAllEnvs(); observed.calls.length = 0; observed.fail = false; observed.wait = undefined; });
 
-it('filters internal Telegram calls from style checks while retaining tool checks', () => {
+it('scores Telegram agent turns for tool use, and their wording only on the delivered reply', () => {
   const bindings = liveAgentScorers(createManualScorers([]), { enabled: true, rate: 0.5 });
   const eligible = (key: string, requestContext: Record<string, string>) => evaluateScoringPredicate(bindings[key]!.filter!, { requestContext });
-  expect(eligible('conciseness', { evalChannel: 'telegram', evalPurpose: 'routing' })).toBe(false);
-  expect(eligible('languageConsistency', { evalPurpose: 'extraction' })).toBe(false);
-  expect(eligible('toolCallAccuracy', { evalChannel: 'telegram', evalPurpose: 'routing' })).toBe(true);
-  expect(eligible('toolCallAccuracy', { evalPurpose: 'wording' })).toBe(false);
+  expect(eligible('conciseness', { evalChannel: 'telegram', evalPurpose: 'turn' })).toBe(false);
+  expect(eligible('languageConsistency', { evalChannel: 'telegram', evalPurpose: 'turn' })).toBe(false);
+  expect(bindings.toolCallAccuracy!.filter).toBeUndefined();
   expect(eligible('conciseness', {})).toBe(true); // Studio's normal chat
   expect(bindings.conciseness!.sampling).toEqual({ type: 'ratio', rate: 0.5 });
   expect(liveAgentScorers(createManualScorers([]), { enabled: false, rate: 1 })).toEqual({});
@@ -45,9 +44,9 @@ it('native workflow attachments persist scores from delivered text, retain histo
   vi.stubEnv('EVALS_ENABLED', 'true'); vi.stubEnv('EVALS_SAMPLE_RATE', '1');
   const storage = new LibSQLStore({ id: 'live-eval-test', url: ':memory:' });
   const c = config();
-  const engine = createConversationEngine(c, new DemoConnector(), storage, 'demo');
+  const engine = createConversationEngine(c, new DemoConnector(), storage);
   try {
-    await engine.record!(1, { incomingText: 'Five soaps please', senderId: '5', texts: ['Order: five soaps'], replyTo: 1 });
+    await engine.record!(1, { incomingText: 'Five soaps please', senderId: '5', texts: ['Order: five soaps'], agentText: 'Order: five soaps', replyTo: 1 });
     await vi.waitFor(() => expect(observed.calls).toHaveLength(5));
     const scores = await storage.getStore('scores');
     await vi.waitFor(async () => {
@@ -56,7 +55,7 @@ it('native workflow attachments persist scores from delivered text, retain histo
       expect(rows.scores[0]!.score).toBe(1);
     });
     await engine.record!(2, { incomingText: 'No, the address is wrong', senderId: '7', texts: ['Please provide the corrected address'], replyTo: 2,
-      order: { orderId: 'o1', revision: 2, status: 'saved', draft: draftSchema.parse({}), questions: '', policy: 'test', savedOrder: { id: 42, number: '1' } },
+      order: { orderId: 'o1', revision: 2, status: 'saved', draft: draftSchema.parse({}), policy: 'test', savedOrder: { id: 42, number: '1' } },
     });
     await vi.waitFor(() => expect(observed.calls).toHaveLength(10));
     const correction = observed.calls.filter(c => c.id === 'user-reported-mistakes').at(-1)!;
@@ -72,7 +71,7 @@ it('native workflow attachments persist scores from delivered text, retain histo
 it('disabling live evaluations retains memory without scheduling any judges', async () => {
   vi.stubEnv('EVALS_ENABLED', 'false');
   const storage = new LibSQLStore({ id: 'disabled-eval-test', url: ':memory:' });
-  const engine = createConversationEngine(config(), new DemoConnector(), storage, 'demo');
+  const engine = createConversationEngine(config(), new DemoConnector(), storage);
   try {
     await engine.record!(1, { incomingText: 'hello', texts: ['Hello'], replyTo: 1 });
     await new Promise(resolve => setTimeout(resolve, 30));
@@ -86,7 +85,7 @@ it('delivered replies finish while native background judges are still waiting', 
   let release!: () => void;
   observed.wait = new Promise<void>(resolve => { release = resolve; });
   const storage = new LibSQLStore({ id: 'async-eval-test', url: ':memory:' });
-  const engine = createConversationEngine(config(), new DemoConnector(), storage, 'demo');
+  const engine = createConversationEngine(config(), new DemoConnector(), storage);
   try {
     await engine.record!(3, { incomingText: 'hello', texts: ['Hello'], replyTo: 3 });
     await vi.waitFor(() => expect(observed.calls).toHaveLength(5));

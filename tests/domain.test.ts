@@ -109,6 +109,14 @@ describe('order preparation', () => {
     const result = await prepareOrder({ ...draft(), shippingPrice: undefined }, config(), new DemoConnector(), '2026-01-15');
     expect(!result.ready && result.issues.some(i => i.field === 'shippingPrice')).toBe(true);
   });
+  it('omits the delivery line when delivery is removed', async () => {
+    const result = await prepareOrder({ ...draft(), shippingPrice: 0 }, config(), new DemoConnector(), '2026-01-15');
+    expect(result.ready && result.order.lines.map(l => l.productId)).toEqual([101]);
+  });
+  it('asks about delivery only after the rest of the order is settled', async () => {
+    const result = await prepareOrder({ ...draft(), lines: [{ query: 'Pebble 250', quantity: 2 }], shippingPrice: undefined }, config(), new DemoConnector(), '2026-01-15');
+    expect(!result.ready && result.issues.map(i => i.field)).not.toContain('shippingPrice');
+  });
   it('does not merge variants even if source codes are equal', async () => {
     const connector = new DemoConnector();
     connector.products[1]!.code = connector.products[0]!.code;
@@ -162,8 +170,17 @@ describe('order preparation', () => {
 it('asks for missing facts in an incomplete order without inventing quantities or client data', async () => {
   const connector = new DemoConnector();
   const empty = await prepareOrder(draftSchema.parse({}), config(), connector, '2026-01-15');
-  expect(!empty.ready && empty.issues.map(i => i.field)).toEqual(expect.arrayContaining(['client', 'lines', 'shippingPrice']));
+  expect(!empty.ready && empty.issues.map(i => i.field)).toEqual(expect.arrayContaining(['client', 'lines']));
+  expect(!empty.ready && empty.issues.map(i => i.field)).not.toContain('shippingPrice');
   const partial = await prepareOrder(draftSchema.parse({ newClient: { name: 'New Example' }, lines: [{ query: 'Linen candle' }] }), config(), connector, '2026-01-15');
   expect(!partial.ready && partial.issues.map(i => i.field)).toContain('lines.0.quantity');
   expect(connector.createCalls).toBe(0);
+});
+
+it('asks for the delivery country when the delivery address has none, without a misleading VAT question', async () => {
+  const result = await prepareOrder({ ...draft(), delivery: { address: 'Example Road 9, 00000 Example City' } }, config(), new DemoConnector(), '2026-10-09');
+  expect(result.ready).toBe(false);
+  if (result.ready) return;
+  expect(result.issues.map(i => i.field)).toContain('delivery.country');
+  expect(result.issues.map(i => i.field)).not.toContain('vat');
 });

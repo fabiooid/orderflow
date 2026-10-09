@@ -1,81 +1,92 @@
 import {expect,it,vi} from 'vitest';
-import {TelegramController, type ConversationEngine} from '../src/telegram/controller.js';
+import {TelegramController} from '../src/telegram/controller.js';
 import {TelegramStore} from '../src/telegram/store.js';
-import {config,prepared} from './helpers.js';
+import {config,message,prepared,press,stubEngine} from './helpers.js';
 import type {Keyboard} from '../src/telegram/api.js';
 
-const msg=(id:number,text:string,sender=5)=>({update_id:id,message:{message_id:id,chat:{id:-1000000000001,type:'supergroup'},from:{id:sender,is_bot:false},text}});
-const tap=(id:number,messageId:number,data:string,chat=-1000000000001)=>({update_id:id,callback_query:{id:`cb${id}`,from:{id:7,is_bot:false},data,message:{message_id:messageId,chat:{id:chat,type:'supergroup'}}}});
+/** A stub agent whose turns prepare a ready order, except a question, which it answers without touching the request. */
+async function orderingEngine(){
+ const order=await prepared();
+ const engine={...stubEngine(),record:vi.fn(async()=>{})};
+ engine.turn.mockImplementation(async input=>{
+  if(input.operatorText==='question')return {text:'Catalogue answer',reply:'',locale:'it'};
+  const p=input.request??input.fresh('order');
+  return {text:'Summary',reply:'',locale:'it',order:{...p,revision:p.revision+1,status:'ready' as const,prepared:order,totals:{net:1,vat:0,gross:1}}};
+ });
+ return engine;
+}
 it('shares context with colleagues, preserves drafts during questions and saves only a current button once',async()=>{
  const c=config(); c.orderSavingEnabled=true;c.telegram.respondToAllMessages=true;
  const store=new TelegramStore(':memory:','shared');await store.init();
- const process=vi.fn(async(text:string,p:any)=>({conversation:{...p,revision:p.revision+1,status:'ready' as const,prepared:await prepared(),totals:{net:1,vat:0,gross:1}},text:'Summary'}));
- const route=vi.fn(async(text:string)=>text==='question'?{action:'answer' as const,text:'Catalogue answer'}:text==='start'?{action:'order' as const,text:'two bottles'}:{action:'continue' as const,text});
- const engine:ConversationEngine=Object.assign(process,{route,record:vi.fn(async()=>{})});
+ const engine=await orderingEngine();
  let mid=100;
  const send=vi.fn(async(_text:string,_reply:number,_keyboard?:Keyboard)=>({message_id:mid++}));
  const save=vi.fn(async()=>({id:321,number:'42'}));const pdf=vi.fn(async()=>({message_id:500}));
  const controller=new TelegramController(c,'bot',store,engine,send,undefined,save,pdf);
  try {
-  await controller.handle(msg(1,'start'));
+  await controller.handle(message(1,'start'));
   expect(send.mock.calls[0]?.[2]?.inline_keyboard[0]?.[0]?.callback_data).toBe('save:u1:1');
-  await controller.handle(msg(2,'question',7));
-  expect((await store.order('u1'))?.revision).toBe(1);expect(process).toHaveBeenCalledTimes(1);
-  await controller.handle(msg(3,'make it three',7));
-  expect(process.mock.calls[1]?.[1].orderId).toBe('u1');
-  expect(route.mock.calls[2]?.[0]).toBe('make it three');
-  await controller.handle(tap(4,100,'save:u1:1'));expect(save).not.toHaveBeenCalled();
-  await controller.handle(tap(5,102,'save:u1:2',99));expect(save).not.toHaveBeenCalled();
-  await controller.handle(tap(6,102,'save:u1:2'));expect(save).toHaveBeenCalledTimes(1);expect(pdf).toHaveBeenCalledTimes(1);
-  await controller.handle(tap(6,102,'save:u1:2'));expect(save).toHaveBeenCalledTimes(1);
+  await controller.handle(message(2,'question',undefined,7));
+  expect((await store.order('u1'))?.revision).toBe(1);
+  expect(engine.turn.mock.calls[1]?.[0].request?.orderId).toBe('u1');
+  await controller.handle(message(3,'make it three',undefined,7));
+  expect(engine.turn.mock.calls[2]?.[0]).toMatchObject({operatorText:'make it three',request:{orderId:'u1'}});
+  await controller.handle(press(4,'save:u1:1',100,7));expect(save).not.toHaveBeenCalled();
+  const otherChat=press(5,'save:u1:2',102,7);otherChat.callback_query.message.chat.id=99;
+  await controller.handle(otherChat);expect(save).not.toHaveBeenCalled();
+  await controller.handle(press(6,'save:u1:2',102,7));expect(save).toHaveBeenCalledTimes(1);expect(pdf).toHaveBeenCalledTimes(1);
+  await controller.handle(press(6,'save:u1:2',102,7));expect(save).toHaveBeenCalledTimes(1);
   expect(await store.activeRequest()).toBeUndefined();
  }finally{store.close();}
 });
 it('accepts natural cancellation without writing a customer or order',async()=>{
  const c=config();c.telegram.respondToAllMessages=true;
  const store=new TelegramStore(':memory:','cancel');await store.init();
- const process=vi.fn(async(_text:string,p:any)=>({conversation:{...p,status:'suspended' as const,revision:1},text:'Which size?'}));
- const engine=Object.assign(process,{route:vi.fn(async()=>({action:'cancel' as const,text:''}))});
+ const engine=stubEngine('suspended','Which size?');
  const controller=new TelegramController(c,'bot',store,engine,async()=>({message_id:100}));
- try{await controller.handle(msg(1,'/ordine two'));await controller.handle(msg(2,'annulla questo ordine',7));expect((await store.order('u1'))?.status).toBe('cancelled');expect(process).toHaveBeenCalledTimes(1);}finally{store.close();}
+ try{
+  await controller.handle(message(1,'ordine two'));
+  engine.turn.mockResolvedValueOnce({text:'',reply:'',locale:'it',cancel:true});
+  await controller.handle(message(2,'annulla questo ordine',undefined,7));
+  expect((await store.order('u1'))?.status).toBe('cancelled');expect(engine.turn).toHaveBeenCalledTimes(2);
+ }finally{store.close();}
 });
 it('resumes a saved callback delivery after restart without repeating the write',async()=>{
  const c=config();c.orderSavingEnabled=true;
  const store=new TelegramStore(':memory:','replay');await store.init();
- const engine:ConversationEngine=async(_text,p)=>({conversation:{...p,revision:1,status:'ready',prepared:await prepared(),totals:{net:1,vat:0,gross:1}},text:'Summary'});
+ const engine=await orderingEngine();
  let mid=100;const send=async()=>({message_id:mid++});
  const save=vi.fn(async()=>({id:321,number:'42'}));
  const pdf=vi.fn().mockRejectedValueOnce(new Error('timeout')).mockResolvedValue({message_id:500});
  const controller=new TelegramController(c,'bot',store,engine,send,undefined,save,pdf);
  try{
-  await controller.handle(msg(1,'/ordine two'));
-  const click=tap(2,100,'save:u1:1');
+  await controller.handle(message(1,'@bot ordine two'));
+  const click=press(2,'save:u1:1',100);
   await expect(controller.handle(click)).rejects.toThrow('timeout');
   await store.retrySend(2); // Operator checked that the PDF did not arrive.
   await controller.handle(click);
   expect(save).toHaveBeenCalledTimes(1);expect(pdf).toHaveBeenCalledTimes(2);expect(await store.offset()).toBe(3);
  }finally{store.close();}
 });
-it('does not send unaddressed group chatter to the model when respondToAllMessages is off',async()=>{
+it('does not send unaddressed group chatter to the agent when respondToAllMessages is off',async()=>{
  const store=new TelegramStore(':memory:','quiet');await store.init();
- const route=vi.fn(async()=>({action:'answer' as const,text:'Hi'}));
- const engine=Object.assign(vi.fn(),{route});const send=vi.fn(async()=>({message_id:100}));
+ const engine=stubEngine();engine.turn.mockResolvedValue({text:'Hi',reply:'',locale:'it'});
+ const send=vi.fn(async()=>({message_id:100}));
  const controller=new TelegramController(config(),'bot',store,engine,send);
  try{
-  await controller.handle(msg(1,'lunch at noon?'));expect(route).not.toHaveBeenCalled();expect(send).not.toHaveBeenCalled();
-  await controller.handle(msg(2,'@bot quali formati abbiamo?'));expect(route).toHaveBeenCalledTimes(1);expect(send).toHaveBeenCalledTimes(1);
+  await controller.handle(message(1,'lunch at noon?'));expect(engine.turn).not.toHaveBeenCalled();expect(send).not.toHaveBeenCalled();
+  await controller.handle(message(2,'@bot quali formati abbiamo?'));expect(engine.turn).toHaveBeenCalledTimes(1);expect(send).toHaveBeenCalledTimes(1);
   expect(await store.offset()).toBe(3);
  }finally{store.close();}
 });
-it('does not treat /review on a customer request as a completed creation',async()=>{
+it('does not treat a review button on a customer request as a completed creation',async()=>{
  const store=new TelegramStore(':memory:','customer-review');await store.init();
- const engine=vi.fn(async(_t:string,p:any)=>({conversation:{...p,revision:p.revision+1,status:'ready' as const},text:'Summary'}));
+ const engine=stubEngine('ready','Summary','customer');
  const createCustomer=vi.fn(async()=>'Created');
  const controller=new TelegramController(config(),'bot',store,engine,async()=>({message_id:100}),createCustomer);
  try{
-  await controller.handle(msg(1,'/cliente Example Studio'));
-  const review={...msg(2,'/review'),message:{...msg(2,'/review').message,reply_to_message:{message_id:100}}};
-  await controller.handle(review);
+  await controller.handle(message(1,'@bot crea il cliente Example Studio'));
+  await controller.handle(press(2,'review:u1:1',100));
   expect((await store.order('u1'))?.status).toBe('ready');expect(createCustomer).not.toHaveBeenCalled();
  }finally{store.close();}
 });

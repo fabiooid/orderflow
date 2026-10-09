@@ -11,14 +11,14 @@ import { TelegramApi } from '../src/telegram/api.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { draftSchema } from '../src/domain/types.js';
 import { checkConnections } from '../src/health/check.js';
-import { config } from './helpers.js';
+import { config, stubEngine } from './helpers.js';
 
 const chat = { id: -1000000000001, type: 'supergroup' };
 const message = (id: number, extra: Record<string, unknown>) => ({ update_id: id, message: { message_id: id, chat, from: { id: 5, is_bot: false }, ...extra } });
 const photo = (id: number, extra: Record<string, unknown> = {}) => message(id, { photo: [{ file_id: `small${id}`, file_size: 10 }, { file_id: `large${id}`, file_size: 900 }], ...extra });
 const voice = (id: number, extra: Record<string, unknown> = {}) => message(id, { voice: { file_id: `voice${id}`, mime_type: 'audio/ogg', file_size: 2000 }, ...extra });
 const click = (id: number, data: string, prompt = 100) => ({ update_id: id, callback_query: { id: `cb${id}`, from: { id: 7, is_bot: false }, data, message: { message_id: prompt, chat } } });
-const conv = (orderId: string, revision: number): Conversation => ({ orderId, revision, status: 'ready', draft: draftSchema.parse({}), questions: '', policy: '' });
+const conv = (orderId: string, revision: number): Conversation => ({ orderId, revision, status: 'ready', draft: draftSchema.parse({}), policy: '' });
 
 describe('normalizing Telegram media', () => {
   it('keeps the largest photo size, voice notes, PDFs and captions', () => {
@@ -62,8 +62,8 @@ describe('routing media', () => {
   });
   it('asks about an unaddressed forward instead of ignoring it', async () => {
     const ctx = { config: config(), botUsername: 'demo_bot' };
-    expect(await routeMessage(base({ text: 'Buongiorno, vorrei 3 saponi', forwardedFrom: 'Anna' }), ctx)).toEqual({ kind: 'prompt' });
-    expect(await routeMessage(base({ text: 'Buongiorno' }), ctx)).toEqual({ kind: 'ignore' });
+    expect(routeMessage(base({ text: 'Buongiorno, vorrei 3 saponi', forwardedFrom: 'Anna' }), ctx)).toEqual({ kind: 'prompt' });
+    expect(routeMessage(base({ text: 'Buongiorno' }), ctx)).toEqual({ kind: 'ignore' });
   });
 });
 
@@ -71,7 +71,7 @@ describe('controller media flow', () => {
   async function setup(media?: MediaReader) {
     const store = new TelegramStore(':memory:', 'media'); await store.init();
     let messageId = 100;
-    const engine = vi.fn(async (_text: string, previous: Conversation) => ({ conversation: { ...previous, revision: previous.revision + 1, status: 'ready' as const }, text: 'Preview' }));
+    const engine = stubEngine('ready', 'Preview');
     const send = vi.fn(async (_text: string, _reply: number, _keyboard?: unknown) => ({ message_id: messageId++ }));
     const buttons = { answer: vi.fn(async () => undefined), clear: vi.fn(async () => undefined) };
     const read = vi.fn<MediaReader>(media ?? (async event => ({ text: [event.text, `[read ${event.attachments?.map(a => a.fileId).join(',')}]`].filter(Boolean).join('\n') })));
@@ -87,10 +87,11 @@ describe('controller media flow', () => {
       expect(send).toHaveBeenLastCalledWith('Preparo un ordine da questo?', 1, { inline_keyboard: [[{ text: '✅ Sì', callback_data: 'media:1:y' }, { text: '✖️ No', callback_data: 'media:1:n' }]] });
       await controller.handle(click(2, 'media:1:y'));
       expect(read).toHaveBeenCalledTimes(1);
-      expect(engine.mock.calls[0]![0]).toBe('[read large1]');
+      // The yes button is the operator's instruction; the reading is content beside it.
+      expect(engine.turn.mock.calls[0]![0]).toMatchObject({ text: '[read large1]', operatorText: 'Sì, prepara un ordine da questo.' });
       expect((await store.activeRequest())?.orderId).toBe('u2');
       await controller.handle(click(3, 'media:1:y'));
-      expect(engine).toHaveBeenCalledTimes(1);
+      expect(engine.turn).toHaveBeenCalledTimes(1);
       expect(send).toHaveBeenCalledTimes(2);
     } finally { store.close(); }
   });
@@ -101,7 +102,7 @@ describe('controller media flow', () => {
       await controller.handle(photo(1));
       await controller.handle(click(2, 'media:1:n'));
       expect(send).toHaveBeenLastCalledWith('Ok, lo ignoro.', 100, undefined);
-      expect(read).not.toHaveBeenCalled(); expect(engine).not.toHaveBeenCalled();
+      expect(read).not.toHaveBeenCalled(); expect(engine.turn).not.toHaveBeenCalled();
       expect(await store.pending({ message: 1 })).toBeUndefined();
     } finally { store.close(); }
   });
@@ -109,20 +110,20 @@ describe('controller media flow', () => {
   it('adds accepted media to the open request', async () => {
     const { store, engine, controller } = await setup();
     try {
-      await controller.handle(message(1, { text: '/ordine per Example Studio' }));
+      await controller.handle(message(1, { text: '@demo_bot ordine per Example Studio' }));
       await controller.handle(photo(2));
       await controller.handle(click(3, 'media:2:y', 101));
-      expect(engine).toHaveBeenCalledTimes(2);
-      expect(engine.mock.calls[1]![1].orderId).toBe('u1');
+      expect(engine.turn).toHaveBeenCalledTimes(2);
+      expect(engine.turn.mock.calls[1]![0]).toMatchObject({ request: { orderId: 'u1' }, operatorText: 'Sì, aggiungilo alla richiesta aperta.' });
     } finally { store.close(); }
   });
 
   it('transcribes a voice note for the open request and shows the transcript', async () => {
     const { store, engine, send, controller } = await setup(async () => ({ text: '[Nota vocale trascritta]\naggiungi due saponi', echo: '🎙️ «aggiungi due saponi»' }));
     try {
-      await controller.handle(message(1, { text: '/ordine per Example Studio' }));
+      await controller.handle(message(1, { text: '@demo_bot ordine per Example Studio' }));
       await controller.handle(voice(2));
-      expect(engine.mock.calls[1]![0]).toContain('aggiungi due saponi');
+      expect(engine.turn.mock.calls[1]![0].text).toContain('aggiungi due saponi');
       expect(send).toHaveBeenLastCalledWith('🎙️ «aggiungi due saponi»\n\nPreview', 2, expect.anything());
     } finally { store.close(); }
   });
@@ -130,9 +131,9 @@ describe('controller media flow', () => {
   it('reads a captioned photo straight away', async () => {
     const { store, engine, read, controller } = await setup();
     try {
-      await controller.handle(photo(1, { caption: '/ordine' }));
+      await controller.handle(photo(1, { caption: '@demo_bot ordine' }));
       expect(read).toHaveBeenCalledTimes(1);
-      expect(engine.mock.calls[0]![0]).toBe('[read large1]');
+      expect(engine.turn.mock.calls[0]![0]).toMatchObject({ text: 'ordine\n[read large1]', operatorText: 'ordine' });
     } finally { store.close(); }
   });
 
@@ -154,9 +155,9 @@ describe('controller media flow', () => {
   it('shows a safe reason when media cannot be read, and leaves no request behind', async () => {
     const { store, engine, send, controller } = await setup(async () => { throw new MediaError('File troppo grande: il limite è 20 MB.'); });
     try {
-      await controller.handle(photo(1, { caption: '/ordine' }));
+      await controller.handle(photo(1, { caption: '@demo_bot ordine' }));
       expect(send).toHaveBeenLastCalledWith('File troppo grande: il limite è 20 MB.', 1, undefined);
-      expect(engine).not.toHaveBeenCalled();
+      expect(engine.turn).not.toHaveBeenCalled();
       expect(await store.activeRequest()).toBeUndefined();
     } finally { store.close(); }
   });

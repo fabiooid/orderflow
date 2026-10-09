@@ -3,7 +3,7 @@ import {
   type Client as FicClient, type IssuedDocument,
 } from '@fattureincloud/fattureincloud-ts-sdk';
 import { z } from 'zod';
-import { clientSchema, preparedOrderSchema, productSchema, totalsSchema, type Client, type ClientOrder, type PreparedOrder, type Product, type SavedOrder, type Totals } from '../domain/types.js';
+import { newCustomerSchema, preparedOrderSchema, productSchema, totalsSchema, type Client, type ClientOrder, type NewCustomer, type PreparedOrder, type Product, type SavedOrder, type Totals } from '../domain/types.js';
 import type { OrderConnector } from './contract.js';
 
 export type SdkPorts = {
@@ -31,11 +31,11 @@ function countryIso(client: FicClient) {
   return countryNames.get(countryKey(name)) ?? '';
 }
 
-export function toFicClient(client: Client): FicClient {
+export function toFicClient(client: NewCustomer): FicClient {
   return {
-    id: client.id, type: 'company', name: client.name, country_iso: client.country, country: italianRegions.of(client.country),
+    id: client.id, type: 'company', name: client.name, country_iso: client.country, country: client.country ? italianRegions.of(client.country) : undefined,
     address_street: client.street, address_city: client.city, address_postal_code: client.postalCode,
-    address_province: client.province, email: client.email, phone: client.phone,
+    address_province: client.province, email: client.email, certified_email: client.certifiedEmail, phone: client.phone,
     vat_number: client.vatNumber, tax_code: client.taxCode, ei_code: client.sdiCode, notes: client.notes,
   };
 }
@@ -45,7 +45,7 @@ function fromFicClient(client: FicClient): Client {
   return {
     id: client.id ?? undefined, name: client.name ?? '', country: countryIso(client),
     street: client.address_street ?? '', city: client.address_city ?? '', postalCode: client.address_postal_code ?? '',
-    province: client.address_province || undefined, email: client.email || undefined, phone: client.phone || undefined,
+    province: client.address_province || undefined, email: client.email || undefined, certifiedEmail: client.certified_email || undefined, phone: client.phone || undefined,
     vatNumber: client.vat_number || undefined, taxCode: client.tax_code || undefined,
     sdiCode: client.ei_code || undefined, notes: client.notes ?? '',
   };
@@ -112,13 +112,14 @@ export class FattureInCloudConnector implements OrderConnector {
     return this.#paginate('Client', async page => (await this.#sdk.clients.listClients(this.#companyId, undefined, 'detailed', undefined, page, 100)).data, fromFicClient);
   }
 
-  async createClient(input: Client) {
+  async createClient(input: NewCustomer) {
     if (!this.#clientWritesEnabled) throw new Error('Live client writes are disabled');
-    const client = clientSchema.parse(input);
+    const client = newCustomerSchema.parse(input);
     if (client.id) throw new Error('Cannot create an existing client');
     const { data } = await this.#sdk.clients.createClient(this.#companyId, { data: toFicClient(client) });
     if (!data.data?.id) throw new Error('Client creation response missing ID; reconcile before retrying');
-    return clientSchema.parse(fromFicClient(data.data));
+    // A name-only customer comes back with blank address fields, which mean absent rather than invalid.
+    return newCustomerSchema.parse(Object.fromEntries(Object.entries(fromFicClient(data.data)).filter(([key, value]) => value !== '' || key === 'notes')));
   }
 
   async calculateTotals(input: PreparedOrder) {
@@ -190,16 +191,16 @@ export class FattureInCloudConnector implements OrderConnector {
   }
 
   async #paginate<T, R>(label: string, fetchPage: (page: number) => Promise<{ data?: T[] | null; last_page?: number | null }>, map: (item: T) => R | undefined) {
-    const results: R[] = [];
-    for (let page = 1; page <= 1000; page++) {
-      const body = await fetchPage(page);
-      for (const item of body.data ?? []) {
-        const mapped = map(item);
-        if (mapped !== undefined) results.push(mapped);
-      }
-      if (page >= (body.last_page ?? page)) return results;
+    const first = await fetchPage(1);
+    const last = first.last_page ?? 1;
+    if (last > 1000) throw new Error(`${label} pagination limit reached`);
+    // The first page gives the page count; fetch the rest a few at a time, well within API rate limits.
+    const bodies: { data?: T[] | null }[] = [first];
+    for (let start = 2; start <= last; start += 4) {
+      const pages = Array.from({ length: Math.min(4, last - start + 1) }, (_, i) => start + i);
+      bodies.push(...await Promise.all(pages.map(fetchPage)));
     }
-    throw new Error(`${label} pagination limit reached`);
+    return bodies.flatMap(body => (body.data ?? []).map(map).filter((mapped): mapped is R => mapped !== undefined));
   }
 
   #assertWrites() {

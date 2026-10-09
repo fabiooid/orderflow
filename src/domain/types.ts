@@ -9,6 +9,8 @@ export const clientSchema = z.object({
   postalCode: z.string().min(1),
   province: z.string().optional(),
   email: z.email().optional(),
+  /** PEC (certified email), used by Italian businesses. */
+  certifiedEmail: z.email().optional(),
   phone: z.string().min(1).optional(),
   vatNumber: z.string().min(1).optional(),
   taxCode: z.string().min(1).optional(),
@@ -16,6 +18,9 @@ export const clientSchema = z.object({
   notes: z.string().default(''),
 }).strict();
 export type Client = z.infer<typeof clientSchema>;
+/** Fatture in Cloud needs only a name to create a customer; an order still needs the full billing address. */
+export const newCustomerSchema = clientSchema.partial({ country: true, street: true, city: true, postalCode: true });
+export type NewCustomer = z.infer<typeof newCustomerSchema>;
 
 export const productSchema = z.object({
   id: z.number().int().positive(),
@@ -50,7 +55,8 @@ export const draftSchema = z.object({
   discountPercent: z.number().min(0).max(100).default(0),
   discountShipping: z.boolean().optional(),
   delivery: z.object({
-    country: z.string().regex(/^[A-Z]{2}$/),
+    /** Absent when the source gives an address without a country; preparation then asks for it. */
+    country: z.string().regex(/^[A-Z]{2}$/).optional(),
     address: z.string().min(1),
   }).strict().optional(),
   notes: z.string().max(4000).default(''),
@@ -93,4 +99,4 @@ export type SavedOrder = { id: number; number: string; url?: string };
 /** A client's earlier order, read only to point out differences. */
 export type ClientOrder = { id: number; number: string; date: string; lines: { productId?: number; code: string; name: string; quantity: number; netPrice: number; discountPercent: number }[] };
 export type VatValidation = 'valid' | 'invalid' | 'unavailable' | 'unchecked';
-export type Issue = { matchingStatus?: 'ambiguous' | 'no-match' | 'unavailable'; field: string; message: string; candidates?: { id: number; label: string }[]; priceComparison?: { document: number; catalogue: number; basis: 'net' | 'gross' | 'unclear' } };
+export type Issue = { matchingStatus?: 'ambiguous' | 'no-match' | 'unavailable'; field: string; message: string; candidates?: { id: number; label: string }[]; priceComparison?: { document: number; catalogue: number; basis: 'net' | 'gross' | 'unclear' }; defaultPrice?: number };
