@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { prepareOrder } from '../src/domain/prepare.js';
 import { draftSchema } from '../src/domain/types.js';
 import { DemoConnector } from '../src/connector/demo.js';
-import { askedText } from '../src/telegram/preview.js';
+import { orderDraft } from '../src/telegram/preview.js';
 import { config, draft } from './helpers.js';
 
 const prepare = (amount: number, basis: 'net' | 'gross' | 'unclear' = 'net', decision: 'pending' | 'catalogue' | 'document' = 'pending') =>
@@ -14,9 +14,10 @@ describe('document prices require clarification', () => {
     expect(result.ready).toBe(false);
     if (result.ready) return;
     expect(result.issues[0]).toMatchObject({ field: 'lines.0.documentPrice', priceComparison: { document: 9, catalogue: 12 } });
-    expect(askedText(result.issues, result.draft, true)).toContain('€9,00');
-    expect(askedText(result.issues, result.draft, true)).toContain('€12,00');
-    expect(askedText(result.issues, result.draft, false)).toContain('confirm the net price');
+    // The agent reads both prices from the API; the draft marks the line whose price needs an answer.
+    expect(result.issues[0]!.message).toContain('9 EUR');
+    expect(result.issues[0]!.message).toContain('12 EUR');
+    expect(orderDraft(result.draft, result.issues, true)).toContain('❓ Da completare: prezzo di Pebble hand wash 250 ml');
   });
   it('uses current FiC prices when the operator chooses catalogue', async () => {
     const result = await prepare(9, 'net', 'catalogue');

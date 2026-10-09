@@ -8,7 +8,6 @@
   "priceBasis": "net",
   "telegram": {
     "groupId": "-1000000000001",
-    "command": "order",
     "access": "all-group-members"
   },
   "shipping": {

@@ -25,8 +25,11 @@ export async function traceTelegramTurn<T>(instance: ObservabilityInstance | und
   const span = instance.startSpan({ name: 'Telegram turn', type: SpanType.GENERIC, tags: ['telegram', 'live'], metadata: { updateId } });
   try {
     const result = await active.run(span, action);
-    if (result && typeof result === 'object' && 'orderId' in result && typeof result.orderId === 'string') {
-      span.update({ metadata: { updateId, orderId: result.orderId } });
+    // Status labels in metadata so Studio can filter turns by order and outcome.
+    if (result && typeof result === 'object') {
+      const { orderId, revision, state, activeOrderId, cancelled, delivered } = result as Record<string, unknown>;
+      const labels = Object.fromEntries(Object.entries({ orderId, revision, state, activeOrderId, cancelled, delivered }).filter(([, v]) => ['string', 'number', 'boolean'].includes(typeof v)));
+      if (Object.keys(labels).length) span.update({ metadata: { updateId, ...labels } });
     }
     span.end({ output: result });
     return result;

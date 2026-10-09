@@ -1,28 +1,29 @@
 import { createIdentityResolver } from '../matching/resolver.js';
 import { loadMatchingConfig } from '../matching/config.js';
-import { customerCreationSkill } from './skills/customer-creation.js';
-import { tracingContext } from './execution-trace.js';
 import { aliasMemory, sharedKnowledgeSchema } from './aliases.js';
 export { sharedKnowledgeSchema } from './aliases.js';
 import { customerOrderHistoryTool } from './customer-order-history.js';
-import { buildSystemPrompt } from './system-prompt.js';
-import { extractionSchema, parseExtraction } from './extraction-schema.js';
+import { systemPrompt } from './system-prompt.js';
+import { customerDraftInput, orderDraftInput, parseCustomer, parseDraft } from './draft-schema.js';
+import { createDraftApi, forAgent, type DraftResult } from './drafts.js';
 import { Agent } from '@mastra/core/agent';
+import type { RequestContext } from '@mastra/core/request-context';
 import { createTool } from '@mastra/core/tools';
 import { Memory } from '@mastra/memory';
 import type { LibSQLStore } from '@mastra/libsql';
 import { z } from 'zod';
 import type { AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
-import { productSchema, type Product } from '../domain/types.js';
+import { productSchema, type OrderDraft, type Product } from '../domain/types.js';
 import { normalize, searchCatalogue } from '../domain/matching.js';
-import type { Extractor } from './workflow.js';
+import { outcomeOf, turnOf, type TurnRequest } from './turn-context.js';
 import { createManualScorers } from './manual-scorers.js';
-import { evalContext, liveAgentScorers, type LiveEvalSettings } from './live-evals.js';
+import { liveAgentScorers, type LiveEvalSettings } from './live-evals.js';
 
-export function memoryScope(config: AppConfig, orderId: string) {
-  if (!/^[a-zA-Z0-9_-]+$/.test(orderId)) throw new Error('Invalid order reference');
-  return { resource: `${config.deploymentId}:telegram:${config.telegram.groupId}`, thread: `${config.deploymentId}:order:${orderId}` };
+/** The shared Mastra memory of one Telegram group: its conversation thread and the resource holding learned aliases. */
+export function groupMemory(config: AppConfig) {
+  const resource = `${config.deploymentId}:telegram:${config.telegram.groupId}`;
+  return { resource, thread: `${resource}:chat` };
 }
 
 export function createOrderAgent(config: AppConfig, connector: OrderConnector, storage: LibSQLStore, live: LiveEvalSettings = { enabled: false, rate: 0 }, matchingOptions: Parameters<typeof createIdentityResolver>[2] = {}) {
@@ -32,7 +33,7 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
     workingMemory: { enabled: true, scope: 'resource', schema: sharedKnowledgeSchema, agentManaged: false },
   } });
   const matchingConfig = matchingOptions.config ?? loadMatchingConfig();
-  const knowledge = aliasMemory(memory, `${config.deploymentId}:telegram:${config.telegram.groupId}`, connector, matchingConfig.mode === 'on');
+  const knowledge = aliasMemory(memory, groupMemory(config).resource, connector, matchingConfig.mode === 'on');
   const matching = createIdentityResolver(config, connector, { ...matchingOptions, config: matchingConfig, aliases: knowledge.read });
   // Search only: results may be up to two minutes old. Order preparation always reads fresh prices.
   let catalogue: { at: number; products: Promise<Product[]> } | undefined;
@@ -44,7 +45,7 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
     return catalogue.products;
   };
   const searchProducts = createTool({
-    id: 'search-products', description: 'Search the catalogue with any words (scent, type, size, code). Returns related products, best first. Search again with fewer or different words when nothing fits.',
+    id: 'search-products', description: 'Search the catalogue with any words (scent, type, size, code). Returns related products, best first. When nothing fits, search again with fewer, different or translated words: catalogue names can be in Italian or English.',
     inputSchema: z.object({ query: z.string().min(1) }), outputSchema: z.array(productSchema),
     execute: async ({ query }) => {
       const [products, data] = await Promise.all([searchable(), knowledge.read()]);
@@ -64,52 +65,62 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
         .map(c => ({ id: c.id!, name: c.name, country: c.country, vatNumber: c.vatNumber }));
     },
   });
-  const resolveTool = (kind: 'client' | 'product') => createTool({
-    id: `resolve-${kind}`,
-    description: `Resolve one intended ${kind} against all current eligible records. Returns an application-validated selection or explicit ambiguity/unavailability. Never substitute an ID after a failed resolution. Product browsing remains searchProducts.`,
-    inputSchema: z.object({ query: z.string().min(1).max(4000) }),
-    outputSchema: z.object({ status: z.enum(['matched', 'ambiguous', 'no-match', 'unavailable']), selectedId: z.number().optional(), candidates: z.array(z.object({ id: z.number(), label: z.string() })).optional() }),
-    execute: async ({ query }, context) => {
-      const source = context?.requestContext?.get('matchingOperatorText');
-      const result = await matching.resolve({ clientQuery: kind === 'client' ? query : '', lines: kind === 'product' ? [{ query }] : [], discountPercent: 0, notes: '' },
-        { orderId: 'lookup', revision: 0, operatorText: typeof source === 'string' ? source : query });
-      const field = kind === 'client' ? 'client' : 'lines.0';
-      const decision = result.decisions.find(d => d.field === field);
-      return { status: decision?.status ?? 'unavailable' as const, selectedId: decision?.selectedId, candidates: result.issues.find(i => i.field === field)?.candidates };
+  const getCustomerOrderHistory = customerOrderHistoryTool(connector);
+  const drafts = createDraftApi(config, connector, matching);
+  /**
+   * The draft tools work on the open request. Using the other kind's tool replaces it (nothing is saved, and the agent
+   * decides when that is what the operator wants). A request this turn cannot change, such as a save awaiting a check,
+   * blocks new work, so nothing is silently left behind.
+   */
+  const prepare = (kind: TurnRequest['kind'], run: (draft: OrderDraft, context: Parameters<typeof drafts.order>[1]) => Promise<DraftResult>) =>
+    async (draft: OrderDraft, requestContext?: RequestContext) => {
+      const turn = turnOf(requestContext), outcome = outcomeOf(requestContext);
+      if (!turn?.request && turn?.locked) {
+        outcome.refused = true;
+        return { status: 'blocked' as const, note: `Another request is open: ${turn.locked}. The operator can finish it first.` };
+      }
+      const own = turn?.request?.kind === kind ? turn.request : undefined;
+      outcome.result = await run(draft, { orderId: own?.orderId ?? 'new', revision: (own?.revision ?? 0) + 1, operatorText: turn?.evidence ?? '', confirmedChoices: own?.confirmedChoices });
+      return forAgent(outcome.result);
+    };
+  const draftOutput = z.object({ status: z.enum(['ready', 'needs', 'existing', 'blocked', 'invalid']), issues: z.array(z.object({ field: z.string(), problem: z.string(), candidates: z.array(z.string()).optional() })).optional(), note: z.string() });
+  /** A draft tool: parse the agent's draft against the schema, then run the API on it. */
+  const draftTool = <S extends z.ZodType>(id: string, description: string, inputSchema: S, parse: (input: unknown) => OrderDraft, api: ReturnType<typeof prepare>) => createTool({
+    id, description, inputSchema, outputSchema: draftOutput,
+    execute: async (input, context) => {
+      let draft: OrderDraft;
+      try { draft = parse(input); } catch (error) {
+        return { status: 'invalid' as const, note: `The draft does not fit the schema: ${error instanceof z.ZodError ? error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ') : 'unreadable'}. Fix it and call again.` };
+      }
+      return api(draft, context?.requestContext);
     },
   });
-  const identityTools: Record<string, ReturnType<typeof resolveTool>> = matching.mode === 'on' ? { resolveProduct: resolveTool('product'), resolveClient: resolveTool('client') } : {};
-  const getCustomerOrderHistory = customerOrderHistoryTool(connector);
-  const scorers = createManualScorers([
-    ...Object.entries(identityTools).map(([id, tool]) => ({ id, description: tool!.description })),
-    { id: 'searchProducts', description: searchProducts.description },
-    { id: 'searchClients', description: searchClients.description },
-    { id: 'getCustomerOrderHistory', description: getCustomerOrderHistory.description },
-    { id: 'rememberAlias', description: knowledge.rememberAlias.description },
-    { id: 'search_skills', description: 'Discover skills by keyword, including customer-creation.' },
-    { id: 'load_skill', description: 'Load customer-creation guidance for identity and details; not a write operation.' },
-  ], process.env.EVAL_JUDGE_MODEL);
+  const orderApi = prepare('order', drafts.order), customerApi = prepare('customer', drafts.customer);
+  const prepareOrder = draftTool('prepare-order', "The order API: create or edit the order. Send the complete order as it should be after this turn, starting from the open order's draft. The application checks customer, products, prices, VAT and delivery against Fatture in Cloud, shows the draft to the operator and reports what is still needed. It never saves.",
+    orderDraftInput, parseDraft, orderApi);
+  const prepareCustomer = draftTool('prepare-customer', "The customer API: create a new customer in Fatture in Cloud, or correct the one being drafted. Send every detail known so far. The application checks for an existing customer, shows the draft and reports what is still needed. It never saves. For an order's customer use prepare-order instead.",
+    customerDraftInput, parseCustomer, customerApi);
+  const cancel = (requestContext?: RequestContext) => {
+    const turn = turnOf(requestContext);
+    if (turn?.request) { outcomeOf(requestContext).cancel = true; return { status: 'cancelled' as const }; }
+    return turn?.locked ? { status: 'locked' as const, note: `${turn.locked}: it cannot be cancelled here.` } : { status: 'nothing-open' as const };
+  };
+  const cancelRequest = createTool({
+    id: 'cancel-request',
+    description: 'Cancel the open unsaved order or customer request, only when the operator asks to drop it. Nothing saved is affected.',
+    inputSchema: z.object({}), outputSchema: z.object({ status: z.enum(['cancelled', 'locked', 'nothing-open']), note: z.string().optional() }),
+    execute: async (_input, context) => cancel(context?.requestContext),
+  });
+  const tools = { prepareOrder, prepareCustomer, cancelRequest, searchProducts, searchClients, getCustomerOrderHistory, rememberAlias: knowledge.rememberAlias };
+  const scorers = createManualScorers(Object.entries(tools).map(([id, tool]) => ({ id, description: tool.description })), process.env.EVAL_JUDGE_MODEL);
   const agent = new Agent({
     // Keep the persisted agent ID stable across the OrderFlow rebrand.
     id: 'order-assistant', name: 'OrderFlow', model: config.model,
-    instructions: buildSystemPrompt(config) + (matching.mode === 'on' ? '\nIdentity matching is enforced by the application. Use resolveProduct/resolveClient for a single identity; search tools are for browsing only. On ambiguous, no-match or unavailable, ask for clarification; never choose a substitute ID. Keep queries faithful to the original operator wording, including code, size, tester and tax identity. IDs from extraction are not selection evidence. Historical-order semantic selection is not supported: do not infer product identities from history; ask for explicit current names/codes. Never claim an unresolved identity is confirmed.' : ''),
-    skills: [customerCreationSkill(config)],
-    memory, tools: { ...identityTools, searchProducts, searchClients, getCustomerOrderHistory, rememberAlias: knowledge.rememberAlias },
+    instructions: systemPrompt,
+    memory, tools,
     scorers: liveAgentScorers(scorers, live),
   });
-  const extract: Extractor = async (text, orderId) => {
-    const scope = memoryScope(config, orderId);
-    // Preserve ownership and history of order threads created before shared alias learning.
-    const existing = await memory.getThreadById({ threadId: scope.thread });
-    if (existing?.resourceId) scope.resource = existing.resourceId;
-    const requestContext = evalContext('extraction');
-    requestContext.set('matchingOperatorText', text);
-    const response = await agent.generate(text, {
-      tracingContext: tracingContext(),
-      memory: scope, structuredOutput: { schema: extractionSchema }, maxSteps: 8,
-      requestContext,
-    });
-    return parseExtraction(response.object);
-  };
-  return { agent, memory, extract, scorers, matching };
+  /** What the draft tools do, callable directly by a scripted stand-in for the model in tests and offline evals. */
+  const calls = { order: orderApi, customer: customerApi, cancel };
+  return { agent, memory, scorers, matching, drafts, calls };
 }

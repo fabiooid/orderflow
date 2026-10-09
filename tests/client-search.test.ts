@@ -74,6 +74,15 @@ it.each(['on', 'shadow'] as const)('uses complete customer search in the shared 
   else expect(result.draft).toEqual(input);
 });
 
+it('offers no unrelated customers when a complete search finds no match', async () => {
+  const connector = new DemoConnector(); const base = connector.clients[0]!;
+  connector.clients.splice(0, connector.clients.length, ...request().candidates.map(c => ({ ...base, ...c })));
+  const resolver = createIdentityResolver(config(), connector, { config: matchingConfigSchema.parse({ mode: 'on', largeClientSearch: true }),
+    selectMany: async groups => groups.map(() => answer('no-match')) });
+  const result = await resolver.resolve({ ...draft(), clientQuery: 'Northwind Deli', lines: [] }, { orderId: 'large-client-miss', revision: 1, operatorText: 'nuovo ordine per Northwind Deli' });
+  expect(result.decisions[0]).toMatchObject({ status: 'no-match' });
+  expect(result.issues).toEqual([expect.objectContaining({ field: 'client', matchingStatus: 'no-match', candidates: [] })]);
+});
 
 it('sends all three customer groups through the real batch adapter in one transport call', async () => {
   const transport = vi.fn(async (input: any) => ({ model: 'test-model', usage: { input_tokens: 10, output_tokens: 10 },

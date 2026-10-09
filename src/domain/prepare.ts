@@ -1,9 +1,11 @@
 import type { AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
 import { clientSchema, draftSchema, preparedOrderSchema, type Client, type Issue, type OrderDraft, type OrderLine, type PreparedOrder, type Product, type VatValidation } from './types.js';
+import { missingCustomerFields } from './customer.js';
 import { asksForTester, isTester, matchProducts, namedAlternatives, normalize, sameClient, searchCatalogue } from './matching.js';
 
-export type Preparation = { ready: false; issues: Issue[]; draft: OrderDraft } | { ready: true; order: PreparedOrder };
+/** `draft` is the draft as preparation read it, for example without a delivery address equal to the billing one. */
+export type Preparation = { ready: false; issues: Issue[]; draft: OrderDraft; clientId?: number } | { ready: true; order: PreparedOrder; draft: OrderDraft };
 export type ValidationLookup = (country: string, vatNumber: string) => Promise<VatValidation>;
 const toCandidates = (clients: Client[]) => clients.filter(c => c.id).map(c => ({ id: c.id!, label: c.name }));
 
@@ -26,13 +28,11 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
   if (client) {
     const valid = clientSchema.safeParse(client);
     if (!valid.success) issues.push({ field: 'client', message: 'Client billing details are incomplete or invalid' });
-    for (const field of config.clients.requiredFields) if (!client[field]) issues.push({ field: `client.${field}`, message: `Missing required client field: ${field}` });
-    if (config.clients.sdiCountries.includes(client.country ?? '') && !client.sdiCode) issues.push({ field: 'client.sdiCode', message: 'SDI code is required by this deployment' });
+    for (const field of missingCustomerFields(client, config)) issues.push({ field: `client.${field}`, message: `Missing required customer field: ${field}` });
   }
 
   const shipping = products.find(p => p.id === config.shipping.productId);
   if (!shipping) throw new Error('Configured shipping product does not exist');
-  if (draft.shippingPrice === undefined) issues.push({ field: 'shippingPrice', message: `Confirm delivery price; catalogue default is ${shipping.netPrice} ${config.currency} excluding VAT` });
 
   if (!draft.lines.length) issues.push({ field: 'lines', message: 'Add at least one product and quantity' });
   const catalogue = products.filter(p => p.id !== shipping.id);
@@ -78,9 +78,11 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
   if (draft.priceTier && draft.priceTier !== 'standard') issues.push({ field: 'priceTier', message: 'Automatic price lists are not supported. Confirm standard API prices or supply explicit unit prices and clear the price-list selection.' });
 
   const delivery = draft.delivery ?? (client ? { country: client.country ?? '', address: [client.street, client.postalCode, client.city, client.country].join(', ') } : undefined);
-  const rules = client && delivery ? config.vatRules.filter(r => (!r.billingCountries || r.billingCountries.includes(client.country ?? '')) && (!r.deliveryCountries || r.deliveryCountries.includes(delivery.country))).sort((a, b) => b.priority - a.priority) : [];
+  const unknownCountry = draft.delivery !== undefined && !draft.delivery.country;
+  if (unknownCountry) issues.push({ field: 'delivery.country', message: 'The delivery address has no country' });
+  const rules = client && delivery && !unknownCountry ? config.vatRules.filter(r => (!r.billingCountries || r.billingCountries.includes(client.country ?? '')) && (!r.deliveryCountries || r.deliveryCountries.includes(delivery.country ?? ''))).sort((a, b) => b.priority - a.priority) : [];
   const rule = rules[0];
-  if (client && !rule) issues.push({ field: 'vat', message: 'No configured VAT rule matches this billing and delivery destination; review required' });
+  if (client && !rule && !unknownCountry) issues.push({ field: 'vat', message: 'No configured VAT rule matches this billing and delivery destination; review required' });
   if (rule?.requireValidVat && client) {
     const manual = draft.manualVatCheck;
     const confirmed = manual && manual.country === client.country && normalize(manual.vatNumber) === normalize(client.vatNumber ?? '');
@@ -88,7 +90,11 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
     if (status !== 'valid') issues.push({ field: 'vat', message: `VAT validation is ${status}. Confirm a manual VIES check for ${client.country} ${client.vatNumber ?? "(missing VAT number)"}; N3.2 requires a valid result.` });
   }
   const shippingPrice = draft.shippingPrice;
-  if (issues.length || !client || !delivery || !rule || shippingPrice === undefined) return { ready: false, issues, draft };
+  // Delivery is just another line: ask about it only once everything else is settled, never as an opening gate.
+  if (!issues.length && shippingPrice === undefined) issues.push({ field: 'shippingPrice', message: `Confirm the delivery charge (catalogue default ${shipping.netPrice} ${config.currency} excluding VAT) or remove it`, defaultPrice: shipping.netPrice });
+  // Report the existing customer already identified, so questions can show who the order is for.
+  const existing = !draft.newClient && matches.length === 1 ? matches[0]!.id : undefined;
+  if (issues.length || !client || !delivery || !rule || shippingPrice === undefined) return { ready: false, issues, draft, ...(existing ? { clientId: existing } : {}) };
 
   const makeLine = (product: Product, quantity: number, isShipping: boolean, netPrice?: number): OrderLine => ({
     productId: product.id, code: product.code, name: product.name, quantity,
@@ -100,9 +106,9 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
   if (Number.isNaN(due.getTime()) || due.toISOString().slice(0, 10) !== date) throw new Error('Invalid order date');
   due.setUTCDate(due.getUTCDate() + config.payments.dueDays);
   const deliveryNote = draft.delivery ? `${config.clients.shippingNotesLabel}: ${draft.delivery.address}` : '';
-  return { ready: true, order: preparedOrderSchema.parse({
+  return { ready: true, draft, order: preparedOrderSchema.parse({
     type: 'order', policyVersion: config.policyVersion, currency: config.currency, client,
-    lines: [...selected.map(({ product, quantity, netPrice }) => makeLine(product, quantity, false, netPrice)), makeLine(shipping, 1, true)],
+    lines: [...selected.map(({ product, quantity, netPrice }) => makeLine(product, quantity, false, netPrice)), ...(shippingPrice > 0 ? [makeLine(shipping, 1, true)] : [])],
     delivery, notes: [draft.notes, deliveryNote].filter(Boolean).join('\n'), date,
     paymentMethodId: config.payments.methodId, dueDate: due.toISOString().slice(0, 10),
   }) };

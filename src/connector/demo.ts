@@ -1,6 +1,6 @@
 import type { OrderConnector } from './contract.js';
 import { calculateLineTotals } from '../domain/totals.js';
-import { preparedOrderSchema, type Client, type ClientOrder, type PreparedOrder, type Product, type SavedOrder } from '../domain/types.js';
+import { preparedOrderSchema, type Client, type ClientOrder, type NewCustomer, type PreparedOrder, type Product, type SavedOrder } from '../domain/types.js';
 
 /** Fictional in-memory service. Never contacts Fatture in Cloud. */
 export class DemoConnector implements OrderConnector {
@@ -18,9 +18,10 @@ export class DemoConnector implements OrderConnector {
   createCalls = 0;
   async listProducts() { return structuredClone(this.products); }
   async listClients() { return structuredClone(this.clients); }
-  async createClient(input: Client) {
+  async createClient(input: NewCustomer) {
     const client = { ...structuredClone(input), id: 1000 + this.clients.length };
-    this.clients.push(client);
+    // Listed like Fatture in Cloud lists a name-only customer: blank address fields.
+    this.clients.push({ country: '', street: '', city: '', postalCode: '', ...client });
     return client;
   }
   async calculateTotals(order: PreparedOrder) { return calculateLineTotals(preparedOrderSchema.parse(order).lines); }

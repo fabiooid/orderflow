@@ -41,7 +41,7 @@ OrderFlow then:
 4. **Posts a summary** with a **Conferma e salva** button. Every edit creates a new revision, and buttons from older revisions stop working.
 5. **Saves the order** only after explicit confirmation, then sends the order PDF back to the group.
 
-Operators can also send **voice notes**, **photos and screenshots**, **PDFs** and **forwarded customer messages**. Voice notes are transcribed (the transcript is shown with the reply); images and PDFs are read into text before extraction. Media sent without a caption gets a *Preparo un ordine da questo?* question with yes/no buttons, so nothing is read or charged until someone says yes. Several photos sent together as an album are handled as one message. Media files are not stored; only the text read from them is.
+Operators can also send **voice notes**, **photos and screenshots**, **PDFs** and **forwarded customer messages**. Voice notes are transcribed (the transcript is shown with the reply); images and PDFs are read into text for the agent, kept apart from the operator's own words. Media sent without a caption gets a *Preparo un ordine da questo?* question with yes/no buttons, so nothing is read or charged until someone says yes. Several photos sent together as an album are handled as one message. Media files are not stored; only the text read from them is.
 
 It can also create new customers (with duplicate checks) and answer catalogue questions, such as `@your_bot quali varianti di Sapone di Esempio abbiamo?`
 
@@ -73,7 +73,7 @@ npm test        # Vitest suite (fictional fixtures, simulated APIs)
 npm run demo    # scripted end-to-end run against a fictional catalogue
 ```
 
-`npm run demo` uses scripted extraction and simulated API responses. It shows the orchestration and duplicate protection, but it says **nothing about LLM accuracy**. Its temporary databases are removed when it finishes.
+`npm run demo` uses scripted drafts and simulated API responses. It shows the orchestration and duplicate protection, but it says **nothing about LLM accuracy**. Its temporary databases are removed when it finishes.
 
 ### Order forms and custom prices
 
@@ -93,7 +93,7 @@ Fresh Fatture in Cloud catalogue prices are the default for every customer. Expl
 
 ### Alias learning
 
-Operators can teach product names and shop/business-name aliases in ordinary messages. The agent's `rememberAlias` tool verifies that the target exists, records the exact operator quote and identity, and persists the mapping in Mastra resource-scoped working memory. Shared Telegram routing and new order threads use the same resource; older order threads retain their history and searches still consult shared aliases. There are no aliases embedded in the source code.
+Operators can teach product names and shop/business-name aliases in ordinary messages. The agent's `rememberAlias` tool verifies that the target exists, records the exact operator quote and identity, and persists the mapping in Mastra resource-scoped working memory. Telegram agent turns use the same resource; older order threads retain their history and searches still consult shared aliases. There are no aliases embedded in the source code.
 
 Learning requires an explicit correction or teaching statement, not merely order confirmation. Attachments and forwarded text cannot authorize learning. Conflicting mappings remain candidates for clarification; operators can explicitly ask to forget a mapping. Prices, tax rules and delivery defaults are not learned. Recognizing a teaching statement is model behavior, so review early learning traces during the pilot.
 
@@ -162,21 +162,14 @@ The runner uses **long polling**, so you need no public URL, webhook or hosting 
 ```bash
 npm run telegram:discover     # find your group ID (send a message to the bot first)
 npm run connections:check     # read-only checks of bot, group, company, catalogue, VAT
-npm run telegram:commands     # register the Italian command menu for the group
 npm run telegram:start        # start the poller (Ctrl+C to stop gracefully)
 ```
 
-Talk to the bot naturally in the configured group. The group has one active request at a time; finish or cancel it before you start another. Slash commands are optional shortcuts:
+Talk to the bot naturally in the configured group: "prepara un ordine per Example Studio, 2 Pebble 250", "this order but change the client to Northwind", "crea il cliente Fable Goods". There are no slash commands. The agent works out what you mean, uses the order and customer APIs, and asks when something is missing. Each draft is shown as a 📝 draft order or 👤 new-customer template, with buttons to pick a product or customer when several fit. Saving happens only when someone presses **✅ Conferma e salva** under the latest summary; every change needs a new confirmation.
 
-The router resolves the reply language from substantive operator messages and explicit preferences. The selected language is stored for application summaries, buttons and subsequent confirmations. Commands with descriptive text use a separate language-resolution call; bare commands keep the current language. Attachment approval buttons are bound to the request and revision shown when the question was asked; resend an attachment if that context has changed.
+The group has one open request at a time. Starting another lists the open ones with a button to cancel them. Say "lascia stare" (or similar) to cancel the open request, or use its ❌ button. The agent declines topics unrelated to orders and customers.
 
-| Command | Alias | Action |
-| --- | --- | --- |
-| `/ordine` | `/order` | Start preparing an order |
-| `/cliente` | `/customer` | Start creating a customer |
-| `/confermaordine` | `/confirmorder` | Save the latest order summary (reply to it) |
-| `/confermacliente` | `/confirmcustomer` | Create the latest customer (reply to it) |
-| `/annulla` | — | Cancel the unsaved request |
+The agent replies in the language of the operator's latest message; the application's templates and buttons follow it. Attachment approval buttons are bound to the request and revision shown when the question was asked; resend an attachment if that context has changed.
 
 **Token permissions:** give the Fatture in Cloud token read access to products, clients and settings, plus order-only document access. **Do not grant invoice permissions.** The application's own restrictions are a second layer, not a substitute for a scoped token.
 
@@ -197,18 +190,18 @@ The router resolves the reply language from substantive operator messages and ex
 | `npm run model:check` | Send a tiny live model request to test connectivity (may cost money) |
 | `npm run telegram:start` | Start the Telegram long-polling runner |
 | `npm run telegram:discover` | List candidate group IDs from pending updates |
-| `npm run telegram:commands` | Register the bot command menu for the group |
 | `npm run telegram:recover` | Reconcile an uncertain message delivery |
 | `npm run write:recover` | Inspect/reconcile an uncertain Fatture in Cloud save |
 | `npm run eval:acceptance -- --offline` | Fictional application acceptance scenarios, no model calls |
-| `npm run eval:acceptance` | The same scenarios with live model extraction; provider charges apply |
+| `npm run eval:acceptance` | The same scenarios with the live agent; provider charges apply |
+| `npm run eval:conversations` | Multi-turn Telegram conversations with the live agent and fictional data; provider charges apply |
 | `npm run telegram:pdf` | Send an **existing** order's PDF to the group |
 | `npm run telegram:traces:import` | Import historical transport records into Mastra traces |
 
 ## Architecture
 
 ```
-Telegram group ──► src/telegram ──► src/assistant (Mastra agent + workflows)
+Telegram group ──► src/telegram ──► src/assistant (Mastra agent + order/customer APIs)
                                          │
                                          ├─► src/domain     matching, VAT, totals
                                          ├─► src/config     validated business config
@@ -222,13 +215,13 @@ Telegram group ──► src/telegram ──► src/assistant (Mastra agent + wo
 | [`src/connector`](src/connector) | Narrow, orders-only contract over the official SDK, plus a fictional demo connector. Depends on neither Mastra nor Telegram. |
 | [`src/domain`](src/domain) | Typed drafts, product matching, business preparation, totals |
 | [`src/config`](src/config) | Public configuration schema and loader |
-| [`src/assistant`](src/assistant) | Mastra agent, `prepare-order` suspend/resume workflow, customer-creation skill, scorers, journaled saves |
-| [`src/telegram`](src/telegram) | Bot API transport, polling controller, routing, previews, delivery recovery |
-| [`src/storage`](src/storage) | Application write journal. Mastra owns conversation and workflow storage. |
+| [`src/assistant`](src/assistant) | Mastra agent, order and customer draft APIs and their schema, scorers, journaled saves |
+| [`src/telegram`](src/telegram) | Bot API transport, polling controller, agent turns, templates and buttons, delivery recovery |
+| [`src/storage`](src/storage) | Application write journal. Mastra owns conversation and trace storage. |
 | [`src/health`](src/health) | Read-only diagnostic checks |
 | [`src/mastra`](src/mastra) | Studio registration and local trace exporter |
 
-Each group has one shared Mastra conversation, stored with speaker IDs and a bounded history. Prices, VAT, permissions and saved-order state always come from the application and the API, never from model memory.
+Each group has one shared Mastra conversation, stored with speaker IDs. The agent reads only the recent part: `memory.lastMessages` stored messages (two per turn, so the default 16 covers the last 8 messages and their replies), plus the open request, which it always receives in full. Prices, VAT, permissions and saved-order state always come from the application and the API, never from model memory.
 
 ## Evaluations
 
@@ -250,7 +243,7 @@ OrderFlow is in **foundation / pre-pilot** stage.
 **Working and covered by offline tests**
 
 - [x] Natural-language order and customer preparation in a shared Telegram group
-- [x] Revision-bound confirmation buttons and commands
+- [x] Revision-bound confirmation and candidate buttons
 - [x] Order saving with PDF delivery, and customer creation with duplicate checks
 - [x] Duplicate-safe write journal and uncertain-delivery recovery
 - [x] Configurable VAT rules, including manual VIES confirmation
@@ -258,8 +251,8 @@ OrderFlow is in **foundation / pre-pilot** stage.
 - [x] Voice-note, image and PDF input (whole-document PDF reading)
 - [x] Confirmed product/customer alias learning in Mastra memory
 - [x] Operator tooling for uncertain remote writes
-- [x] Live turn tracing across model/workflow/API/delivery operations
-- [x] Fictional acceptance scenarios with optional live-model extraction
+- [x] Live turn tracing across model/API/delivery operations
+- [x] Fictional acceptance scenarios and multi-turn conversation evals with the live agent
 
 **Not yet done**
 

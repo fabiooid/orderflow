@@ -1,5 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { tracedConnector, traceOperation } from '../src/assistant/execution-trace.js';
+import { turnCachedConnector, withTurnCache } from '../src/connector/turn-cache.js';
 import type { OrderConnector } from '../src/connector/contract.js';
 import { orderCreator } from '../src/telegram/order.js';
 import { telegramTraces } from '../src/telegram/traces.js';
@@ -14,7 +15,6 @@ import { TelegramController } from '../src/telegram/controller.js';
 import { createConversationEngine } from '../src/telegram/engine.js';
 import { acquirePollerLock } from '../src/telegram/lock.js';
 import { albumOf, groupAlbums } from '../src/telegram/adapter.js';
-import type { MediaReader } from '../src/telegram/media.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { FattureInCloudConnector } from '../src/connector/fatture-in-cloud.js';
 import { checkConnections } from '../src/health/check.js';
@@ -47,16 +47,21 @@ async function main() {
   try {
     await store.init();
     await traces.sync(store);
-    const connector = tracedConnector(mode === 'demo' ? new DemoConnector() : fic());
-    const engine = createConversationEngine(config, connector, storage, mode);
-    engineShutdown = engine.shutdown;
-    // Reading a scanned form takes about a minute: keep "typing…" visible meanwhile.
-    const typing = (read: MediaReader): MediaReader => async (event, locale) => {
+    const connector = turnCachedConnector(tracedConnector(mode === 'demo' ? new DemoConnector() : fic()));
+    // Model work and form reading take from seconds to about a minute: keep "typing…" visible meanwhile.
+    // Only around engine calls, so chatter the bot ignores never shows it, nor triggers the list reads started here.
+    const typing = async <T>(work: () => Promise<T>) => {
+      connector.prefetch();
       const show = () => { api.typing(config.telegram.groupId).catch(() => undefined); };
       show();
       const timer = setInterval(show, 4500);
-      try { return await read(event, locale); } finally { clearInterval(timer); }
+      try { return await work(); } finally { clearInterval(timer); }
     };
+    const untyped = createConversationEngine(config, connector, storage);
+    const engine = { ...untyped, turn: (input: Parameters<typeof untyped.turn>[0]) => typing(() => untyped.turn(input)),
+      revise: (...args: Parameters<typeof untyped.revise>) => typing(() => untyped.revise(...args)) };
+    engineShutdown = engine.shutdown;
+    const readMedia = engine.media((id, max) => traceOperation('Telegram download media', () => api.download(id, max)));
     const orderConnector: OrderConnector = mode === 'demo' ? connector : tracedConnector(fic({ writesEnabled: config.orderSavingEnabled }));
     const controller = new TelegramController(config, me.username, store, engine, (text, reply, keyboard) => traceOperation('Telegram deliver text', () => api.sendText(config.telegram.groupId, text, reply, keyboard)), mode === 'read-only' ? customerCreator(config, tracedConnector(fic({ clientWritesEnabled: true })), journal) : undefined,
       mode === 'read-only' && config.orderSavingEnabled ? orderCreator(config, orderConnector, journal) : undefined,
@@ -65,8 +70,8 @@ async function main() {
         if (!saved.url) throw new Error('Saved order PDF not available; reconcile delivery without recreating order');
         return traceOperation('Telegram deliver order PDF', () => api.sendOrderPdf(config.telegram.groupId, saved.url!, `${locale === 'it' ? 'Ordine' : 'Order'} ${saved.number}`), { orderId: id });
       }, {answer: id => api.answerCallback(id), clear: id => api.clearButtons(config.telegram.groupId, id)},
-      typing(engine.media((id, max) => traceOperation('Telegram download media', () => api.download(id, max)))));
-    console.log(`OrderFlow Telegram ${mode} running. Customer creation requires /confirmcustomer. Order saving: ${config.orderSavingEnabled ? 'confirmation required' : 'disabled'}. Stop with Ctrl+C.`);
+      (event, locale) => typing(() => readMedia(event, locale)));
+    console.log(`OrderFlow Telegram ${mode} running. Saving needs the confirmation button. Order saving: ${config.orderSavingEnabled ? 'enabled' : 'disabled'}. Stop with Ctrl+C.`);
     while (!stopping) {
       let updates: { update_id: number }[];
       try {
@@ -82,11 +87,11 @@ async function main() {
       }
       for (const [update, ...album] of groupAlbums(updates)) {
         if (stopping) break;
-        await engine.traceTurn(update!.update_id, async () => {
+        await withTurnCache(() => engine.traceTurn(update!.update_id, async () => {
           await controller.handle(update!, album);
           const entry = await store.update(update!.update_id);
-          return { orderId: entry?.plan.order?.orderId, revision: entry?.plan.order?.revision, state: entry?.plan.order?.status, delivered: entry?.done ?? false };
-        });
+          return { orderId: entry?.plan.order?.orderId, revision: entry?.plan.order?.revision, state: entry?.plan.order?.status, activeOrderId: entry?.plan.activeOrderId, cancelled: entry?.plan.cancelled?.length, delivered: entry?.done ?? false };
+        }));
         try { await traces.sync(store, update!.update_id); } catch { console.warn('Trace export failed; Telegram state remains stored for later import.'); }
       }
     }

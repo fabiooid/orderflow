@@ -1,30 +1,32 @@
 import { expect, it, vi } from 'vitest';
 import { LibSQLStore } from '@mastra/libsql';
-import { createConversationEngine } from '../src/telegram/engine.js';
-import { TelegramController } from '../src/telegram/controller.js';
-import { TelegramStore } from '../src/telegram/store.js';
+import { createConversationEngine, type Converse } from '../src/telegram/engine.js';
+import { TelegramController, type ConversationEngine } from '../src/telegram/controller.js';
+import { TelegramStore, type Conversation } from '../src/telegram/store.js';
 import { DemoConnector } from '../src/connector/demo.js';
+import { draftSchema } from '../src/domain/types.js';
 import { matchingConfigSchema } from '../src/matching/config.js';
 import type { SelectionResult } from '../src/matching/types.js';
 import type { SelectMany } from '../src/matching/resolver.js';
-import { config, draft } from './helpers.js';
+import { config, draft, message, press, prepared, stubEngine } from './helpers.js';
 
 const on = matchingConfigSchema.parse({ mode: 'on' });
 const judge: SelectMany = async requests => requests.map(r => ({ status: 'matched', selectedId: r.kind === 'client' ? 201 : 101,
   evidence: { requestHash: 'test', promptVersion: 'test', retrieval: r.retrieval, elapsedMs: 0 } } satisfies SelectionResult));
+const fresh = (kind: 'order' | 'customer'): Conversation => ({ orderId: 'new', revision: 0, status: 'new', ...(kind === 'customer' ? { kind } : {}), draft: draftSchema.parse({}), policy: config().policyVersion });
 
-it('preserves pre-router operator text, stores validated IDs, and re-resolves clarification turns', async () => {
+it('judges the operator words, never trusts model-written IDs, and settles a pick by button without the agent', async () => {
   const c = config(); c.telegram.respondToAllMessages = true;
   const store = new TelegramStore(':memory:', 'jev-routing'); await store.init();
   const storage = new LibSQLStore({ id: 'jev-routing', url: ':memory:' });
   const selectMany = vi.fn(judge);
-  const extract = vi.fn().mockResolvedValueOnce({ ...draft(), clientId: 202, lines: [{ query: 'small pebble wash', productId: 102 }] })
-    .mockResolvedValue({ ...draft(), clientId: 202, lines: [{ query: 'small pebble wash', productId: 102, quantity: 2 }] });
-  const engine = createConversationEngine(c, new DemoConnector(), storage, 'demo', extract, undefined, { config: on, selectMany });
-  engine.route = async () => ({ action: 'order', text: 'Paraphrased request with the wrong ID', locale: 'en' });
+  // The scripted agent writes IDs of its own; the order API must replace them with judged ones.
+  const converse = vi.fn<Converse>()
+    .mockImplementationOnce(async (_prompt, act) => { await act.order({ ...draft(), clientId: 202, lines: [{ query: 'small pebble wash', productId: 102 }] }); return { reply: '', locale: 'en' }; })
+    .mockImplementationOnce(async (prompt, act) => { await act.order({ ...prompt.openRequest!.draft, lines: [{ ...prompt.openRequest!.draft.lines[0]!, quantity: 2 }] }); return { reply: '', locale: 'en' }; });
+  const engine = createConversationEngine(c, new DemoConnector(), storage, { converse, matching: { config: on, selectMany } });
   let id = 100;
   const controller = new TelegramController(c, 'bot', store, engine, async () => ({ message_id: id++ }));
-  const message = (updateId: number, text: string, replyTo?: number) => ({ update_id: updateId, message: { message_id: updateId, text, from: { id: 5, is_bot: false }, chat: { id: Number(c.telegram.groupId), type: 'supergroup' }, ...(replyTo ? { reply_to_message: { message_id: replyTo } } : {}) } });
   try {
     const original = 'The example shop wants the small pebble wash';
     await controller.handle(message(1, original));
@@ -32,50 +34,67 @@ it('preserves pre-router operator text, stores validated IDs, and re-resolves cl
     const first = await store.order('u1');
     expect(first?.status).toBe('suspended');
     expect(first?.draft.lines[0]?.productId).toBe(101);
-    engine.route = async () => ({ action: 'continue', text: 'quantity two', locale: 'en' });
     await controller.handle(message(2, 'Make it two', 100));
     const next = await store.order('u1');
     expect(next?.status).toBe('ready');
     expect(next?.prepared?.client.id).toBe(201);
-    expect(next?.draft.lines[0]?.productId).toBe(101);
     expect(next?.matchingDecisions).toHaveLength(2);
     expect(selectMany.mock.calls[1]![0][0]?.context).toContain('Make it two');
-    const calls = extract.mock.calls.length;
-    await controller.handle(message(3, 'line 1: 101', 101));
-    expect(extract).toHaveBeenCalledTimes(calls);
+    await controller.handle(press(3, 'pick:u1:2:lines.0:101', 101));
+    expect(converse).toHaveBeenCalledTimes(2);
     expect((await store.order('u1'))?.draft.lines[0]?.productId).toBe(101);
+    expect((await store.order('u1'))?.matchingDecisions?.find(d => d.field === 'lines.0')?.source).toBe('operator');
   } finally { await engine.shutdown(); store.close(); await storage.close(); }
 }, 20000);
 
-it('enabling authoritative matching invalidates confirmations prepared under the legacy policy', async () => {
+it('enabling authoritative matching rechecks a summary prepared under the legacy policy before it can be saved', async () => {
   const c = config(); c.orderSavingEnabled = true;
   const store = new TelegramStore(':memory:', 'jev-policy'); await store.init();
-  const { prepared } = await import('./helpers.js');
-  const process: import('../src/telegram/controller.js').ConversationEngine = async (_text, previous) => ({
-    conversation: { ...previous, revision: previous.revision + 1, status: 'ready', prepared: await prepared(), totals: { net: 1, vat: 0, gross: 1 } }, text: 'Summary',
+  const order = await prepared();
+  const stub = stubEngine();
+  stub.turn.mockImplementation(async input => {
+    const previous = input.request ?? input.fresh('order');
+    return { text: 'Summary', reply: '', locale: 'it', order: { ...previous, revision: previous.revision + 1, status: 'ready', prepared: order, totals: { net: 1, vat: 0, gross: 1 } } };
   });
-  const send = vi.fn(async () => ({ message_id: 100 })); const save = vi.fn();
-  const message = (id: number, text: string, reply?: number) => ({ update_id: id, message: { message_id: id, from: { id: 5, is_bot: false }, chat: { id: Number(c.telegram.groupId), type: 'supergroup' }, text, ...(reply ? { reply_to_message: { message_id: reply } } : {}) } });
+  const engine: ConversationEngine = { ...stub };
+  const send = vi.fn(async (_text: string, _reply: number) => ({ message_id: 100 })); const save = vi.fn();
   try {
-    await new TelegramController(c, 'bot', store, process, send, undefined, save, async () => ({ message_id: 200 })).handle(message(1, '/order two'));
-    process.matchingPolicy = 'jev-identities-v1:test';
-    await new TelegramController(c, 'bot', store, process, send, undefined, save, async () => ({ message_id: 200 })).handle(message(2, '/confirmorder', 100));
+    await new TelegramController(c, 'bot', store, engine, send, undefined, save, async () => ({ message_id: 200 })).handle(message(1, '@bot order two'));
+    engine.matchingPolicy = 'jev-identities-v1:test';
+    await new TelegramController(c, 'bot', store, engine, send, undefined, save, async () => ({ message_id: 200 })).handle(press(2, 'save:u1:1', 100));
     expect(save).not.toHaveBeenCalled();
-    expect((await store.order('u1'))?.status).toBe('ready');
+    // Checked again and shown as a new revision: the old button can no longer save it.
+    expect(stub.revise).toHaveBeenCalledTimes(1);
+    expect((await store.order('u1'))?.revision).toBe(2);
+    expect(send.mock.calls.at(-1)![0]).toContain('La configurazione è cambiata');
   } finally { store.close(); }
 });
 
-it('finishes a customer request without offering creation when an existing customer is explicitly selected', async () => {
+it('treats a bare name in a customer request as a new customer, not a failed lookup', async () => {
+  const storage = new LibSQLStore({ id: 'jev-new-customer', url: ':memory:' });
+  const noMatch: SelectMany = async requests => requests.map(r => ({ status: 'no-match', evidence: { requestHash: 'test', promptVersion: 'test', retrieval: r.retrieval, elapsedMs: 0 } } satisfies SelectionResult));
+  const converse: Converse = async (_prompt, act) => { await act.customer(draftSchema.parse({ newClient: { name: 'Bottega Esempio' } })); return { reply: '', locale: 'it' }; };
+  const engine = createConversationEngine(config(), new DemoConnector(), storage, { converse, matching: { config: on, selectMany: noMatch } });
+  try {
+    const result = await engine.turn({ text: 'Crea cliente "Bottega Esempio"', operatorText: 'Crea cliente "Bottega Esempio"', senderId: '5', fresh });
+    expect(result.text).not.toContain('Nessun cliente corrisponde');
+    expect(result.order?.kind).toBe('customer');
+    expect(result.order?.draft.newClient?.name).toBe('Bottega Esempio');
+    expect(result.order?.draft.clientId).toBeUndefined();
+  } finally { await engine.shutdown(); await storage.close(); }
+});
+
+it('finishes a customer request without offering creation when an existing customer is picked', async () => {
   const c = config();
   const storage = new LibSQLStore({ id: 'jev-existing-customer', url: ':memory:' });
-  const extract = vi.fn();
-  const engine = createConversationEngine(c, new DemoConnector(), storage, 'demo', extract, undefined, { config: on, selectMany: judge });
+  const converse = vi.fn<Converse>();
+  const engine = createConversationEngine(c, new DemoConnector(), storage, { converse, matching: { config: on, selectMany: judge } });
   try {
-    const result = await engine('client: 201', { orderId: 'existing', kind: 'customer', revision: 1, status: 'suspended', policy: c.policyVersion, questions: '', draft: { ...draft(), newClient: { name: 'Example shop' } } });
-    expect(result.conversation.status).toBe('reviewed');
-    expect(result.conversation.draft.clientId).toBe(201);
-    expect(result.conversation.draft.newClient).toBeUndefined();
+    const result = await engine.revise({ orderId: 'existing', kind: 'customer', revision: 1, status: 'suspended', policy: c.policyVersion, draft: { ...draft(), newClient: { name: 'Example shop' } } }, { field: 'client', id: 201 });
+    expect(result.order.status).toBe('reviewed');
+    expect(result.order.draft.clientId).toBe(201);
+    expect(result.order.draft.newClient).toBeUndefined();
     expect(result.text).toContain('201');
-    expect(extract).not.toHaveBeenCalled();
+    expect(converse).not.toHaveBeenCalled();
   } finally { await engine.shutdown(); await storage.close(); }
 });

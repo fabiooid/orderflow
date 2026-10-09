@@ -1,9 +1,15 @@
 import { createClient, type Client } from '@libsql/client';
-import type { OrderDraft, PreparedOrder, Totals, SavedOrder } from '../domain/types.js';
+import type { Issue, OrderDraft, PreparedOrder, Totals, SavedOrder } from '../domain/types.js';
+import type { ConfirmedChoice, Decision } from '../matching/resolver.js';
 import type { MessageEvent, OrderLink } from './adapter.js';
 import type { AppConfig } from '../config/schema.js';
 import type { ConnectorMode } from '../config/load.js';
-export type Conversation = { confirmedChoices?: ReturnType<typeof import('../matching/resolver.js').confirmedChoices>; sourceText?: string; matchingDecisions?: import('../matching/resolver.js').Decision[]; locale?: AppConfig['locale']; orderId: string; startedBy?: string; startedAt?: string; kind?: 'customer'; revision: number; runId?: string; status: 'new' | 'suspended' | 'ready' | 'reviewed' | 'saving' | 'saved' | 'cancelled'; prepared?: PreparedOrder; totals?: Totals; savedOrder?: SavedOrder; draft: OrderDraft; questions: string; policy: string };
+/** Requests stored before customer requests existed have no kind: they are orders. */
+export const kindOf = (c: Pick<Conversation, 'kind'>) => c.kind ?? 'order';
+/** A request's conversation so far, the evidence identity matching reads; bounded so long requests stay usable. */
+export const appendSource = (source: string | undefined, text: string) => [source, text].filter(Boolean).join('\n').slice(-12000);
+/** One order or customer request. `issues` are what the order or customer API last reported as still needed. */
+export type Conversation = { confirmedChoices?: ConfirmedChoice[]; sourceText?: string; matchingDecisions?: Decision[]; locale?: AppConfig['locale']; orderId: string; startedBy?: string; startedAt?: string; kind?: 'customer'; revision: number; status: 'new' | 'suspended' | 'ready' | 'reviewed' | 'saving' | 'saved' | 'cancelled'; prepared?: PreparedOrder; totals?: Totals; savedOrder?: SavedOrder; draft: OrderDraft; issues?: Issue[]; policy: string };
 // Local state locations. Scopes include the mode so fictional state stays separate from account data.
 export const TELEGRAM_STATE_URL = 'file:.data/telegram.db';
 export const telegramScopePrefix = (config: AppConfig, mode: ConnectorMode) => `${config.deploymentId}:${config.telegram.groupId}:${mode}:`;
@@ -13,7 +19,15 @@ export const pollerLockPath = (config: AppConfig) => `.data/telegram-${config.de
 export function journalKey(config: AppConfig, conversationId: string) {
   return `${config.deploymentId}:${config.companyId}:${config.telegram.groupId}:${conversationId}`;
 }
-export type ReplyPlan ={ locale?: AppConfig['locale']; incomingText?: string; senderId?: string; receivedAt?: string; texts: string[]; pdfOrderId?: number; order?: Conversation; replyTo: number;
+export type ReplyPlan ={ locale?: AppConfig['locale']; incomingText?: string; senderId?: string; receivedAt?: string; texts: string[];
+  /** The agent's own words within `texts`; the rest was written by the application (drafts, summaries, confirmations). */
+  agentText?: string; pdfOrderId?: number; order?: Conversation; replyTo: number;
+  /** Other requests this reply voids, stored with it. */
+  cancelled?: Conversation[];
+  /** The open request when the update arrived, for traces. */
+  activeOrderId?: string;
+  /** Newest open request when the reply lists open requests; it binds the void-all button. */
+  voidAll?: OrderLink & { count: number };
   /** Original media message whose question the last text asks; it carries the yes/no buttons. */
   prompt?: { message: number; active: boolean } };
 /** Media waiting for an answer to "prepare an order from this?". `read` keeps text already extracted from it. */
@@ -52,12 +66,16 @@ export class TelegramStore {
     return row ? JSON.parse(String(row.state)) : undefined;
   }
   async activeRequest(): Promise<Conversation | undefined> {
-    const row = (await this.db.execute({
+    return (await this.openRequests(1))[0];
+  }
+  /** Unsaved and unverified requests, newest first. */
+  async openRequests(limit = -1): Promise<Conversation[]> {
+    const rows = (await this.db.execute({
       sql: `SELECT state FROM tg_orders WHERE scope=? AND json_extract(state,'$.kind') IS NOT 'catalogue'
-        AND json_extract(state,'$.status') IN ('new','suspended','ready','saving') ORDER BY rowid DESC LIMIT 1`,
-      args: [this.scope],
-    })).rows[0];
-    return row ? JSON.parse(String(row.state)) : undefined;
+        AND json_extract(state,'$.status') IN ('new','suspended','ready','saving') ORDER BY rowid DESC LIMIT ?`,
+      args: [this.scope, limit],
+    })).rows;
+    return rows.map(row => JSON.parse(String(row.state)));
   }
   async link(message: number): Promise<OrderLink | undefined> {
     const row = (await this.db.execute({ sql: 'SELECT order_id,revision FROM tg_links WHERE scope=? AND message=?', args: [this.scope, message] })).rows[0];
@@ -79,6 +97,7 @@ export class TelegramStore {
       statements.push({ sql: 'INSERT INTO tg_pending(scope,message,album,state) VALUES (?,?,?,?) ON CONFLICT(scope,message) DO UPDATE SET state=excluded.state', args: [this.scope, message, value.event.album ?? null, JSON.stringify(value)] });
     }
     if (effects.consume !== undefined) statements.push({ sql: 'UPDATE tg_pending SET used=1 WHERE scope=? AND message=?', args: [this.scope, effects.consume] });
+    for (const order of plan.cancelled ?? []) statements.push({ sql: 'INSERT INTO tg_orders VALUES (?,?,?) ON CONFLICT(scope,id) DO UPDATE SET state=excluded.state', args: [this.scope, order.orderId, JSON.stringify(order)] });
     if (plan.order) {
       statements.push({ sql: 'INSERT INTO tg_orders VALUES (?,?,?) ON CONFLICT(scope,id) DO UPDATE SET state=excluded.state', args: [this.scope, plan.order.orderId, JSON.stringify(plan.order)] });
       statements.push({ sql: 'INSERT OR REPLACE INTO tg_links VALUES (?,?,?,?)', args: [this.scope, plan.replyTo, plan.order.orderId, plan.order.revision] });
