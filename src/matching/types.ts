@@ -27,7 +27,8 @@ export type SelectionResult = {
   clarificationIds?: number[];
   reason?: 'disabled' | 'incomplete-retrieval' | 'invalid-input' | 'invalid-response' | 'service-unavailable';
   evidence: {
-    groups?: { candidateIds: number[]; status: SelectionResult['status']; selectedId?: number; evidence: Omit<SelectionResult['evidence'], 'groups'> }[];
+    strategy?: string;
+    groups?: { candidateCount: number; candidateHash: string; reason?: string; status: SelectionResult['status']; selectedId?: number; evidence: Pick<SelectionResult['evidence'], 'requestHash' | 'promptVersion' | 'model' | 'elapsedMs'> }[];
     requestHash: string;
     promptVersion: string;
     model?: string;

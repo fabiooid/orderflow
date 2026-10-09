@@ -26,7 +26,7 @@ while (!existsSync(resolve(projectRoot, 'package.json')) || JSON.parse(readFileS
   if (parent === projectRoot) throw new Error('Cannot locate application root');
   projectRoot = parent;
 }
-const config = await loadConfig(resolve(projectRoot, process.env.APP_CONFIG_PATH ?? 'config/example.json'));
+const config = await loadConfig(resolve(projectRoot, process.env.APP_CONFIG_PATH ?? 'config/example.json'), projectRoot);
 await mkdir(resolve(projectRoot, '.data'), { recursive: true });
 const mode = connectorMode();
 // Resolve before Studio changes cwd to its public directory. LibSQL opens lazily.

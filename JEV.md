@@ -46,16 +46,16 @@ The integration does not invent a confidence threshold: calibrate rollout on hel
 realistic cases before enabling `on` in a live deployment.
 
 Each Choice question accepts up to 253 records plus ambiguity/no-match options.
-Customer name searches covering 254–2,530 eligible records search every record in
-up to ten independent groups, batched in one request. A single match is accepted
+Experimental customer name searches (`JEV_LARGE_CLIENT_SEARCH=true`, default false) covering 254–2,530 eligible records search every record in
+up to ten independent groups, batched in a separate customer request so failures cannot take product questions down. A single match is accepted
 only when every other group reports no match. Multiple matches or any ambiguous
 group require clarification; a failed group blocks selection. No probabilities are
-compared across groups, and per-group evidence is retained. This preserves partial
+compared across groups, and compact per-group hashes, counts, status and model/prompt provenance are retained; full probability tables are omitted. This preserves partial
 name/typo matching without dropping customers through a lexical shortlist.
 Larger customer sets require a narrower city/VAT query or explicit record choice.
-Product sets above 253 and incomplete sets still fail explicitly. Independent client/product judgments are batched in one request. The application
+Product sets above 253 and incomplete sets still fail explicitly. Independent client/product judgments are batched in a separate customer request so failures cannot take product questions down. The application
 filters shipping, tester status, explicit codes and sizes, and structured customer
-tax identity and explicitly named catalogue cities before applying a result. History pagination/selection, chunked
+tax identity and explicitly named catalogue cities before applying a result. History pagination/selection, product chunked
 retrieval and semantic multi-result browsing remain separate work; browsing still
 uses the existing search tools.
 
@@ -108,3 +108,22 @@ identity conflicts without FIC access, Telegram, or saves. On 8 October 2026 all
 10 smoke cases passed after a repeat run exposed a city/VAT conflict and a deterministic city constraint was added. This is connection/integration evidence, not production
 accuracy calibration. Offline tests cover outages, invalid selections, shadow/off,
 resume, original-text preservation, explicit choices and alias authorization.
+
+## Large-customer capacity probe
+
+Run `node --env-file=.env --import tsx scripts/eval-large-clients.ts` to measure
+fictional 600- and 2,530-record requests. Reports actual per-request token usage
+once (not summed from duplicated per-question usage), latency and selection outcome.
+This is a capacity smoke test, not held-out calibration. Grouped matching remains
+disabled by default even after a passing probe. Ambiguous groups do not supply an
+arbitrary shortlist: only actual group matches are offered; otherwise ask for city,
+VAT or a more specific name. Request hashes cover inputs and strategy/prompt version,
+not model results. Each group retains its actual model and prompt version.
+
+Capacity probe on 9 October 2026 (`jev-1.13.0`, fictional records): 600 customers
+in three questions matched in 2.14 seconds, using 44,647 input and 6,383 output
+tokens. The 2,530-customer/ten-question request failed; a diagnostic repeat returned
+HTTP 400 in 3.24 seconds. No usage was returned for the rejected request. Dollar
+cost was not calculated because account pricing was not verified. This maximum is
+an application budget, **not a proven supported request size**. Keep the flag off
+until the request shape and held-out selection behavior are validated.
