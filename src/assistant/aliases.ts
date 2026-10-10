@@ -6,8 +6,11 @@ import { normalize } from '../domain/matching.js';
 import { turnOf } from './turn-context.js';
 
 const evidence = { phrase: z.string().min(1).max(160), sourceMessage: z.string().min(1).max(1000), confirmedBy: z.string().min(1) };
-/** Older memories stored numeric catalogue ids. They load as the same opaque strings. */
-const storedId = z.union([z.string().min(1), z.number().int().positive().transform(String)]);
+/**
+ * Older memories stored numeric catalogue ids. Mastra turns this schema into JSON Schema for working memory, which
+ * cannot hold a transform, so the schema accepts both and `read` returns them as the same opaque strings.
+ */
+const storedId = z.union([z.string().min(1), z.number().int().positive()]);
 export const sharedKnowledgeSchema = z.object({
   aliases: z.array(z.object({ ...evidence, productId: storedId }).strict()).max(500).default([]),
   clientAliases: z.array(z.object({ ...evidence, clientId: storedId }).strict()).max(500).default([]),
@@ -18,7 +21,11 @@ export function aliasMemory(memory: Memory, resourceId: string, connector: Order
   const threadId = `${resourceId}:alias-learning`;
   const read = async () => {
     const raw = await memory.getWorkingMemory({ threadId, resourceId });
-    return sharedKnowledgeSchema.parse(raw ? JSON.parse(raw) : {});
+    const data = sharedKnowledgeSchema.parse(raw ? JSON.parse(raw) : {});
+    return {
+      aliases: data.aliases.map(a => ({ ...a, productId: String(a.productId) })),
+      clientAliases: data.clientAliases.map(a => ({ ...a, clientId: String(a.clientId) })),
+    };
   };
   let tail: Promise<unknown> = Promise.resolve();
   const rememberAlias = createTool({
