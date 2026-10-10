@@ -140,6 +140,12 @@ export const conversationCases: ConversationCase[] = [
       return [...expect(chosen || offered, `"saponi" did not lead to the hand wash: ${JSON.stringify(o.open?.draft.lines)}`), ...expect(!/Linen candle/.test(last(o)), 'offered unrelated products')];
     }),
   },
+  {
+    id: 'no-invented-delivery',
+    turns: [{ text: 'abbiamo saponi?' }, { text: 'ok mettili in un ordine 4 saponi e un tester cliente Example Studio' }],
+    // Prices were just shown, but nobody named a delivery charge: it stays open for the order API to ask.
+    check: all(neverGaveUp, o => expect(o.open?.draft.shippingPrice === undefined, `invented a delivery charge of ${o.open?.draft.shippingPrice}`)),
+  },
   { id: 'off-topic', turns: [{ text: 'che tempo fa domani a Milano?' }], check: all(neverGaveUp, nothingOpen, o => expect(last(o).length < 300, 'long off-topic reply')) },
   {
     id: 'new-order-starts-empty',
