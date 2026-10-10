@@ -5,7 +5,8 @@ import { prepareOrder } from '../src/domain/prepare.js';
 
 it('requires an explicit matching manual VAT confirmation and rejects invalid or stale checks', async () => {
   const c = config();
-  c.vatRules = [{ id: 'manual-test', priority: 1, vatId: 49, rate: 0, nature: 'N3.2', requireValidVat: true }];
+  c.vatRules = [{ id: 'manual-test', priority: 1, rate: 0, requireValidVat: true }];
+  c.invoicing.vat = [{ ruleId: 'manual-test', vatId: 49, nature: 'N3.2' }];
   const connector = new DemoConnector();
   const client = (await connector.listClients())[0]!;
   const d = draft();
@@ -19,7 +20,7 @@ it('requires an explicit matching manual VAT confirmation and rejects invalid or
 });
 
 it('accepts Fatture in Cloud default VAT ID zero', async () => {
-  const c = config(); c.vatRules[0]!.vatId = 0;
+  const c = config(); c.invoicing.vat = c.invoicing.vat.map(item => ({ ...item, vatId: 0 }));
   const result = await prepareOrder(draft(), c, new DemoConnector(), '2026-01-15');
   expect(result.ready && result.order.lines.every(l => l.vatId === 0)).toBe(true);
 });

@@ -28,7 +28,7 @@ it('creates only after confirmation, deduplicates retries, and refuses changed p
 });
 
 it('allows customer creation without email or VAT when deployment requirements are empty', async () => {
- const c = config(); c.clients.requiredFields = []; c.clients.sdiCountries = [];
+ const c = config(); c.clients.requiredFields = [];
  const details = customerDetails(draftSchema.parse({ newClient: { name: 'Test', country: 'IT', street: 'Via Test 1', city: 'Roma', postalCode: '00100' } }), c);
  expect(details.client?.name).toBe('Test');
  expect(details.client?.vatNumber).toBeUndefined();
@@ -36,12 +36,13 @@ it('allows customer creation without email or VAT when deployment requirements a
 });
 
 it('needs only a name to create a customer and lists what can still be added', () => {
-  const c = { ...config(), locale: 'it' as const }; c.clients = { ...c.clients, requiredFields: [], sdiCountries: [] };
+  const c = { ...config(), locale: 'it' as const }; c.clients = { ...c.clients, requiredFields: [] };
   const newClient = { name: 'Bottega Esempio', street: 'Example Lane 30', city: 'Example City', postalCode: '00000', province: 'EX', email: 'info@example.invalid' };
   expect(customerDetails(draftSchema.parse({}), c).missing).toEqual(['name']);
   expect(customerDetails(draftSchema.parse({ newClient: { name: 'Bottega Esempio' } }), c).client?.name).toBe('Bottega Esempio');
   const client = customerDetails(draftSchema.parse({ newClient }), c).client!;
-  expect(optionalCustomerFields(client, true)).toEqual(['Paese', 'Partita IVA / codice fiscale', 'Codice SDI', 'PEC', 'Telefono']);
+  expect(optionalCustomerFields(client, true)).toEqual(['Paese', 'Partita IVA / codice fiscale', 'Telefono']);
+  expect(optionalCustomerFields({ ...client, country: 'IT' }, true, { sdiCountries: ['IT'], pecCountries: ['IT'] })).toEqual(['Partita IVA / codice fiscale', 'Codice SDI', 'PEC', 'Telefono']);
   expect(optionalCustomerFields({ ...client, country: 'DE' }, true)).toEqual(['Partita IVA / codice fiscale', 'Telefono']);
   const preview = customerPreview(client, true);
   expect(preview).toContain('• Paese\n• Partita IVA / codice fiscale');

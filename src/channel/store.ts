@@ -17,11 +17,11 @@ export const telegramMemoryUrl = (config: AppConfig, mode: ConnectorMode) => `fi
 export const pollerLockPath = (config: AppConfig) => `.data/telegram-${config.deploymentId}.lock`;
 /** Stable application-owned prefix for journaled writes; changing it would orphan stored journal entries. */
 export function journalKey(config: AppConfig, conversationId: string) {
-  return `${config.deploymentId}:${config.companyId}:${config.channel.groupId}:${conversationId}`;
+  return `${config.deploymentId}:${config.invoicing.companyId}:${config.channel.groupId}:${conversationId}`;
 }
 export type ReplyPlan ={ locale?: AppConfig['locale']; incomingText?: string; senderId?: string; receivedAt?: string; texts: string[];
   /** The agent's own words within `texts`; the rest was written by the application (drafts, summaries, confirmations). */
-  agentText?: string; pdfOrderId?: number; order?: Conversation; replyTo: number;
+  agentText?: string; pdfOrderId?: string; order?: Conversation; replyTo: number;
   /** Other requests this reply voids, stored with it. */
   cancelled?: Conversation[];
   /** The open request when the update arrived, for traces. */

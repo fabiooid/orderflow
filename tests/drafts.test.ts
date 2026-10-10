@@ -22,23 +22,23 @@ it('reports a ready order with its totals, or exactly what is still needed', asy
   const needs = await api.order({ ...draft(), lines: [{ query: 'Pebble 250', quantity: 2 }], shippingPrice: undefined }, context, '2026-01-15');
   expect(needs.status).toBe('needs');
   if (needs.status !== 'needs') return;
-  expect(needs.issues[0]).toMatchObject({ field: 'lines.0', candidates: expect.arrayContaining([expect.objectContaining({ id: 101 })]) });
+  expect(needs.issues[0]).toMatchObject({ field: 'lines.0', candidates: expect.arrayContaining([expect.objectContaining({ id: '101' })]) });
   // The agent reads the problems and candidate names; record IDs stay with the application.
   expect(forAgent(needs)).toMatchObject({ status: 'needs', issues: [{ field: 'lines.0', candidates: expect.arrayContaining(['Pebble hand wash 250 ml']) }] });
   expect(JSON.stringify(forAgent(needs))).not.toContain('101');
 });
 
 it('never trusts a model-written identity: matching replaces it with the judged one', async () => {
-  const judge: SelectMany = async requests => requests.map(r => ({ status: 'matched', selectedId: r.kind === 'client' ? 201 : 101, evidence: { requestHash: 't', promptVersion: 't', retrieval: r.retrieval, elapsedMs: 0 } } satisfies SelectionResult));
+  const judge: SelectMany = async requests => requests.map(r => ({ status: 'matched', selectedId: r.kind === 'client' ? '201' : '101', evidence: { requestHash: 't', promptVersion: 't', retrieval: r.retrieval, elapsedMs: 0 } } satisfies SelectionResult));
   const connector = new DemoConnector();
   const on = createIdentityResolver(config(), connector, { config: matchingConfigSchema.parse({ mode: 'on' }), selectMany: judge });
-  const result = await createDraftApi(config(), connector, on).order({ ...draft(), clientId: 999, lines: [{ query: 'the small pebble wash', productId: 102, quantity: 2 }] }, { ...context, operatorText: 'the small pebble wash for the studio' }, '2026-01-15');
+  const result = await createDraftApi(config(), connector, on).order({ ...draft(), clientId: '999', lines: [{ query: 'the small pebble wash', productId: '102', quantity: 2 }] }, { ...context, operatorText: 'the small pebble wash for the studio' }, '2026-01-15');
   expect(result.status).toBe('ready');
-  expect(result.draft.clientId).toBe(201);
-  expect(result.draft.lines[0]?.productId).toBe(101);
+  expect(result.draft.clientId).toBe('201');
+  expect(result.draft.lines[0]?.productId).toBe('101');
   // An operator's button pick is the one identity that comes from outside the resolver.
-  const picked = await createDraftApi(config(), connector, on).order(result.draft, { ...context, choice: { field: 'lines.0', id: 102 } }, '2026-01-15');
-  expect(picked.draft.lines[0]?.productId).toBe(102);
+  const picked = await createDraftApi(config(), connector, on).order(result.draft, { ...context, choice: { field: 'lines.0', id: '102' } }, '2026-01-15');
+  expect(picked.draft.lines[0]?.productId).toBe('102');
 });
 
 it('drafts a new customer and lists the deployment\'s missing fields', async () => {
@@ -76,7 +76,7 @@ it('uses Mastra resource memory for shared confirmed aliases without storing pri
     const resourceId = `${c.deploymentId}:telegram:${c.channel.groupId}`;
     await memory.createThread({ threadId: 'one', resourceId });
     await memory.createThread({ threadId: 'two', resourceId });
-    const confirmed = sharedKnowledgeSchema.parse({ aliases: [{ phrase: 'small wash', productId: 101, sourceMessage: 'demo-message', confirmedBy: 'demo-operator' }] });
+    const confirmed = sharedKnowledgeSchema.parse({ aliases: [{ phrase: 'small wash', productId: '101', sourceMessage: 'demo-message', confirmedBy: 'demo-operator' }] });
     await memory.updateWorkingMemory({ threadId: 'one', resourceId, workingMemory: JSON.stringify(confirmed) });
     expect(await memory.getWorkingMemory({ threadId: 'two', resourceId })).toContain('small wash');
     expect(() => sharedKnowledgeSchema.parse({ ...confirmed, prices: { item: 1 } })).toThrow();

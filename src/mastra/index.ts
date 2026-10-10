@@ -32,7 +32,7 @@ const configuredUrl = mode === 'demo' ? (process.env.MASTRA_DATABASE_URL ?? 'fil
 const storageUrl = configuredUrl.startsWith('file:') && !configuredUrl.startsWith('file:/')
   ? pathToFileURL(resolve(projectRoot, configuredUrl.slice(5))).href : configuredUrl;
 const storage = new LibSQLStore({ id: 'assistant-storage', url: storageUrl });
-const connector = mode === 'read-only' ? FattureInCloudConnector.fromToken(config.companyId, process.env.FIC_ACCESS_TOKEN ?? '') : new DemoConnector();
+const connector = mode === 'read-only' ? FattureInCloudConnector.fromToken(config.invoicing.companyId, process.env.FIC_ACCESS_TOKEN ?? '') : new DemoConnector();
 const live = liveEvalSettings();
 // Studio chat uses the same order and customer APIs as Telegram; they validate only, and Studio has no save buttons.
 const { agent, scorers: manualScorers } = createOrderAgent(config, connector, storage, live);

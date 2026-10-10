@@ -3,14 +3,14 @@ import { draftSchema, type OrderDraft } from '../domain/types.js';
 import type { Conversation } from '../channel/store.js';
 import { expect, type ConversationCase } from './harness.js';
 
-type Line = { productId: number; quantity: number; netPrice: number; discountPercent: number; vatId: number };
+type Line = { productId: string; quantity: number; netPrice: number; discountPercent: number; vatId: number };
 /** What the operator ends up with: the prepared order, or the fields still asked about. */
-export type Outcome = { ready: false; issues: string[] } | { ready: true; clientId?: number; lines: Line[]; deliveryCountry: string; totals: { net: number; vat: number; gross: number } };
+export type Outcome = { ready: false; issues: string[] } | { ready: true; clientId?: string; lines: Line[]; deliveryCountry: string; totals: { net: number; vat: number; gross: number } };
 
-const merchandise = (quantity = 2, netPrice = 12, discountPercent = 0): Line => ({ productId: 101, quantity, netPrice, discountPercent, vatId: 1 });
-const shipping: Line = { productId: 900, quantity: 1, netPrice: 8, discountPercent: 0, vatId: 1 };
+const merchandise = (quantity = 2, netPrice = 12, discountPercent = 0): Line => ({ productId: '101', quantity, netPrice, discountPercent, vatId: 1 });
+const shipping: Line = { productId: '900', quantity: 1, netPrice: 8, discountPercent: 0, vatId: 1 };
 const base = draftSchema.parse({ clientQuery: 'Example Studio', lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 8 });
-const ready = (lines: Line[], net: number, vat: number, gross: number): Outcome => ({ ready: true, clientId: 201, lines, deliveryCountry: 'IT', totals: { net, vat, gross } });
+const ready = (lines: Line[], net: number, vat: number, gross: number): Outcome => ({ ready: true, clientId: '201', lines, deliveryCountry: 'IT', totals: { net, vat, gross } });
 
 /** The outcome the operator sees after the last message. */
 export function observedOutcome(request?: Conversation): Outcome {

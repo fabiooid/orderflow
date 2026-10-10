@@ -28,15 +28,16 @@ export async function checkConnections(config: AppConfig, ports: HealthPorts): P
     if (!await ports.company()) throw new Error(); return 'Configured company is accessible.';
   });
   await check('Catalogue and shipping', async () => {
-    const p = await ports.products(); if (!p.some(p => p.id === config.shipping.productId)) throw new Error();
+    const p = await ports.products(); if (!p.some(p => p.id === config.invoicing.shippingProductId)) throw new Error();
     return `${p.length} catalogue entries read; configured shipping product found.`;
   });
   await check('Client access', async () => `${(await ports.clients()).length} client records accessible; no client data printed.`);
   await check('VAT mappings', async () => {
     const vats = await ports.vat();
     for (const rule of config.vatRules) {
-      const vat = vats.find(v => v.id === rule.vatId);
-      if (!vat || vat.is_disabled || vat.value !== rule.rate || (rule.nature && vat.ei_type?.replace(/^N/, '') !== rule.nature.replace(/^N/, ''))) throw new Error();
+      const binding = config.invoicing.vat.find(item => item.ruleId === rule.id);
+      const vat = binding ? vats.find(v => v.id === binding.vatId) : undefined;
+      if (!binding || !vat || vat.is_disabled || vat.value !== rule.rate || (binding.nature && vat.ei_type?.replace(/^N/, '') !== binding.nature.replace(/^N/, ''))) throw new Error();
     }
     return 'All configured VAT IDs, rates and nature codes match enabled account entries.';
   });

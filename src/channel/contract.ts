@@ -25,7 +25,7 @@ export type ParsedCallback = {
   event: MessageEvent;
   action:
     | { kind: 'pending'; message: number; accept: boolean }
-    | { kind: 'pick'; target: OrderLink; choice: { field: string; id: number } }
+    | { kind: 'pick'; target: OrderLink; choice: { field: string; id: string } }
     | { kind: 'confirmOrder' | 'confirmCustomer' | 'review' | 'cancel' | 'cancelAll'; target: OrderLink };
 };
 

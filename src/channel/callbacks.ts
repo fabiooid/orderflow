@@ -8,7 +8,7 @@ export const callbackLabels = { save: '✅ Conferma e salva', customer: '✅ Con
 export const callbackData = (action: keyof typeof callbackActions, link: OrderLink) => `${action}:${link.orderId}:${link.revision}`;
 
 /** A candidate button under a draft: the request revision, the field it settles and the record picked. */
-export const pickData = (link: OrderLink, field: string, id: number) => `pick:${link.orderId}:${link.revision}:${field}:${id}`;
+export const pickData = (link: OrderLink, field: string, id: string) => `pick:${link.orderId}:${link.revision}:${field}:${id}`;
 
 /** Buttons under a prompt for media that did not say what to do with it. */
 export const mediaCallbackData = (message: number, accept: boolean) => `media:${message}:${accept ? 'y' : 'n'}`;

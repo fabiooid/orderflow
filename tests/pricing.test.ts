@@ -14,14 +14,14 @@ import { draftSchema, type ClientOrder } from '../src/domain/types.js';
 import { orderPreview } from '../src/channel/preview.js';
 import { draft, prepared } from './helpers.js';
 
-const tradeForm = { schemaVersion: 1, id: 'trade-list', name: 'Trade list', priceTier: 'trade', columns: [{ id: 'order', heading: 'Order', value: 'quantity' }], rows: [{ code: 'DEMO-A', label: 'Pebble', cells: { order: { productId: 101, netPrice: 15 } } }] };
+const tradeForm = { schemaVersion: 1, id: 'trade-list', name: 'Trade list', priceTier: 'trade', columns: [{ id: 'order', heading: 'Order', value: 'quantity' }], rows: [{ code: 'DEMO-A', label: 'Pebble', cells: { order: { productId: '101', netPrice: 15 } } }] };
 const tiered = (clientIds = [201]) => configSchema.parse({ ...structuredClone(example), priceTiers: [{ id: 'trade', name: 'Trade', clientIds }], orderForms: [tradeForm] });
 const prepare = (input: Partial<ReturnType<typeof draft>>, config = tiered()) => prepareOrder(draftSchema.parse({ ...draft(), ...input }), config, new DemoConnector(), '2026-01-15');
 
 describe('price tiers', () => {
   it('uses API prices even for clients with legacy configured template prices', async () => {
     const result = await prepare({});
-    expect(result.ready && result.order.lines[0]).toMatchObject({ productId: 101, netPrice: 12 });
+    expect(result.ready && result.order.lines[0]).toMatchObject({ productId: '101', netPrice: 12 });
     expect(result.ready && result.order.priceTier).toBeUndefined();
     const other = await prepare({}, tiered([]));
     expect(other.ready && other.order.lines[0]?.netPrice).toBe(12);
@@ -43,8 +43,8 @@ describe('price tiers', () => {
     const parse = (extra: object) => configSchema.safeParse({ ...structuredClone(example), ...extra }).success;
     expect(parse({ orderForms: [tradeForm] })).toBe(false);
     expect(parse({ priceTiers: [{ id: 'a', name: 'A', clientIds: [1] }, { id: 'b', name: 'B', clientIds: [1] }] })).toBe(false);
-    expect(parse({ priceTiers: [{ id: 'trade', name: 'H', clientIds: [] }], orderForms: [{ ...tradeForm, rows: [{ code: '', label: 'x', cells: { tester: { productId: 1 } } }] }] })).toBe(false);
-    expect(tierPrices(tiered(), 'trade')).toEqual(new Map([[101, 15]]));
+    expect(parse({ priceTiers: [{ id: 'trade', name: 'H', clientIds: [] }], orderForms: [{ ...tradeForm, rows: [{ code: '', label: 'x', cells: { tester: { productId: '1' } } }] }] })).toBe(false);
+    expect(tierPrices(tiered(), 'trade')).toEqual(new Map([['101', 15]]));
   });
   it('loads order forms listed as file paths', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'forms-'));
@@ -66,21 +66,21 @@ describe('price tiers', () => {
 
 it('offers exactly the named products for an "A oppure B" line', async () => {
   const products = await new DemoConnector().listProducts();
-  expect(namedAlternatives('da chiarire (A1, order): Pebble hand wash 250 ml oppure Linen candle 200 g', products).map(p => p.id)).toEqual([101, 103]);
+  expect(namedAlternatives('da chiarire (A1, order): Pebble hand wash 250 ml oppure Linen candle 200 g', products).map(p => p.id)).toEqual(['101', '103']);
   expect(namedAlternatives('Pebble hand wash 250 ml or something else', products)).toEqual([]);
   const result = await prepare({ lines: [{ query: 'Pebble hand wash 250 ml oppure Linen candle 200 g', quantity: 1 }] }, tiered([]));
-  expect(!result.ready && result.issues[0]?.candidates).toEqual([{ id: 101, label: 'Pebble hand wash 250 ml' }, { id: 103, label: 'Linen candle 200 g' }]);
+  expect(!result.ready && result.issues[0]?.candidates).toEqual([{ id: '101', label: 'Pebble hand wash 250 ml' }, { id: '103', label: 'Linen candle 200 g' }]);
 });
 
 describe('previous orders', () => {
   const earlier = (number: string, date: string, lines: Partial<ClientOrder['lines'][number]>[]): ClientOrder =>
-    ({ id: Number(number), number, date, lines: lines.map(l => ({ code: '', name: '', quantity: 1, netPrice: 0, discountPercent: 0, ...l })) });
+    ({ id: number, number, date, lines: lines.map(l => ({ code: '', name: '', quantity: 1, netPrice: 0, discountPercent: 0, ...l })) });
   it('compares unit prices after discount with the latest paid line, skipping free ones', async () => {
     const order = await prepared(); // Pebble at €12 with 10% off, delivery at €8 with no discount.
     const found = priceDiscrepancies(order, [
-      earlier('9', '2026-01-10', [{ productId: 101, netPrice: 0 }, { productId: 900, netPrice: 8 }]),
-      earlier('8', '2025-12-01', [{ productId: 101, netPrice: 12, discountPercent: 20 }]),
-      earlier('7', '2025-11-01', [{ productId: 101, netPrice: 30 }]),
+      earlier('9', '2026-01-10', [{ productId: '101', netPrice: 0 }, { productId: '900', netPrice: 8 }]),
+      earlier('8', '2025-12-01', [{ productId: '101', netPrice: 12, discountPercent: 20 }]),
+      earlier('7', '2025-11-01', [{ productId: '101', netPrice: 30 }]),
     ]);
     expect(found).toEqual([{ name: 'Pebble hand wash 250 ml', now: 10.8, before: 9.6, order: { number: '8', date: '2025-12-01' } }]);
   });
@@ -96,7 +96,7 @@ describe('previous orders', () => {
       { id: 6, type: 'order', number: 136, date: '2026-10-02', entity: { id: 43 }, items_list: [] },
     ] } });
     const connector = new FattureInCloudConnector(1, { documents: { listIssuedDocuments } } as unknown as SdkPorts);
-    expect(await connector.listClientOrders(42, 3)).toEqual([{ id: 5, number: '77', date: '2026-01-10', lines: [{ productId: 7, code: 'DEMO-R', name: 'Linen refill 1 l', quantity: 1, netPrice: 80, discountPercent: 0 }] }]);
+    expect(await connector.listClientOrders('42', 3)).toEqual([{ id: '5', number: '77', date: '2026-01-10', lines: [{ productId: '7', code: 'DEMO-R', name: 'Linen refill 1 l', quantity: 1, netPrice: 80, discountPercent: 0 }] }]);
     expect(listIssuedDocuments).toHaveBeenCalledWith(1, 'order', undefined, 'detailed', '-date', 1, 5, 'entity.id = 42');
   });
 });

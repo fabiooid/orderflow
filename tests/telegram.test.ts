@@ -50,7 +50,7 @@ it('turns buttons into typed actions bound to their revision', () => {
   const tap = (data: string) => ({ update_id: 9, callback_query: { id: 'cb', from: { id: 7, is_bot: false }, data, message: { message_id: 100, chat: { id: -1000000000001, type: 'supergroup' } } } });
   expect(normalizeCallback(tap('save:u1:2'), config())).toMatchObject({ action: { kind: 'confirmOrder', target: { orderId: 'u1', revision: 2 } }, event: { senderId: '7', replyTo: 100, text: '✅ Conferma e salva' } });
   expect(normalizeCallback(tap('review:u1:2'), config())).toMatchObject({ action: { kind: 'review', target: { orderId: 'u1', revision: 2 } } });
-  expect(normalizeCallback(tap('pick:u1:2:lines.0:104'), config())).toMatchObject({ action: { kind: 'pick', target: { orderId: 'u1', revision: 2 }, choice: { field: 'lines.0', id: 104 } } });
+  expect(normalizeCallback(tap('pick:u1:2:lines.0:104'), config())).toMatchObject({ action: { kind: 'pick', target: { orderId: 'u1', revision: 2 }, choice: { field: 'lines.0', id: '104' } } });
   expect(normalizeCallback(tap('pick:u1:2:notes:104'), config())).toBeUndefined();
   expect(normalizeCallback(tap('delete:u1:2'), config())).toBeUndefined();
 });

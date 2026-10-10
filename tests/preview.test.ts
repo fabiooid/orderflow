@@ -44,9 +44,9 @@ it('shows a draft customer with what is still missing', () => {
 it('shows a draft order with what is known and marks each missing piece', () => {
   const draft = draftSchema.parse({ clientQuery: 'Northwind', lines: [{ query: 'sapone menta' }, { query: 'spray menta', quantity: 2 }, { query: 'candela', quantity: 1, netPrice: 9 }] });
   const issues = [
-    { field: 'client', matchingStatus: 'ambiguous' as const, message: 'Clarify', candidates: [{ id: 1, label: 'Northwind Bistro — Bergamo' }] },
+    { field: 'client', matchingStatus: 'ambiguous' as const, message: 'Clarify', candidates: [{ id: '1', label: 'Northwind Bistro — Bergamo' }] },
     { field: 'lines.0.quantity', message: 'Specify the quantity' },
-    { field: 'lines.1', message: 'Choose the exact product', candidates: [{ id: 2, label: 'Spray Menta 100ml' }] },
+    { field: 'lines.1', message: 'Choose the exact product', candidates: [{ id: '2', label: 'Spray Menta 100ml' }] },
     { field: 'shippingPrice', message: 'Confirm the delivery charge', defaultPrice: 8 },
   ];
   const text = orderDraft(draft, issues, true);
@@ -63,8 +63,8 @@ it('shows a draft order with what is known and marks each missing piece', () => 
 });
 
 it('shows the chosen customer on a draft order', () => {
-  const draft = draftSchema.parse({ clientQuery: 'Example Studio', clientId: 201, lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 0 });
-  const text = orderDraft(draft, [{ field: 'vat', message: 'Check VAT' }], true, { id: 201, name: 'Example Studio', country: 'IT', street: 'Example Street 1', city: 'Example City', postalCode: '00000', notes: '' });
+  const draft = draftSchema.parse({ clientQuery: 'Example Studio', clientId: '201', lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 0 });
+  const text = orderDraft(draft, [{ field: 'vat', message: 'Check VAT' }], true, { id: '201', name: 'Example Studio', country: 'IT', street: 'Example Street 1', city: 'Example City', postalCode: '00000', notes: '' });
   expect(text).toMatch(/🏪 Example Studio\n📍 Example Street 1, 00000 Example City, IT/);
   expect(text).toContain('🚚 Consegna: nessuna');
   expect(text).toContain('❓ Da completare: controllo IVA');
