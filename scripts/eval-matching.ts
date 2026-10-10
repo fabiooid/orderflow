@@ -29,6 +29,6 @@ try {
   console.log(JSON.stringify({ passed, total, wrongSelections, unavailable }));
   if (passed !== total) process.exitCode = 1;
 } catch {
-  console.error('Matching evaluation could not start. Set JEV_MODE=shadow and TYPESAFE_API_KEY; check JEV configuration. No records were written.');
+  console.error('Matching evaluation could not start. Set MATCHER_MODE=shadow (or JEV_MODE=shadow) and TYPESAFE_API_KEY. No records were written.');
   process.exitCode = 1;
 }

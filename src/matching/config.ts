@@ -9,16 +9,33 @@ export const matchingConfigSchema = z.object({
 }).strict();
 export type MatchingConfig = z.infer<typeof matchingConfigSchema>;
 
+/** Prefer the vendor-neutral name. An empty value falls through to the deprecated JEV_* alias. */
+function setting(env: NodeJS.ProcessEnv, name: string, alias: string): string | undefined {
+  const primary = env[name];
+  if (primary !== undefined && primary !== '') return primary;
+  return env[alias];
+}
+
+function flag(env: NodeJS.ProcessEnv, name: string, alias: string): boolean | string {
+  const raw = setting(env, name, alias);
+  if (raw === undefined || raw === '') return false;
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  return raw;
+}
+
 /** Shared workflow configuration for Telegram, Studio and read-only evaluation. */
 export function loadMatchingConfig(env: NodeJS.ProcessEnv = process.env): MatchingConfig {
   const parsed = matchingConfigSchema.safeParse({
-    largeClientSearch: env.JEV_LARGE_CLIENT_SEARCH === undefined ? false : env.JEV_LARGE_CLIENT_SEARCH === 'true' ? true : env.JEV_LARGE_CLIENT_SEARCH === 'false' ? false : env.JEV_LARGE_CLIENT_SEARCH,
-    mode: env.JEV_MODE, model: env.JEV_MODEL,
-    timeoutMs: env.JEV_TIMEOUT_MS, maxRetries: env.JEV_MAX_RETRIES,
+    largeClientSearch: flag(env, 'MATCHER_LARGE_CLIENT_SEARCH', 'JEV_LARGE_CLIENT_SEARCH'),
+    mode: setting(env, 'MATCHER_MODE', 'JEV_MODE'),
+    model: setting(env, 'MATCHER_MODEL', 'JEV_MODEL'),
+    timeoutMs: setting(env, 'MATCHER_TIMEOUT_MS', 'JEV_TIMEOUT_MS'),
+    maxRetries: setting(env, 'MATCHER_MAX_RETRIES', 'JEV_MAX_RETRIES'),
   });
-  if (!parsed.success) throw new Error('Invalid JEV configuration');
+  if (!parsed.success) throw new Error('Invalid matching configuration');
   if (parsed.data.mode !== 'off' && !env.TYPESAFE_API_KEY?.trim()) {
-    throw new Error('TYPESAFE_API_KEY is required when JEV_MODE is enabled');
+    throw new Error('TYPESAFE_API_KEY is required when matching is enabled');
   }
   return parsed.data;
 }

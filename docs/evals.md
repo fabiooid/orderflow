@@ -181,7 +181,7 @@ npm run eval:acceptance
 
 Both replay the messages through the real Telegram controller and engine (`src/evals/acceptance.ts`, run by the shared harness in `src/evals/harness.ts`) and compare the outcome exactly. The six cases cover Italian and English orders, a quantity correction, a custom unit price, discount excluding delivery, and missing delivery confirmation. Expected customer, products, quantities, net prices, discounts, VAT IDs, delivery country, totals and clarification fields are checked exactly. Score 1 means every checked field matches; 0 prints the mismatch. It is not a model judge's opinion.
 
-Offline mode replaces the model with each case's scripted drafts, so it checks application behavior only. The second command uses the actual agent against the fictional `DemoConnector` and makes paid model calls. With `JEV_MODE=on` the order API resolves identities as in Telegram, so JEV calls are made too. Set `EVAL_AGENT_MODEL` to compare models. It ignores business configuration and never writes FIC records or messages Telegram. Each run uses a temporary memory database, preventing prior evaluations from influencing it.
+Offline mode replaces the model with each case's scripted drafts, so it checks application behavior only. The second command uses the actual agent against the fictional `DemoConnector` and makes paid model calls. With `MATCHER_MODE=on` (or the deprecated `JEV_MODE=on`) the order API resolves identities as in Telegram, so JEV calls are made too. Set `EVAL_AGENT_MODEL` to compare models. It ignores business configuration and never writes FIC records or messages Telegram. Each run uses a temporary memory database, preventing prior evaluations from influencing it.
 
 These cases do not certify media accuracy, conversational understanding, actual save permissions or every VAT scenario. The offline Vitest suite separately tests confirmation/revisions, duplicate prevention, alias persistence, PDF page rendering and recovery. `eval:orderforms` measures real document reading. A supervised live order remains the final integration check.
 
@@ -228,7 +228,7 @@ accuracy is claimed by the offline regression suite.
 
 ### JEV workflow integration
 
-`JEV_MODE=on npm run eval:matching:workflow` sends fictional product/customer cases
+`MATCHER_MODE=on npm run eval:matching:workflow` (or `JEV_MODE=on`) sends fictional product/customer cases
 through the same order API used by Telegram and Studio. Drafts are scripted; JEV calls are real and billed normally. No FIC or
 Telegram access or writes occur. Dated smoke notes are in [planning/run-log.md](planning/run-log.md). This is smoke
 evidence, not held-out calibration. `npm test` covers authoritative IDs, explicit
