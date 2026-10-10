@@ -1,7 +1,7 @@
 import Decimal from 'decimal.js';
 import type { OrderLine, Totals } from './types.js';
 
-/** Predictive totals for fixtures/review; Fatture in Cloud is authoritative for live rounding. */
+/** Predictive totals for fixtures/review; the invoicing connector is authoritative for live rounding. */
 export function calculateLineTotals(lines: OrderLine[]): Totals {
   let net = new Decimal(0);
   let vat = new Decimal(0);

@@ -2,7 +2,10 @@
   "schemaVersion": 1,
   "deploymentId": "fictional-demo",
   "policyVersion": "demo-v1",
-  "companyId": 1,
+  "invoicing": {
+    "provider": "fatture-in-cloud",
+    "companyId": 1
+  },
   "locale": "it",
   "currency": "EUR",
   "priceBasis": "net",

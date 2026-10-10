@@ -18,7 +18,7 @@ it('gives the agent the order and customer APIs and lookups, and no way to save'
 });
 
 it('keeps business rules in the prompt and field rules in the API schema, with no slash commands', () => {
-  const prompt = systemPrompt;
+  const prompt = systemPrompt(config().invoicing.label);
   expect(prompt).toContain('Never create invoices or proformas');
   expect(prompt).toContain('Only the operator saves');
   expect(prompt).toContain('out of scope');

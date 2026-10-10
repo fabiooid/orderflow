@@ -9,7 +9,7 @@ async function main() {
   const config = await loadAppConfig();
   const permissions = await liveHealthPorts(config, process.env).telegram();
   if (!permissions.member || !permissions.canSend) throw new Error();
-  const connector = FattureInCloudConnector.fromToken(config.companyId, process.env.FIC_ACCESS_TOKEN ?? '');
+  const connector = FattureInCloudConnector.fromToken(config.invoicing.companyId, process.env.FIC_ACCESS_TOKEN ?? '');
   const order = await connector.getOrder(id);
   if (!order.url) throw new Error();
   // No order write, no customer email, no model-supplied URL or destination.

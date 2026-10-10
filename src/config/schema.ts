@@ -7,17 +7,31 @@ const telegramChannelSchema = z.object({
   respondToAllMessages: z.boolean().default(false),
 }).strict();
 
-/** Accepts the older top-level `telegram` object by folding it into `channel`. */
-function liftChannel(value: unknown) {
+/** Accepts the older top-level `telegram` object and `companyId` by folding them into `channel` and `invoicing`. */
+function liftLegacy(value: unknown) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
-  const record = value as Record<string, unknown>;
-  if (record.channel || !record.telegram || typeof record.telegram !== 'object') return value;
-  const { telegram, ...rest } = record;
-  return { ...rest, channel: { provider: 'telegram', ...(telegram as object) } };
+  const record = { ...(value as Record<string, unknown>) };
+  if (!record.channel && record.telegram && typeof record.telegram === 'object') {
+    record.channel = { provider: 'telegram', ...(record.telegram as object) };
+    delete record.telegram;
+  }
+  if (!record.invoicing && typeof record.companyId === 'number') {
+    record.invoicing = { provider: 'fatture-in-cloud', companyId: record.companyId };
+    delete record.companyId;
+  } else if (record.invoicing && typeof record.invoicing === 'object' && (record.invoicing as { companyId?: number }).companyId === record.companyId) {
+    delete record.companyId;
+  }
+  return record;
 }
 
 const country = z.string().regex(/^[A-Z]{2}$/);
 const positiveId = z.number().int().positive();
+const invoicingSchema = z.object({
+  provider: z.literal('fatture-in-cloud'),
+  companyId: positiveId,
+  /** Name shown to operators. Defaults to the provider's own name. */
+  label: z.string().min(1).max(80).default('Fatture in Cloud'),
+}).strict();
 const vatRuleSchema = z.object({
   id: z.string().min(1),
   priority: z.number().int(),
@@ -66,12 +80,13 @@ const configObject = z.object({
   schemaVersion: z.literal(1),
   deploymentId: z.string().regex(/^[a-z0-9-]+$/),
   policyVersion: z.string().min(1),
-  companyId: positiveId,
   locale: z.enum(['it', 'en']),
   currency: z.string().regex(/^[A-Z]{3}$/),
   priceBasis: z.literal('net'),
   /** Which conversation to join. Add a provider by extending this object. */
   channel: telegramChannelSchema,
+  /** Which invoicing system stores orders. Add a provider by extending this object. */
+  invoicing: invoicingSchema,
   orderSavingEnabled: z.boolean().default(false),
   shipping: z.object({ productId: positiveId, discountByDefault: z.boolean() }).strict(),
   clients: z.object({
@@ -116,7 +131,7 @@ const configObject = z.object({
   }
 });
 
-export const configSchema = z.preprocess(liftChannel, configObject);
+export const configSchema = z.preprocess(liftLegacy, configObject);
 
 export type AppConfig = z.infer<typeof configSchema>;
 

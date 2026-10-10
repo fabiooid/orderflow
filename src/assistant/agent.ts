@@ -96,9 +96,10 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
     },
   });
   const orderApi = prepare('order', drafts.order), customerApi = prepare('customer', drafts.customer);
-  const prepareOrder = draftTool('prepare-order', "The order API: create or edit the order. Send the complete order as it should be after this turn, starting from the open order's draft. The application checks customer, products, prices, VAT and delivery against Fatture in Cloud, shows the draft to the operator and reports what is still needed. It never saves.",
+  const books = config.invoicing.label;
+  const prepareOrder = draftTool('prepare-order', `The order API: create or edit the order. Send the complete order as it should be after this turn, starting from the open order's draft. The application checks customer, products, prices, VAT and delivery against ${books}, shows the draft to the operator and reports what is still needed. It never saves.`,
     orderDraftInput, parseDraft, orderApi);
-  const prepareCustomer = draftTool('prepare-customer', "The customer API: create a new customer in Fatture in Cloud, or correct the one being drafted. Send every detail known so far. The application checks for an existing customer, shows the draft and reports what is still needed. It never saves. For an order's customer use prepare-order instead.",
+  const prepareCustomer = draftTool('prepare-customer', `The customer API: create a new customer in ${books}, or correct the one being drafted. Send every detail known so far. The application checks for an existing customer, shows the draft and reports what is still needed. It never saves. For an order's customer use prepare-order instead.`,
     customerDraftInput, parseCustomer, customerApi);
   const cancel = (requestContext?: RequestContext) => {
     const turn = turnOf(requestContext);
@@ -116,7 +117,7 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
   const agent = new Agent({
     // Keep the persisted agent ID stable across the OrderFlow rebrand.
     id: 'order-assistant', name: 'OrderFlow', model: config.model,
-    instructions: systemPrompt,
+    instructions: systemPrompt(books),
     memory, tools,
     scorers: liveAgentScorers(scorers, live),
   });

@@ -80,7 +80,7 @@ const fieldLabels: Record<string, CopyKey> = {
 };
 const fieldLabel = (field: string, it: boolean) => fieldLabels[field] ? say(it, fieldLabels[field]) : field;
 
-/** Details Fatture in Cloud accepts but does not require. SDI and PEC apply to Italian customers, assumed when no country is given. */
+/** Optional customer details. SDI and PEC apply to Italian customers, assumed when no country is given. */
 export function optionalCustomerFields(client: Partial<NewCustomer>, it: boolean) {
   const italian = !client.country || client.country === 'IT';
   const fields: string[] = (['street', 'postalCode', 'city', 'country'] as const).filter(field => !client[field]).map(field => fieldLabel(field, it));

@@ -22,8 +22,8 @@ A channel turns a provider's updates into the conversation core and sends replie
 
 ## How to add an invoicing connector
 
-1. Implement `OrderConnector` in `src/connector/contract.ts`. Map only orders and customers. Do not expose invoices, email or deletes.
-2. Keep vendor ids and payload shapes inside the adapter. The domain sees the types in `src/domain/types.ts`.
-3. Put provider-only settings in config under that provider, not as new defaults in code.
-4. Run the shared connector contract tests against your adapter (the demo connector is the reference). Mock the vendor HTTP layer; do not call a live account from `npm test`.
-5. Wire it from `connectorMode()` / the composition root. `src/domain/` and `src/assistant/` must keep importing the contract only.
+1. Implement `OrderConnector` in `src/connector/contract.ts` in a new file under `src/connector/`. Map only orders and customers. Do not expose invoices, email or deletes.
+2. Keep vendor payload shapes inside the adapter. The domain sees the types in `src/domain/types.ts`.
+3. Put provider-only settings under `invoicing` in config (`provider` plus that system's company id). Do not add a new default in code.
+4. Add the adapter to `tests/connector-contract.test.ts`. The demo connector is the reference. Mock the vendor HTTP layer; do not call a live account from `npm test`.
+5. Wire it from `connectorMode()` / the composition root. `src/domain/` and `src/assistant/` must keep importing the contract only. `npm run boundaries` checks this.

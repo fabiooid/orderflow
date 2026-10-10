@@ -76,7 +76,8 @@ export class TelegramController {
     this.locale = config.locale;
   }
 
-  private books() { return 'Fatture in Cloud'; }
+  /** Operator-facing name of the invoicing system, from config. */
+  private books() { return this.config.invoicing.label; }
 
   private t(key: CopyKey, vars?: CopyVars) { return copy(this.locale, key, vars); }
 

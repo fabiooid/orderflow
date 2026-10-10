@@ -24,7 +24,7 @@ async function main() {
   }
   const out = values.out ?? `private/order-forms/${values.id}.json`;
   const config = await loadAppConfig();
-  const connector = connectorMode() === 'demo' ? new DemoConnector() : FattureInCloudConnector.fromToken(config.companyId, process.env.FIC_ACCESS_TOKEN ?? '');
+  const connector = connectorMode() === 'demo' ? new DemoConnector() : FattureInCloudConnector.fromToken(config.invoicing.companyId, process.env.FIC_ACCESS_TOKEN ?? '');
   const catalogue = await connector.listProducts();
   const agent = new Agent({ id: 'order-form-import', name: 'Order form import', model: config.model, instructions: 'You transcribe printed price lists exactly and map them to a product catalogue. Never invent rows or products.' });
   

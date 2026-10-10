@@ -61,7 +61,7 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
         } else if (documentPrice.decision === 'document' && documentPrice.basis === 'net') {
           netPrice = documentPrice.amount;
         } else {
-          issues.push({ field: `${field}.documentPrice`, message: `Document: ${documentPrice.amount} EUR (${documentPrice.basis}); FiC: ${chosen.netPrice} EUR net. Choose catalogue prices or explicitly confirm a net document price.`, priceComparison: { document: documentPrice.amount, catalogue: chosen.netPrice, basis: documentPrice.basis } });
+          issues.push({ field: `${field}.documentPrice`, message: `Document: ${documentPrice.amount} EUR (${documentPrice.basis}); catalogue: ${chosen.netPrice} EUR net. Choose catalogue prices or explicitly confirm a net document price.`, priceComparison: { document: documentPrice.amount, catalogue: chosen.netPrice, basis: documentPrice.basis } });
         }
       }
       selected.push({ product: chosen, quantity: line.quantity, netPrice, index });

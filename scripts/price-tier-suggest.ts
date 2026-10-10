@@ -15,14 +15,14 @@ async function main() {
   const prices = tierPrices(config, values.tier);
   if (!prices.size) { console.error(`No order form gives prices for tier "${values.tier}". Import one with --tier ${values.tier} and list it in orderForms.`); process.exit(1); }
   const token = process.env.FIC_ACCESS_TOKEN ?? '';
-  const connector = FattureInCloudConnector.fromToken(config.companyId, token);
+  const connector = FattureInCloudConnector.fromToken(config.invoicing.companyId, token);
   const catalogue = new Map((await connector.listProducts()).map(p => [p.id, p.netPrice]));
   const api = new IssuedDocumentsApi(new Configuration({ accessToken: token, baseOptions: { timeout: 20000 } }));
   
   const wanted = Number(values.orders);
   const score = new Map<number, { name: string; tier: number; standard: number; orders: number }>();
   for (let page = 1, seen = 0; seen < wanted; page++) {
-    const { data } = await api.listIssuedDocuments(config.companyId, 'order', undefined, 'detailed', '-date', page, 100);
+    const { data } = await api.listIssuedDocuments(config.invoicing.companyId, 'order', undefined, 'detailed', '-date', page, 100);
     for (const order of data.data ?? []) {
       const id = order.entity?.id;
       if (!id || seen++ >= wanted) continue;

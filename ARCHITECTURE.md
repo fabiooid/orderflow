@@ -10,7 +10,7 @@ Italian e-invoicing fields (SDI, PEC, VAT nature codes) are generic capabilities
 
 ## Adapters behind interfaces
 
-- Invoicing reads and writes go through `OrderConnector` in `src/connector/contract.ts`. `src/domain/` and `src/assistant/` do not import a vendor SDK.
+- Invoicing reads and writes go through `OrderConnector` in `src/connector/contract.ts`. Fatture in Cloud is `src/connector/fatture-in-cloud.ts`. Its company id and display name live under `invoicing` in config. `src/domain/` and `src/assistant/` do not import a vendor SDK.
 - Document reading goes through `DocumentProvider` in `src/documents/contract.ts`.
 - A messaging channel implements `ChannelAdapter` in `src/channel/contract.ts`. Telegram is `src/channels/telegram/`. Conversation state, previews and confirmation live in `src/channel/` and must not import an adapter.
 - Adding a channel or an invoicing backend is a new adapter folder plus config. It does not edit order preparation, totals or the confirmation flow.

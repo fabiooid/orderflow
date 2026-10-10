@@ -18,7 +18,7 @@ export const clientSchema = z.object({
   notes: z.string().default(''),
 }).strict();
 export type Client = z.infer<typeof clientSchema>;
-/** Fatture in Cloud needs only a name to create a customer; an order still needs the full billing address. */
+/** A customer can be created from a name alone; an order still needs the full billing address. */
 export const newCustomerSchema = clientSchema.partial({ country: true, street: true, city: true, postalCode: true });
 export type NewCustomer = z.infer<typeof newCustomerSchema>;
 

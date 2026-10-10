@@ -7,7 +7,7 @@ import {
 import { delegated, evidenceInput, evidenceMessages, hasUserFollowup, messageText, renderEvidence } from './eval-evidence.js';
 
 export const DEFAULT_JUDGE_MODEL = 'openai/gpt-4.1-mini';
-const policy = `Evaluate internal staff assistance for a configurable Fatture in Cloud connector.
+const policy = `Evaluate internal staff assistance for a configured invoicing connector.
 Product/customer search tools ground identities. The customer-creation skill guides data collection.
 The read-only getCustomerOrderHistory tool can support customer-specific product clarifications and price comparisons. History is optional for ordinary catalogue questions; do not demand it on every turn. Historical prices are not defaults, and past purchases alone must not resolve an ambiguous current request without operator confirmation. Unavailable history is not proof that no previous orders exist.
 The APPLICATION validates drafts, checks duplicates, calculates totals and saves clients/orders only after explicit confirmation of the latest summary.
