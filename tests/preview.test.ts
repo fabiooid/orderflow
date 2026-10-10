@@ -24,7 +24,7 @@ it('shows one billing address, no notes nobody asked for, and no slash commands'
 it('uses the shop, person and number icons on a new customer', () => {
   const text = customerPreview({
     name: 'Cliente Test', country: 'IT', street: 'Via Esempio 1', city: 'Milano', postalCode: '20100',
-    email: 'ordini@esempio.it', phone: '3330000000', vatNumber: 'IT00000000000', taxCode: 'RSSMRA80A01F205X', sdiCode: 'ABCDEFG', notes: 'Consegna: Via Magazzino 2',
+    email: 'ordini@example.invalid', phone: '3330000000', vatNumber: 'IT00000000000', taxCode: 'RSSMRA80A01F205X', sdiCode: 'ABCDEFG', notes: 'Consegna: Via Magazzino 2',
   }, true);
   expect(text).toContain('🏪 Cliente Test');
   expect(text).toContain('👤 Codice fiscale RSSMRA80A01F205X');

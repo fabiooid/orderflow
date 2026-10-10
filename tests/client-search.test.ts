@@ -79,7 +79,7 @@ it('offers no unrelated customers when a complete search finds no match', async 
   connector.clients.splice(0, connector.clients.length, ...request().candidates.map(c => ({ ...base, ...c })));
   const resolver = createIdentityResolver(config(), connector, { config: matchingConfigSchema.parse({ mode: 'on', largeClientSearch: true }),
     selectMany: async groups => groups.map(() => answer('no-match')) });
-  const result = await resolver.resolve({ ...draft(), clientQuery: 'Puparone', lines: [] }, { orderId: 'large-client-miss', revision: 1, operatorText: 'nuovo ordine per Puparone' });
+  const result = await resolver.resolve({ ...draft(), clientQuery: 'Northwind Deli', lines: [] }, { orderId: 'large-client-miss', revision: 1, operatorText: 'nuovo ordine per Northwind Deli' });
   expect(result.decisions[0]).toMatchObject({ status: 'no-match' });
   expect(result.issues).toEqual([expect.objectContaining({ field: 'client', matchingStatus: 'no-match', candidates: [] })]);
 });
