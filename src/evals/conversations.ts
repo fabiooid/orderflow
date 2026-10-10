@@ -127,6 +127,25 @@ export const conversationCases: ConversationCase[] = [
     turns: [{ text: 'ordine per Example Studio: 2 Pebble hand wash 250 ml' }, { text: 'che tempo fa domani?' }, { text: 'ok mostrami l\'ordine' }],
     check: all(neverGaveUp, orderFor('201'), o => expect(/Bozza ordine|Anteprima ordine/.test(last(o)), 'the open order was not shown')),
   },
+  // The catalogue says "hand wash"; the operator says "saponi". Meaning, not shared words, finds it.
+  { id: 'soap-by-meaning', turns: [{ text: 'abbiamo saponi?' }], check: all(neverGaveUp, o => expect(/hand wash/i.test(last(o)), 'the hand wash was not offered for "saponi"')) },
+  { id: 'whole-catalogue', turns: [{ text: 'che prodotti abbiamo?' }], check: all(neverGaveUp, o => expect(['hand wash', 'Linen candle'].every(name => last(o).includes(name)), 'the catalogue was not listed')) },
+  {
+    id: 'soap-in-an-order',
+    turns: [{ text: 'ordine per Example Studio: 2 saponi, spedizione 8 euro' }],
+    // The hand wash, chosen or offered (two sizes fit): never "no product", and never unrelated products.
+    check: all(neverGaveUp, o => {
+      const chosen = ['101', '104'].includes(o.open?.draft.lines[0]?.productId ?? '');
+      const offered = /hand wash/i.test(last(o)) || !!o.open?.issues?.some(i => i.field === 'lines.0' && i.candidates?.some(c => /hand wash/i.test(c.label)));
+      return [...expect(chosen || offered, `"saponi" did not lead to the hand wash: ${JSON.stringify(o.open?.draft.lines)}`), ...expect(!/Linen candle/.test(last(o)), 'offered unrelated products')];
+    }),
+  },
+  {
+    id: 'no-invented-delivery',
+    turns: [{ text: 'abbiamo saponi?' }, { text: 'ok mettili in un ordine 4 saponi e un tester cliente Example Studio' }],
+    // Prices were just shown, but nobody named a delivery charge: it stays open for the order API to ask.
+    check: all(neverGaveUp, o => expect(o.open?.draft.shippingPrice === undefined, `invented a delivery charge of ${o.open?.draft.shippingPrice}`)),
+  },
   { id: 'off-topic', turns: [{ text: 'che tempo fa domani a Milano?' }], check: all(neverGaveUp, nothingOpen, o => expect(last(o).length < 300, 'long off-topic reply')) },
   {
     id: 'new-order-starts-empty',

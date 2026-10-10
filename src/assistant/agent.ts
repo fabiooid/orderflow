@@ -26,6 +26,9 @@ export function groupMemory(config: AppConfig) {
   return { resource, thread: `${resource}:chat` };
 }
 
+/** Products the agent may read at once to judge by meaning; a larger catalogue needs words that appear in it. */
+const CATALOGUE_LIST_LIMIT = 300;
+
 export function createOrderAgent(config: AppConfig, connector: OrderConnector, storage: LibSQLStore, live: LiveEvalSettings = { enabled: false, rate: 0 }, matchingOptions: Parameters<typeof createIdentityResolver>[2] = {}) {
   const memory = new Memory({ storage, options: {
     lastMessages: config.memory.lastMessages,
@@ -44,13 +47,21 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
     }
     return catalogue.products;
   };
+  /**
+   * Word search finds products by their literal words; meaning is the agent's job. When no product contains the words,
+   * or nothing is asked for, the agent gets the catalogue itself (up to a size that fits a model call) to judge.
+   */
   const searchProducts = createTool({
-    id: 'search-products', description: 'Search the catalogue with any words (scent, type, size, code). Returns related products, best first. When nothing fits, search again with fewer, different or translated words: catalogue names can be in Italian or English.',
-    inputSchema: z.object({ query: z.string().min(1) }), outputSchema: z.array(productSchema),
+    id: 'search-products',
+    description: 'Find products in the catalogue. With words (scent, type, size, code) it returns the products containing them, best first. With no words, or when no product contains them, it returns the catalogue so you can judge by meaning which products fit, in any language ("saponi" can be a hand wash). Answer from what it returns; never invent products.',
+    inputSchema: z.object({ query: z.string().describe('Words to look for; empty to see the catalogue.') }),
+    outputSchema: z.object({ found: z.enum(['words', 'catalogue', 'catalogue-too-large']), products: z.array(productSchema) }),
     execute: async ({ query }) => {
       const [products, data] = await Promise.all([searchable(), knowledge.read()]);
       const ids = new Set(data.aliases.filter(a => normalize(a.phrase) === normalize(query)).map(a => a.productId));
-      return [...new Map([...products.filter(p => ids.has(p.id)), ...searchCatalogue(query, products)].map(p => [p.id, p])).values()];
+      const matches = [...new Map([...products.filter(p => ids.has(p.id)), ...searchCatalogue(query, products)].map(p => [p.id, p])).values()];
+      if (matches.length) return { found: 'words' as const, products: matches };
+      return products.length <= CATALOGUE_LIST_LIMIT ? { found: 'catalogue' as const, products } : { found: 'catalogue-too-large' as const, products: [] };
     },
   });
   const searchClients = createTool({
