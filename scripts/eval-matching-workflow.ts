@@ -11,7 +11,7 @@ import { matchingFixtures } from '../src/matching/fixtures.js';
 // Fictional records only; no FIC, Telegram, conversational model, or write calls.
 async function main() {
   const matching = loadMatchingConfig();
-  if (matching.mode !== 'on') throw new Error('Set JEV_MODE=on for the fictional workflow evaluation');
+  if (matching.mode !== 'on') throw new Error('Set MATCHER_MODE=on (or JEV_MODE=on) for the fictional workflow evaluation');
   const app = configSchema.parse(JSON.parse(await readFile(new URL('../config/example.json', import.meta.url), 'utf8')));
   let passed = 0;
   for (const fixture of matchingFixtures) {
@@ -38,4 +38,4 @@ async function main() {
   console.log(JSON.stringify({ passed, total: matchingFixtures.length }));
   if (passed !== matchingFixtures.length) process.exitCode = 1;
 }
-main().catch(() => { console.error('Workflow matching evaluation unavailable; check JEV configuration and credentials.'); process.exitCode = 1; });
+main().catch(() => { console.error('Workflow matching evaluation unavailable; check matching configuration and credentials.'); process.exitCode = 1; });

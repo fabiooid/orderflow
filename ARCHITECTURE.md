@@ -20,7 +20,7 @@ Italian e-invoicing is optional. SDI and PEC country lists live under `tax.italy
 
 ## Matchers
 
-Identity matching is optional. `JEV_MODE=off` is the default, and that path does not call a vendor. The resolver takes a `SelectMany` function. It does not import a vendor client. The Typesafe adapter is `src/matching/jev-client.ts`, installed only by `src/matching/wire.ts` from Studio, the channel runner and evals. Another matcher is a new `SelectMany` passed the same way. Do not put a vendor name on core types. The stored decision source `jev` is an existing value; leave it unless a migration is explicit.
+Identity matching is optional. `MATCHER_MODE=off` is the default, and that path does not call a vendor. `JEV_MODE` and the other `JEV_*` environment names are deprecated aliases: a set `MATCHER_*` value wins, otherwise the alias is used. The default model remains `jev-1.13.0`. The resolver takes a `SelectMany` function. It does not import a vendor client. The Typesafe adapter is `src/matching/jev-client.ts`, installed only by `src/matching/wire.ts` from Studio, the channel runner and evals. Another matcher is a new `SelectMany` passed the same way. Do not put a vendor name on core types. The stored decision source `jev` is an existing value; leave it unless a migration is explicit.
 
 ## Locale and currency
 
