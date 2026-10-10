@@ -11,6 +11,7 @@ import type { Keyboard } from '../channels/telegram/api.js';
 import { installTelegramChannel } from '../channels/telegram/adapter.js';
 import { TelegramController } from '../channel/controller.js';
 import { createConversationEngine, type Converse } from '../channel/engine.js';
+import { wireMatching } from '../matching/wire.js';
 import { TelegramStore, type Conversation } from '../channel/store.js';
 
 /**
@@ -45,7 +46,7 @@ export async function runConversation(config: AppConfig, connector: OrderConnect
   const directory = await mkdtemp(join(tmpdir(), 'orderflow-conversation-'));
   const storage = new LibSQLStore({ id: 'conversation-eval', url: `file:${join(directory, 'memory.db')}` });
   const store = new TelegramStore(':memory:', 'eval');
-  const engine = createConversationEngine(config, connector, storage, { converse: options.converse });
+  const engine = createConversationEngine(config, connector, storage, { converse: options.converse, matching: wireMatching() });
   const replies: string[] = [];
   const readings = new Map<string, string>();
   let messageId = 1000;

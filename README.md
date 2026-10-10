@@ -287,4 +287,4 @@ Never paste tokens into Telegram, issues or pull requests.
 
 ## JEV data selection
 
-JEV product/customer identity resolution is shared by Telegram and Studio. `JEV_MODE=off` preserves legacy matching, `shadow` records judgments without applying them, and `on` applies validated selections before preparation and on clarification resumes. See [docs/jev.md](docs/jev.md) for configuration and `npm run eval:matching:workflow`. Historical rollout notes are in [docs/planning/jev-implementation-plan.md](docs/planning/jev-implementation-plan.md).
+JEV product/customer identity resolution is shared by Telegram and Studio. `MATCHER_MODE=off` preserves legacy matching, `shadow` records judgments without applying them, and `on` applies validated selections before preparation and on clarification resumes. `JEV_MODE` and the other `JEV_*` names still work as deprecated aliases. The default model remains `jev-1.13.0`. See [docs/jev.md](docs/jev.md) for configuration and `npm run eval:matching:workflow`. Historical rollout notes are in [docs/planning/jev-implementation-plan.md](docs/planning/jev-implementation-plan.md).

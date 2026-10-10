@@ -3,16 +3,18 @@
 JEV is integrated into product and customer resolution in the shared Telegram/Studio
 order workflow. GPT interprets requests; application code validates JEV’s selections
 before preparing prices, taxes and totals. Writes still require the existing latest
-preview confirmation. `JEV_MODE=off` remains the default; no deployment is activated
-by installing this integration.
+preview confirmation. `MATCHER_MODE=off` remains the default (`JEV_MODE` is a deprecated
+alias); no deployment is activated by installing this integration.
 
 ## Run the evaluation
 
 Set `TYPESAFE_API_KEY` privately in `.env`, then run:
 
 ```sh
-JEV_MODE=shadow npm run eval:matching
+MATCHER_MODE=shadow npm run eval:matching
 ```
+
+`JEV_MODE=shadow` still starts the same run.
 
 The command submits ten fictional product/client cases twice, reversing candidate
 order on the second pass. It reports expected/actual selections, confidence, model,
@@ -28,13 +30,16 @@ Dated smoke-run notes are in [planning/run-log.md](planning/run-log.md). They ar
 
 ## Configuration and boundaries
 
-- `JEV_MODE`: `off` (default), `shadow`, or `on`. These values configure
+Prefer the `MATCHER_*` names. Each `JEV_*` name below is a deprecated alias: if both
+are set, `MATCHER_*` wins. The stored decision source stays `jev`.
+
+- `MATCHER_MODE` (`JEV_MODE`): `off` (default), `shadow`, or `on`. These values configure
   Telegram, Studio and the standalone selector. `off` uses legacy matching; `shadow`
   records decisions without changing draft identities or blocking preparation; `on`
   makes application-validated JEV selections authoritative.
-- `JEV_MODEL`: defaults to `jev-1.13.0`; the response records the actual model.
-- `JEV_TIMEOUT_MS`: total request budget including retries, default 15000.
-- `JEV_MAX_RETRIES`: SDK retries after the first attempt, default 1, maximum 2.
+- `MATCHER_MODEL` (`JEV_MODEL`): defaults to `jev-1.13.0`; the response records the actual model.
+- `MATCHER_TIMEOUT_MS` (`JEV_TIMEOUT_MS`): total request budget including retries, default 15000.
+- `MATCHER_MAX_RETRIES` (`JEV_MAX_RETRIES`): SDK retries after the first attempt, default 1, maximum 2.
 
 The adapter returns `matched`, `ambiguous`, `no-match`, or `unavailable`. A matched
 ID is always copied from a supplied candidate. It is a judgment, not permission to
@@ -44,7 +49,7 @@ The integration does not invent a confidence threshold: calibrate rollout on hel
 realistic cases before enabling `on` in a live deployment.
 
 Each Choice question accepts up to 253 records plus ambiguity/no-match options.
-Experimental customer name searches (`JEV_LARGE_CLIENT_SEARCH=true`, default false) covering 254–2,530 eligible records search every record in
+Experimental customer name searches (`MATCHER_LARGE_CLIENT_SEARCH=true`, or the deprecated `JEV_LARGE_CLIENT_SEARCH=true`, default false) covering 254–2,530 eligible records search every record in
 up to ten independent groups, batched in a separate customer request so failures cannot take product questions down. A single match is accepted
 only when every other group reports no match. Multiple matches or any ambiguous
 group require clarification; a failed group blocks selection. No probabilities are
@@ -97,7 +102,7 @@ requests need a fresh conversation rather than silently truncating identity evid
 ## Evaluate the integrated path
 
 ```sh
-JEV_MODE=on npm run eval:matching:workflow
+MATCHER_MODE=on npm run eval:matching:workflow
 ```
 
 This runs the shared native order workflow with scripted extraction, fictional API

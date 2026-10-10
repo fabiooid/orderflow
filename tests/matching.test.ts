@@ -56,8 +56,21 @@ describe('read-only JEV selection boundary', () => {
   });
   it('keeps off mode inert and checks enabled credentials', async () => {
     expect(loadMatchingConfig({}).mode).toBe('off');
+    expect(loadMatchingConfig({}).model).toBe('jev-1.13.0');
     expect(() => loadMatchingConfig({ JEV_MODE: 'shadow' })).toThrow('TYPESAFE_API_KEY');
+    expect(() => loadMatchingConfig({ MATCHER_MODE: 'on' })).toThrow('TYPESAFE_API_KEY');
     expect((await createJevSelector(matchingConfigSchema.parse({}))(request)).reason).toBe('disabled');
+  });
+  it('prefers MATCHER_* settings and still accepts deprecated JEV_* aliases', () => {
+    const key = { TYPESAFE_API_KEY: 'fictional-key' };
+    expect(loadMatchingConfig({ ...key, JEV_MODE: 'shadow', JEV_MODEL: 'jev-1.13.0', JEV_TIMEOUT_MS: '2000', JEV_MAX_RETRIES: '0', JEV_LARGE_CLIENT_SEARCH: 'true' }))
+      .toMatchObject({ mode: 'shadow', model: 'jev-1.13.0', timeoutMs: 2000, maxRetries: 0, largeClientSearch: true });
+    expect(loadMatchingConfig({
+      ...key, MATCHER_MODE: 'on', JEV_MODE: 'shadow', MATCHER_MODEL: 'other-model', JEV_MODEL: 'jev-1.13.0',
+      MATCHER_TIMEOUT_MS: '3000', JEV_TIMEOUT_MS: '2000', MATCHER_MAX_RETRIES: '2', JEV_MAX_RETRIES: '0',
+      MATCHER_LARGE_CLIENT_SEARCH: 'false', JEV_LARGE_CLIENT_SEARCH: 'true',
+    })).toMatchObject({ mode: 'on', model: 'other-model', timeoutMs: 3000, maxRetries: 2, largeClientSearch: false });
+    expect(() => loadMatchingConfig({ MATCHER_MODE: 'sideways' })).toThrow('Invalid matching configuration');
   });
   it('uses the official SDK wire format without live network access', async () => {
     const fetch = vi.fn(async (_url: string, init?: RequestInit) => {

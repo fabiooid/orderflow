@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { PROMPT_VERSION } from './jev-client.js';
+import { PROMPT_VERSION } from './prompt.js';
 import { selectionRequestSchema, type SelectionRequest, type SelectionResult } from './types.js';
 
 const GROUP_SIZE = 253;

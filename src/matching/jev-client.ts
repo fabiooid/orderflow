@@ -2,9 +2,10 @@ import { createHash } from 'node:crypto';
 import { choice, TypeSafeClient, type Fetch, type SystemOneRequest } from '@typesafe-ai/sdk';
 import { z } from 'zod';
 import type { MatchingConfig } from './config.js';
+import { PROMPT_VERSION } from './prompt.js';
 import { selectionRequestSchema, type SelectionRequest, type SelectionResult } from './types.js';
 
-export const PROMPT_VERSION = 'record-selection-v2';
+export { PROMPT_VERSION };
 export type JudgmentTransport = (request: SystemOneRequest, signal: AbortSignal) => Promise<unknown>;
 const probability = z.number().finite().min(0).max(1);
 const responseSchema = z.object({

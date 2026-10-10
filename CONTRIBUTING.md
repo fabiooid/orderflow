@@ -27,3 +27,10 @@ A channel turns a provider's updates into the conversation core and sends replie
 3. Put provider-only settings under `invoicing` in config (`provider` plus that system's company id). Do not add a new default in code.
 4. Add the adapter to `tests/connector-contract.test.ts`. The demo connector is the reference. Mock the vendor HTTP layer; do not call a live account from `npm test`.
 5. Wire it from `connectorMode()` / the composition root. `src/domain/` and `src/assistant/` must keep importing the contract only. `npm run boundaries` checks this.
+
+## How to add a matcher
+
+1. Implement `SelectMany` from `src/matching/resolver.ts`. Map only identity choices. Do not write orders or customers from the matcher.
+2. Keep the vendor client inside the adapter. `src/matching/resolver.ts` and `src/matching/client-search.ts` must not import it.
+3. Install it from a composition root (`src/mastra/`, `scripts/`, `src/evals/`) by passing `selectMany` into `createIdentityResolver` or `wireMatching`. `MATCHER_MODE=off` (and the deprecated `JEV_MODE=off`) must keep working with no matcher installed.
+4. Cover it with the existing resolver tests by passing your function as `selectMany`. Do not call a live account from `npm test`.

@@ -10,6 +10,7 @@ import { telegramMemoryUrl } from '../channel/store.js';
 import { FattureInCloudConnector } from '../connector/fatture-in-cloud.js';
 import { DemoConnector } from '../connector/demo.js';
 import { createOrderAgent } from '../assistant/agent.js';
+import { wireMatching } from '../matching/wire.js';
 import { liveEvalSettings } from '../assistant/live-evals.js';
 import { createDeliveredReplyWorkflow } from '../channel/evaluation.js';
 import { createMediaAgents, modelVision } from '../channel/media.js';
@@ -35,7 +36,7 @@ const storage = new LibSQLStore({ id: 'assistant-storage', url: storageUrl });
 const connector = mode === 'read-only' ? FattureInCloudConnector.fromToken(config.invoicing.companyId, process.env.FIC_ACCESS_TOKEN ?? '') : new DemoConnector();
 const live = liveEvalSettings();
 // Studio chat uses the same order and customer APIs as Telegram; they validate only, and Studio has no save buttons.
-const { agent, scorers: manualScorers } = createOrderAgent(config, connector, storage, live);
+const { agent, scorers: manualScorers } = createOrderAgent(config, connector, storage, live, wireMatching());
 const deliveredReply = createDeliveredReplyWorkflow(manualScorers, live);
 // The media readers and the order-form workflow can be tried and inspected in Studio too.
 const { mediaReader, formReader } = createMediaAgents(config);

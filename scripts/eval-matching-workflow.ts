@@ -5,12 +5,13 @@ import { draftSchema } from '../src/domain/types.js';
 import { createDraftApi } from '../src/assistant/drafts.js';
 import { createIdentityResolver } from '../src/matching/resolver.js';
 import { loadMatchingConfig } from '../src/matching/config.js';
+import { wireMatching } from '../src/matching/wire.js';
 import { matchingFixtures } from '../src/matching/fixtures.js';
 
 // Fictional records only; no FIC, Telegram, conversational model, or write calls.
 async function main() {
   const matching = loadMatchingConfig();
-  if (matching.mode !== 'on') throw new Error('Set JEV_MODE=on for the fictional workflow evaluation');
+  if (matching.mode !== 'on') throw new Error('Set MATCHER_MODE=on (or JEV_MODE=on) for the fictional workflow evaluation');
   const app = configSchema.parse(JSON.parse(await readFile(new URL('../config/example.json', import.meta.url), 'utf8')));
   let passed = 0;
   for (const fixture of matchingFixtures) {
@@ -24,7 +25,7 @@ async function main() {
     const draft = draftSchema.parse({ clientQuery: fixture.request.kind === 'client' ? query : 'Example Studio',
       lines: [{ query: fixture.request.kind === 'product' ? query : 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 8 });
     const text = `Prepare an order for ${draft.clientQuery}: ${draft.lines[0]!.query}, two pieces; delivery eight euros.`;
-    const drafts = createDraftApi(app, connector, createIdentityResolver(app, connector, { config: matching }));
+    const drafts = createDraftApi(app, connector, createIdentityResolver(app, connector, { config: matching, selectMany: wireMatching().selectMany }));
     const outcome = await drafts.order(draft, { orderId: `eval-${fixture.name}`, revision: 1, operatorText: text }, '2026-10-08');
     const field = fixture.request.kind === 'client' ? 'client' : 'lines.0';
     const actual: string = outcome.status === 'ready'
@@ -37,4 +38,4 @@ async function main() {
   console.log(JSON.stringify({ passed, total: matchingFixtures.length }));
   if (passed !== matchingFixtures.length) process.exitCode = 1;
 }
-main().catch(() => { console.error('Workflow matching evaluation unavailable; check JEV configuration and credentials.'); process.exitCode = 1; });
+main().catch(() => { console.error('Workflow matching evaluation unavailable; check matching configuration and credentials.'); process.exitCode = 1; });
