@@ -48,3 +48,16 @@ it('sends the model only schemas that convert to JSON Schema', async () => {
     for (const [name, schema] of schemas) expect(() => z.toJSONSchema(schema as z.ZodType), name).not.toThrow();
   } finally { await storage.close(); }
 });
+
+it('hands the agent the catalogue when no product contains the words, so it can judge by meaning', async () => {
+  const storage = new LibSQLStore({ id: 'agent-search', url: ':memory:' });
+  try {
+    const tools = await createOrderAgent(config(), new DemoConnector(), storage).agent.listTools();
+    const search = (query: string) => tools.searchProducts!.execute!({ query }, {} as never) as Promise<{ found: string; products: { name: string }[] }>;
+    expect(await search('candle')).toMatchObject({ found: 'words', products: [{ name: 'Linen candle 200 g' }] });
+    const soaps = await search('saponi');
+    expect(soaps.found).toBe('catalogue');
+    expect(soaps.products.map(p => p.name)).toContain('Pebble hand wash 250 ml');
+    expect((await search('')).found).toBe('catalogue');
+  } finally { await storage.close(); }
+});

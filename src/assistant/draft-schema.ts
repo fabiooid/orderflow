@@ -34,7 +34,7 @@ export const orderDraftInput = z.object({
   manualVatCheck: z.object({ country: z.string().regex(/^[A-Z]{2}$/), vatNumber: z.string().min(1), status: z.enum(['valid', 'invalid']) }).strict().nullable()
     .describe('Only after the operator explicitly confirms a completed VIES check and its result, bound to that exact country and VAT number. Never inferred from a name, number format or location.'),
   lines: z.array(z.object({
-    query: z.string().min(1).describe("The operator's product words without quantity or price. Operators use short names, synonyms, plurals and typos."),
+    query: z.string().min(1).describe("The product the operator means, without quantity or price, keeping every size, scent, tester or code they give. Operators use short names, synonyms, plurals, typos and other languages: when their words share none with the catalogue, write it in the catalogue's terms as you understand it (\"saponi\" to \"hand wash\"). The application checks it against their message and asks when it is unsure."),
     productId: z.string().min(1).nullable().describe('Keep the productId already in the open draft, or copy the id from an order-form [productId …] marker. Otherwise null: the application resolves query against the catalogue and offers choices when several fit.'),
     quantity: z.number().positive().nullable().describe('Count of items ("5 x", "5 pezzi"). A size or volume such as "5 litri" is part of the product, not the quantity. null when no count is written.'),
     netPrice: z.number().nonnegative().nullable().describe('Net unit price the operator states for this order, including later corrections. null otherwise: catalogue prices apply. Never a price read from a document, never learned for future orders.'),

@@ -149,7 +149,7 @@ export function createIdentityResolver(app: AppConfig, connector: OrderConnector
         const offered = status === 'no-match' ? [] : result?.clarificationIds ? result.clarificationIds.flatMap(id => item.candidates.filter(c => c.id === id)) : item.candidates;
         issues.push({ field: item.field, matchingStatus: status,
           message: status === 'unavailable' ? 'Identity matching unavailable or candidate set too large. Retry or specify an exact code.'
-            : status === 'no-match' ? 'No existing record matches. Check the spelling, or provide details to create a new record. No record has been selected.'
+            : status === 'no-match' ? (item.kind === 'product' ? 'No catalogue product matches these words. No record has been selected.' : 'No existing record matches. Check the spelling, or provide details to create a new record. No record has been selected.')
             : 'Clarify the exact identity; provide the customer city, VAT number, or a more specific name. No record has been selected.',
           candidates: offered.slice(0, 10).map(c => ({ id: c.id, label: [c.code, c.name, c.city, c.country, c.vatNumber].filter(Boolean).join(' — ') })) });
       }
