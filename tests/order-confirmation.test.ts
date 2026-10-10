@@ -2,9 +2,9 @@ import { expect, it, vi } from 'vitest';
 import { config, draft, message, prepared, press, stubEngine } from './helpers.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { WriteJournal } from '../src/storage/write-journal.js';
-import { orderCreator } from '../src/telegram/order.js';
-import { TelegramController, policyFingerprint } from '../src/telegram/controller.js';
-import { TelegramStore, type Conversation } from '../src/telegram/store.js';
+import { orderCreator } from '../src/channel/order.js';
+import { TelegramController, policyFingerprint } from '../src/channel/controller.js';
+import { TelegramStore, type Conversation } from '../src/channel/store.js';
 
 it('saves the reviewed payload once and blocks changed payload retries', async () => {
  const c=config();c.orderSavingEnabled=true;

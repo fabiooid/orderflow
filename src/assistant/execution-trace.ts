@@ -20,9 +20,9 @@ export async function traceOperation<T>(name: string, action: () => Promise<T>, 
   }
 }
 
-export async function traceTelegramTurn<T>(instance: ObservabilityInstance | undefined, updateId: number, action: () => Promise<T>): Promise<T> {
+export async function traceChannelTurn<T>(instance: ObservabilityInstance | undefined, updateId: number, action: () => Promise<T>): Promise<T> {
   if (!instance) return action();
-  const span = instance.startSpan({ name: 'Telegram turn', type: SpanType.GENERIC, tags: ['telegram', 'live'], metadata: { updateId } });
+  const span = instance.startSpan({ name: 'Channel turn', type: SpanType.GENERIC, tags: ['channel', 'live'], metadata: { updateId } });
   try {
     const result = await active.run(span, action);
     // Status labels in metadata so Studio can filter turns by order and outcome.
@@ -34,7 +34,7 @@ export async function traceTelegramTurn<T>(instance: ObservabilityInstance | und
     span.end({ output: result });
     return result;
   } catch (error) {
-    span.error({ error: new Error('Telegram turn interrupted; inspect local write and delivery journals'), endSpan: true });
+    span.error({ error: new Error('Channel turn interrupted; inspect local write and delivery journals'), endSpan: true });
     throw error;
   }
 }

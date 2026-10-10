@@ -2,9 +2,9 @@ import { expect, it, vi } from 'vitest';
 import { WriteJournal } from '../src/storage/write-journal.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { FattureInCloudConnector, toFicClient, toFicOrder, type SdkPorts } from '../src/connector/fatture-in-cloud.js';
-import { orderCreator } from '../src/telegram/order.js';
+import { orderCreator } from '../src/channel/order.js';
 import { config, prepared, draft } from './helpers.js';
-import { journalKey, type Conversation } from '../src/telegram/store.js';
+import { journalKey, type Conversation } from '../src/channel/store.js';
 
 it('reconciles a confirmed remote result without repeating the write, and refuses mismatched payloads', async () => {
   const journal = new WriteJournal(':memory:'); await journal.init();

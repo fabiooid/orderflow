@@ -2,9 +2,9 @@ import { parseArgs } from 'node:util';
 import { connectorMode, loadAppConfig } from '../src/config/load.js';
 import { FattureInCloudConnector } from '../src/connector/fatture-in-cloud.js';
 import { WriteJournal } from '../src/storage/write-journal.js';
-import { TelegramApi } from '../src/telegram/api.js';
-import { TelegramStore, TELEGRAM_STATE_URL, telegramScopePrefix, pollerLockPath, journalKey } from '../src/telegram/store.js';
-import { acquirePollerLock } from '../src/telegram/lock.js';
+import { TelegramApi } from '../src/channels/telegram/api.js';
+import { TelegramStore, TELEGRAM_STATE_URL, telegramScopePrefix, pollerLockPath, journalKey } from '../src/channel/store.js';
+import { acquirePollerLock } from '../src/channels/telegram/lock.js';
 import { clientSchema, preparedOrderSchema, totalsSchema } from '../src/domain/types.js';
 
 /** Operator runbook command, intentionally unavailable to the agent. No remote writes or messages. */

@@ -1,5 +1,5 @@
 import { createScorer } from '@mastra/core/evals';
-import type { FormLine } from '../telegram/order-forms.js';
+import type { FormLine } from '../channel/order-forms.js';
 
 /** Expected order for one page: product ID → quantity. */
 type Expected = Record<string, number>;

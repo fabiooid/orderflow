@@ -9,6 +9,8 @@ import { config, draft, prepared } from './helpers.js';
 
 describe('business configuration', () => {
   it('rejects unsupported modes and undeclared capabilities', () => {
+    expect(configSchema.parse({ ...config(), currency: 'USD' }).currency).toBe('USD');
+    expect(() => configSchema.parse({ ...config(), currency: 'usd' })).toThrow();
     expect(() => configSchema.parse({ ...config(), priceBasis: 'gross' })).toThrow();
     expect(() => configSchema.parse({ ...config(), allowInvoices: true })).toThrow();
     expect(() => preparedOrderSchema.parse({ type: 'invoice' })).toThrow();

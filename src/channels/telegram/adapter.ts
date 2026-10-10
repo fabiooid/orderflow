@@ -1,8 +1,12 @@
 import { z } from 'zod';
-import type { AppConfig } from '../config/schema.js';
+import type { AppConfig } from '../../config/schema.js';
+import { callbackActions, callbackLabels } from '../../channel/callbacks.js';
+import { installInbound } from '../../channel/inbound.js';
+import { MAX_FILE_BYTES, type Attachment, type ChannelAdapter, type MessageEvent, type OrderLink } from '../../channel/contract.js';
+import { TelegramApi } from './api.js';
 
-/** Bot API downloads stop at 20 MB. */
-export const MAX_FILE_BYTES = 20 * 1024 * 1024;
+export { MAX_FILE_BYTES, type Attachment, type MessageEvent, type OrderLink };
+export { callbackData, mediaCallbackData, pickData } from '../../channel/callbacks.js';
 
 const file = z.object({ file_id: z.string().min(1), file_size: z.number().int().optional(), mime_type: z.string().optional() });
 const person = z.object({ first_name: z.string(), last_name: z.string().optional() });
@@ -26,18 +30,6 @@ const updateSchema = z.object({
     reply_to_message: z.object({ message_id: z.number().int() }).optional(),
   }).optional(),
 });
-
-/** A Telegram file reference; the bytes are downloaded only when the message is processed. */
-export type Attachment = { kind: 'voice' | 'image' | 'pdf'; fileId: string; mimeType: string; size?: number };
-export type MessageEvent = {
-  updateId: number; groupId: string; senderId: string; messageId: number; replyTo?: number;
-  /** Message text or media caption. */
-  text: string;
-  attachments?: Attachment[];
-  /** Display name of the original sender of a forwarded message. */
-  forwardedFrom?: string;
-  album?: string;
-};
 
 function attachments(message: NonNullable<z.infer<typeof updateSchema>['message']>): Attachment[] {
   const found: Attachment[] = [];
@@ -64,7 +56,7 @@ export function normalizeMessage(input: unknown, config: AppConfig): MessageEven
   if (!parsed.success) return null;
   const { update_id, message } = parsed.data;
   if (!message || !message.from || message.from.is_bot || message.sender_chat) return null;
-  if (!['group', 'supergroup'].includes(message.chat.type) || String(message.chat.id) !== config.telegram.groupId) return null;
+  if (!['group', 'supergroup'].includes(message.chat.type) || String(message.chat.id) !== config.channel.groupId) return null;
   const files = attachments(message);
   const text = message.text ?? message.caption ?? '';
   if (!text && !files.length) return null;
@@ -90,15 +82,6 @@ export function groupAlbums<T>(updates: T[]): T[][] {
   return groups;
 }
 
-export type OrderLink = { orderId: string; revision: number };
-
-const callbackActions = { save: 'confirmOrder', customer: 'confirmCustomer', review: 'review', cancel: 'cancel', cancelall: 'cancelAll' } as const;
-/** What a button press is recorded as in the conversation: the button's own label. */
-const callbackLabels = { save: '✅ Conferma e salva', customer: '✅ Conferma e salva', review: '👀 Controllato', cancel: '❌ Annulla', cancelall: '🗑 Annulla tutte' } as const;
-export const callbackData = (action: keyof typeof callbackActions, link: OrderLink) => `${action}:${link.orderId}:${link.revision}`;
-/** A candidate button under a draft: the request revision, the field it settles and the record picked. */
-export const pickData = (link: OrderLink, field: string, id: number) => `pick:${link.orderId}:${link.revision}:${field}:${id}`;
-
 /** Callback payload is a revision-bound capability, checked against our stored message link. */
 export function normalizeCallback(input: unknown, config: AppConfig) {
   const parsed = z.object({ update_id: z.number().int(), callback_query: z.object({
@@ -107,8 +90,8 @@ export function normalizeCallback(input: unknown, config: AppConfig) {
   }) }).safeParse(input);
   if (!parsed.success) return undefined;
   const q = parsed.data.callback_query;
-  if (q.from.is_bot || String(q.message.chat.id) !== config.telegram.groupId || !['group','supergroup'].includes(q.message.chat.type)) return undefined;
-  const base = { updateId: parsed.data.update_id, groupId: config.telegram.groupId, senderId: String(q.from.id), messageId: q.message.message_id, replyTo: q.message.message_id };
+  if (q.from.is_bot || String(q.message.chat.id) !== config.channel.groupId || !['group','supergroup'].includes(q.message.chat.type)) return undefined;
+  const base = { updateId: parsed.data.update_id, groupId: config.channel.groupId, senderId: String(q.from.id), messageId: q.message.message_id, replyTo: q.message.message_id };
   const media = /^media:(\d+):([yn])$/.exec(q.data);
   if (media) {
     const accept = media[2] === 'y';
@@ -129,5 +112,23 @@ export function normalizeCallback(input: unknown, config: AppConfig) {
   return { id: q.id, messageId: q.message.message_id, target, event, action: { kind: callbackActions[button], target } as const };
 }
 
-/** Buttons under a prompt for media that did not say what to do with it. */
-export const mediaCallbackData = (message: number, accept: boolean) => `media:${message}:${accept ? 'y' : 'n'}`;
+/** Telegram as a ChannelAdapter. Parsing is pure; sending uses the Bot API client. */
+export class TelegramChannel implements ChannelAdapter {
+  readonly provider = 'telegram';
+  readonly threadTitle = 'OrderFlow Telegram group';
+  constructor(private readonly api: TelegramApi) {}
+  parseMessage(update: unknown, config: AppConfig) { return normalizeMessage(update, config); }
+  parseCallback(update: unknown, config: AppConfig) { return normalizeCallback(update, config); }
+  sendText(conversationId: string, text: string, replyTo: number, keyboard?: Parameters<TelegramApi['sendText']>[3]) {
+    return this.api.sendText(conversationId, text, replyTo, keyboard);
+  }
+}
+
+/** Installs Telegram parsing for the conversation core. Call this from the process entrypoint. */
+export function installTelegramChannel() {
+  installInbound({
+    threadTitle: 'OrderFlow Telegram group',
+    parseMessage: normalizeMessage,
+    parseCallback: normalizeCallback,
+  });
+}

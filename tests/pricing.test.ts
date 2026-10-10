@@ -11,7 +11,7 @@ import { priceDiscrepancies } from '../src/domain/history.js';
 import { namedAlternatives } from '../src/domain/matching.js';
 import { prepareOrder } from '../src/domain/prepare.js';
 import { draftSchema, type ClientOrder } from '../src/domain/types.js';
-import { orderPreview } from '../src/telegram/preview.js';
+import { orderPreview } from '../src/channel/preview.js';
 import { draft, prepared } from './helpers.js';
 
 const tradeForm = { schemaVersion: 1, id: 'trade-list', name: 'Trade list', priceTier: 'trade', columns: [{ id: 'order', heading: 'Order', value: 'quantity' }], rows: [{ code: 'DEMO-A', label: 'Pebble', cells: { order: { productId: 101, netPrice: 15 } } }] };

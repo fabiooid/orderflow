@@ -1,5 +1,21 @@
 import { z } from 'zod';
 
+const telegramChannelSchema = z.object({
+  provider: z.literal('telegram'),
+  groupId: z.string().regex(/^-\d+$/),
+  access: z.literal('all-group-members'),
+  respondToAllMessages: z.boolean().default(false),
+}).strict();
+
+/** Accepts the older top-level `telegram` object by folding it into `channel`. */
+function liftChannel(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const record = value as Record<string, unknown>;
+  if (record.channel || !record.telegram || typeof record.telegram !== 'object') return value;
+  const { telegram, ...rest } = record;
+  return { ...rest, channel: { provider: 'telegram', ...(telegram as object) } };
+}
+
 const country = z.string().regex(/^[A-Z]{2}$/);
 const positiveId = z.number().int().positive();
 const vatRuleSchema = z.object({
@@ -46,19 +62,16 @@ export const orderFormSchema = z.object({
 });
 export type OrderForm = z.infer<typeof orderFormSchema>;
 
-export const configSchema = z.object({
+const configObject = z.object({
   schemaVersion: z.literal(1),
   deploymentId: z.string().regex(/^[a-z0-9-]+$/),
   policyVersion: z.string().min(1),
   companyId: positiveId,
   locale: z.enum(['it', 'en']),
-  currency: z.literal('EUR'),
+  currency: z.string().regex(/^[A-Z]{3}$/),
   priceBasis: z.literal('net'),
-  telegram: z.object({
-    groupId: z.string().regex(/^-\d+$/),
-    access: z.literal('all-group-members'),
-    respondToAllMessages: z.boolean().default(false),
-  }).strict(),
+  /** Which conversation to join. Add a provider by extending this object. */
+  channel: telegramChannelSchema,
   orderSavingEnabled: z.boolean().default(false),
   shipping: z.object({ productId: positiveId, discountByDefault: z.boolean() }).strict(),
   clients: z.object({
@@ -103,10 +116,9 @@ export const configSchema = z.object({
   }
 });
 
-export type AppConfig = z.infer<typeof configSchema>;
+export const configSchema = z.preprocess(liftChannel, configObject);
 
-/** Picks the user-facing string for the configured locale. */
-export function translate(config: Pick<AppConfig, 'locale'>, it: string, en: string) { return config.locale === 'it' ? it : en; }
+export type AppConfig = z.infer<typeof configSchema>;
 
 /** Tier of a client, if any. */
 export function clientTier(config: Pick<AppConfig, 'priceTiers'>, clientId?: number) {

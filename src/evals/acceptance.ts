@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import { draftSchema, type OrderDraft } from '../domain/types.js';
-import type { Conversation } from '../telegram/store.js';
+import type { Conversation } from '../channel/store.js';
 import { expect, type ConversationCase } from './harness.js';
 
 type Line = { productId: number; quantity: number; netPrice: number; discountPercent: number; vatId: number };

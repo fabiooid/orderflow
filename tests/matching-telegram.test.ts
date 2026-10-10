@@ -1,8 +1,8 @@
 import { expect, it, vi } from 'vitest';
 import { LibSQLStore } from '@mastra/libsql';
-import { createConversationEngine, type Converse } from '../src/telegram/engine.js';
-import { TelegramController, type ConversationEngine } from '../src/telegram/controller.js';
-import { TelegramStore, type Conversation } from '../src/telegram/store.js';
+import { createConversationEngine, type Converse } from '../src/channel/engine.js';
+import { TelegramController, type ConversationEngine } from '../src/channel/controller.js';
+import { TelegramStore, type Conversation } from '../src/channel/store.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { draftSchema } from '../src/domain/types.js';
 import { matchingConfigSchema } from '../src/matching/config.js';
@@ -16,7 +16,7 @@ const judge: SelectMany = async requests => requests.map(r => ({ status: 'matche
 const fresh = (kind: 'order' | 'customer'): Conversation => ({ orderId: 'new', revision: 0, status: 'new', ...(kind === 'customer' ? { kind } : {}), draft: draftSchema.parse({}), policy: config().policyVersion });
 
 it('judges the operator words, never trusts model-written IDs, and settles a pick by button without the agent', async () => {
-  const c = config(); c.telegram.respondToAllMessages = true;
+  const c = config(); c.channel.respondToAllMessages = true;
   const store = new TelegramStore(':memory:', 'jev-routing'); await store.init();
   const storage = new LibSQLStore({ id: 'jev-routing', url: ':memory:' });
   const selectMany = vi.fn(judge);
