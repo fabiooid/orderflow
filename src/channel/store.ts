@@ -10,6 +10,23 @@ export const kindOf = (c: Pick<Conversation, 'kind'>) => c.kind ?? 'order';
 export const appendSource = (source: string | undefined, text: string) => [source, text].filter(Boolean).join('\n').slice(-12000);
 /** One order or customer request. `issues` are what the order or customer API last reported as still needed. */
 export type Conversation = { confirmedChoices?: ConfirmedChoice[]; sourceText?: string; matchingDecisions?: Decision[]; locale?: AppConfig['locale']; orderId: string; startedBy?: string; startedAt?: string; kind?: 'customer'; revision: number; status: 'new' | 'suspended' | 'ready' | 'reviewed' | 'saving' | 'saved' | 'cancelled'; prepared?: PreparedOrder; totals?: Totals; savedOrder?: SavedOrder; draft: OrderDraft; issues?: Issue[]; policy: string };
+/**
+ * A stored request as the current code expects it. Requests saved before ids became opaque strings hold numeric
+ * product and customer ids; they load as the same ids in string form, so an open request survives the upgrade.
+ */
+export function loadConversation(state: string): Conversation {
+  const c = JSON.parse(state) as Conversation;
+  const id = <T>(value: T) => (typeof value === 'number' ? String(value) : value);
+  return {
+    ...c,
+    draft: { ...c.draft, clientId: id(c.draft.clientId), lines: c.draft.lines.map(line => ({ ...line, productId: id(line.productId) })) },
+    ...(c.prepared ? { prepared: { ...c.prepared, client: { ...c.prepared.client, id: id(c.prepared.client.id) }, lines: c.prepared.lines.map(line => ({ ...line, productId: id(line.productId) })) } } : {}),
+    ...(c.savedOrder ? { savedOrder: { ...c.savedOrder, id: id(c.savedOrder.id) } } : {}),
+    ...(c.confirmedChoices ? { confirmedChoices: c.confirmedChoices.map(choice => ({ ...choice, id: id(choice.id) })) } : {}),
+    ...(c.matchingDecisions ? { matchingDecisions: c.matchingDecisions.map(d => ({ ...d, selectedId: id(d.selectedId) })) } : {}),
+    ...(c.issues ? { issues: c.issues.map(issue => ({ ...issue, ...(issue.candidates ? { candidates: issue.candidates.map(k => ({ ...k, id: id(k.id) })) } : {}) })) } : {}),
+  };
+}
 // Local state locations. Scopes include the mode so fictional state stays separate from account data.
 export const TELEGRAM_STATE_URL = 'file:.data/telegram.db';
 export const telegramScopePrefix = (config: AppConfig, mode: ConnectorMode) => `${config.deploymentId}:${config.channel.groupId}:${mode}:`;
@@ -63,7 +80,7 @@ export class TelegramStore {
   // Earlier versions stored catalogue answers as conversations; they are never requests and are skipped here.
   async order(id: string): Promise<Conversation | undefined> {
     const row = (await this.db.execute({ sql: "SELECT state FROM tg_orders WHERE scope=? AND id=? AND json_extract(state,'$.kind') IS NOT 'catalogue'", args: [this.scope, id] })).rows[0];
-    return row ? JSON.parse(String(row.state)) : undefined;
+    return row ? loadConversation(String(row.state)) : undefined;
   }
   async activeRequest(): Promise<Conversation | undefined> {
     return (await this.openRequests(1))[0];
@@ -75,7 +92,7 @@ export class TelegramStore {
         AND json_extract(state,'$.status') IN ('new','suspended','ready','saving') ORDER BY rowid DESC LIMIT ?`,
       args: [this.scope, limit],
     })).rows;
-    return rows.map(row => JSON.parse(String(row.state)));
+    return rows.map(row => loadConversation(String(row.state)));
   }
   async link(message: number): Promise<OrderLink | undefined> {
     const row = (await this.db.execute({ sql: 'SELECT order_id,revision FROM tg_links WHERE scope=? AND message=?', args: [this.scope, message] })).rows[0];

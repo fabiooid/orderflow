@@ -163,7 +163,8 @@ it('keeps a request from an earlier configuration, checked again under the curre
     // The agent sees the same order, now under the current configuration; nothing was cancelled.
     expect(engine.turn.mock.calls[0]![0].request).toMatchObject({ orderId: 'u0', revision: 3, draft, policy: expect.not.stringMatching(/^earlier$/) });
     expect((await store.order('u0'))).toMatchObject({ status: 'suspended', revision: 3 });
-    expect(send.mock.calls[0]![0]).toBe('La configurazione è cambiata: ho ricontrollato la richiesta aperta.\n\nNot created yet.\n\nRechecked draft');
+    // The recheck is silent: the operator reads only the answer to what they asked.
+    expect(send.mock.calls[0]![0]).toBe('Not created yet.');
     // A button from before the change is stale: it is dropped without saving or replying.
     await controller.handle(press(2, 'save:u0:2', 90));
     expect(send).toHaveBeenCalledTimes(1);
@@ -215,4 +216,22 @@ it('remembers the agent\'s own words, and application drafts only as a labelled 
   expect(remembered({ texts: ['Manca il paese?\n\n👤 Nuovo cliente\n━━━━\n\n🏪 Pippo'], agentText: 'Manca il paese?' })).toBe('Manca il paese?\n[Application message: 👤 Nuovo cliente]');
   expect(remembered({ texts: ['Annullato. Nulla è stato salvato.'] })).toBe('[Application message: Annullato. Nulla è stato salvato.]');
   expect(remembered({ texts: ['Linen candle 200 g — DEMO-B — €20,00'], agentText: 'Linen candle 200 g — DEMO-B — €20,00' })).toBe('Linen candle 200 g — DEMO-B — €20,00');
+});
+
+it('continues an open request saved before ids were strings, after a configuration change', async () => {
+  const storage = new LibSQLStore({ id: 'tg-legacy-ids', url: ':memory:' });
+  const store = new TelegramStore(':memory:', 'legacy'); await store.init();
+  // As stored by an earlier version: numeric ids, prepared under an earlier configuration.
+  const legacy = { orderId: 'u0', revision: 3, status: 'suspended', policy: 'earlier', issues: [{ field: 'client', message: 'Which customer?' }],
+    draft: { clientQuery: '', discountPercent: 0, notes: '', lines: [{ query: 'Linen candle 200 g', productId: 103, quantity: 20 }] } };
+  await store.plan(90, { replyTo: 90, texts: [], order: legacy as never });
+  const send = vi.fn(async (_text: string, _reply: number) => ({ message_id: 100 }));
+  const converse = vi.fn<Converse>(async prompt => ({ reply: prompt.openRequest ? 'Per quale cliente?' : 'none', locale: 'it' }));
+  try {
+    const engine = createConversationEngine(config(), new DemoConnector(), storage, { converse });
+    await new TelegramController(config(), 'bot', store, engine, send).handle(message(1, 'crea ordine nuovo per Example Studio'));
+    expect(send.mock.calls[0]![0]).not.toContain('Non riesco a elaborare');
+    expect(converse.mock.calls[0]![0].openRequest?.draft.lines[0]?.productId).toBe('103');
+    expect((await store.order('u0'))?.draft.lines[0]?.productId).toBe('103');
+  } finally { store.close(); await storage.close(); }
 });
