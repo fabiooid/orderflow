@@ -1,11 +1,14 @@
 import { vi } from 'vitest';
+import { installTelegramChannel } from '../src/channels/telegram/adapter.js';
 import example from '../config/example.json';
+
+installTelegramChannel();
 import { configSchema } from '../src/config/schema.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { draftSchema } from '../src/domain/types.js';
 import { prepareOrder } from '../src/domain/prepare.js';
-import type { TurnInput, TurnOutput } from '../src/telegram/controller.js';
-import type { Conversation } from '../src/telegram/store.js';
+import type { TurnInput, TurnOutput } from '../src/channel/controller.js';
+import type { Conversation } from '../src/channel/store.js';
 export const config = () => configSchema.parse(structuredClone(example));
 export const draft = () => draftSchema.parse({
   clientQuery: 'Example Studio', lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 8, discountPercent: 10,

@@ -1,12 +1,12 @@
 import { expect, it, vi } from 'vitest';
-import { customerCreator } from '../src/telegram/customer.js';
+import { customerCreator } from '../src/channel/customer.js';
 import { customerDetails } from '../src/domain/customer.js';
-import { customerPreview, optionalCustomerFields } from '../src/telegram/preview.js';
+import { customerPreview, optionalCustomerFields } from '../src/channel/preview.js';
 import { WriteJournal } from '../src/storage/write-journal.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { draftSchema } from '../src/domain/types.js';
 import { config } from './helpers.js';
-import type { Conversation } from '../src/telegram/store.js';
+import type { Conversation } from '../src/channel/store.js';
 
 it('creates only after confirmation, deduplicates retries, and refuses changed payloads', async () => {
  const journal = new WriteJournal(':memory:'); await journal.init();

@@ -1,13 +1,13 @@
 import sharp from 'sharp';
 import { createVisionDocumentProvider } from '../src/documents/reader.js';
 import { describe, expect, it, vi } from 'vitest';
-import { groupAlbums, MAX_FILE_BYTES, normalizeMessage, type MessageEvent } from '../src/telegram/adapter.js';
-import { asksFirst, routeMessage } from '../src/telegram/routing.js';
-import { TelegramController } from '../src/telegram/controller.js';
-import { TelegramStore, type Conversation } from '../src/telegram/store.js';
+import { groupAlbums, MAX_FILE_BYTES, normalizeMessage, type MessageEvent } from '../src/channels/telegram/adapter.js';
+import { asksFirst, routeMessage } from '../src/channel/routing.js';
+import { TelegramController } from '../src/channel/controller.js';
+import { TelegramStore, type Conversation } from '../src/channel/store.js';
 import type { Agent } from '@mastra/core/agent';
-import { createMediaReader, MediaError, voiceTranscriber, type MediaReader, type Read, type Transcribe } from '../src/telegram/media.js';
-import { TelegramApi } from '../src/telegram/api.js';
+import { createMediaReader, MediaError, voiceTranscriber, type MediaReader, type Read, type Transcribe } from '../src/channel/media.js';
+import { TelegramApi } from '../src/channels/telegram/api.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { draftSchema } from '../src/domain/types.js';
 import { checkConnections } from '../src/health/check.js';
@@ -57,7 +57,7 @@ describe('routing media', () => {
     expect(asksFirst(base({ attachments: image }), { config: c, active: conv('u1', 1) })).toBe(true);
     expect(asksFirst(base({ attachments: audio }), { config: c, active: conv('u1', 1) })).toBe(false);
     expect(asksFirst(base({ attachments: audio }), { config: c })).toBe(true);
-    c.telegram.respondToAllMessages = true;
+    c.channel.respondToAllMessages = true;
     expect(asksFirst(base({ attachments: audio }), { config: c })).toBe(false);
   });
   it('asks about an unaddressed forward instead of ignoring it', async () => {

@@ -129,7 +129,7 @@ Settings come from two places:
 | `EVALS_ENABLED`, `EVALS_SAMPLE_RATE`, `EVAL_JUDGE_MODEL` | Background evaluation settings |
 | `MASTRA_DATABASE_URL` | Mastra storage location for demo mode |
 
-**2. Business configuration (JSON)**, for company, Telegram group, VAT rules, shipping, required customer fields, model and memory. Start from the fictional [`config/example.json`](config/example.json):
+**2. Business configuration (JSON)**, for company, the messaging channel, VAT rules, shipping, required customer fields, model and memory. `channel.provider` is `telegram` today. A file that still has the older top-level `telegram` object is accepted and read as that channel. Start from the fictional [`config/example.json`](config/example.json):
 
 ```bash
 cp config/example.json config/business.local.json

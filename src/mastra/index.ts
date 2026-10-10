@@ -6,14 +6,14 @@ import { Mastra } from '@mastra/core';
 import { LibSQLStore } from '@mastra/libsql';
 import { Observability, MastraStorageExporter } from '@mastra/observability';
 import { connectorMode, loadConfig } from '../config/load.js';
-import { telegramMemoryUrl } from '../telegram/store.js';
+import { telegramMemoryUrl } from '../channel/store.js';
 import { FattureInCloudConnector } from '../connector/fatture-in-cloud.js';
 import { DemoConnector } from '../connector/demo.js';
 import { createOrderAgent } from '../assistant/agent.js';
 import { liveEvalSettings } from '../assistant/live-evals.js';
-import { createDeliveredReplyWorkflow } from '../telegram/evaluation.js';
-import { createMediaAgents, modelVision } from '../telegram/media.js';
-import { createOrderFormWorkflow } from '../telegram/order-forms.js';
+import { createDeliveredReplyWorkflow } from '../channel/evaluation.js';
+import { createMediaAgents, modelVision } from '../channel/media.js';
+import { createOrderFormWorkflow } from '../channel/order-forms.js';
 import { omitMedia } from '../assistant/omit-media.js';
 import { orderFormScorers } from '../assistant/order-form-scorers.js';
 

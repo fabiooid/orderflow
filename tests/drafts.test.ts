@@ -73,7 +73,7 @@ it('uses Mastra resource memory for shared confirmed aliases without storing pri
   try {
     const c = config();
     const { memory } = createOrderAgent(c, new DemoConnector(), storage);
-    const resourceId = `${c.deploymentId}:telegram:${c.telegram.groupId}`;
+    const resourceId = `${c.deploymentId}:telegram:${c.channel.groupId}`;
     await memory.createThread({ threadId: 'one', resourceId });
     await memory.createThread({ threadId: 'two', resourceId });
     const confirmed = sharedKnowledgeSchema.parse({ aliases: [{ phrase: 'small wash', productId: 101, sourceMessage: 'demo-message', confirmedBy: 'demo-operator' }] });

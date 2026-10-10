@@ -34,6 +34,9 @@ jobs:
       - name: Typecheck
         run: npm run check
 
+      - name: Import boundaries
+        run: npm run boundaries
+
       - name: Validate example config
         run: npm run config:check
 

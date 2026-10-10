@@ -3,7 +3,7 @@ import { LibSQLStore } from '@mastra/libsql';
 import { evaluateScoringPredicate } from '@mastra/core/evals';
 import { liveAgentScorers, liveEvalSettings } from '../src/assistant/live-evals.js';
 import { createManualScorers } from '../src/assistant/manual-scorers.js';
-import { createConversationEngine } from '../src/telegram/engine.js';
+import { createConversationEngine } from '../src/channel/engine.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { config } from './helpers.js';
 import { draftSchema } from '../src/domain/types.js';
@@ -97,7 +97,7 @@ it('delivered replies finish while native background judges are still waiting', 
 });
 
  it('uses matching workflow scorer names and IDs so Studio does not list each twice', async () => {
-  const { createDeliveredReplyWorkflow } = await import('../src/telegram/evaluation.js');
+  const { createDeliveredReplyWorkflow } = await import('../src/channel/evaluation.js');
   const workflow = createDeliveredReplyWorkflow(createManualScorers([]), { enabled: true, rate: 0.1 });
   const scorers = await workflow.listScorers();
   expect(Object.values(scorers)).toHaveLength(5);

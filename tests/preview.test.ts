@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { customerPreview, orderDraft, orderPreview, pickable } from '../src/telegram/preview.js';
+import { customerPreview, orderDraft, orderPreview, pickable } from '../src/channel/preview.js';
 import { draftSchema } from '../src/domain/types.js';
 import { prepared } from './helpers.js';
 
@@ -68,4 +68,11 @@ it('shows the chosen customer on a draft order', () => {
   expect(text).toMatch(/🏪 Example Studio\n📍 Example Street 1, 00000 Example City, IT/);
   expect(text).toContain('🚚 Consegna: nessuna');
   expect(text).toContain('❓ Da completare: controllo IVA');
+});
+
+it('shows a configured currency other than euro after the amount', async () => {
+  const order = await prepared();
+  const text = orderPreview(order, { net: 29.6, vat: 6.51, gross: 36.11 }, false, [], 'USD');
+  expect(text).toContain('12.00 USD');
+  expect(text).not.toContain('€');
 });

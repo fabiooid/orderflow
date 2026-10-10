@@ -135,7 +135,7 @@ skips and score propagation; they do not establish judge accuracy.
 - `src/assistant/manual-scorers.ts`: built-in scorer configuration and stable IDs.
 - `src/assistant/eval-evidence.ts`: role/provenance-preserving evidence adapter.
 - `src/assistant/live-evals.ts`: native attachment filters and sampling settings.
-- `src/telegram/evaluation.ts`: delivered-reply workflow and step scorer adapters.
+- `src/channel/evaluation.ts`: delivered-reply workflow and step scorer adapters.
 - `src/mastra/index.ts`: Studio registration and live attachments.
 - `tests/live-evals.test.ts`: native background scoring/storage integration tests.
 - `tests/manual-scorers.test.ts`: offline regression coverage with stubbed judges.
@@ -211,7 +211,7 @@ These sources describe different execution contexts; seeing all three is expecte
 and does not by itself indicate duplicate processing or duplicate scoring. Demo
 Studio uses its separate configured database.
 
-New polling turns have a native Mastra **Telegram turn** parent span. Its metadata carries status labels for filtering: `updateId`, `orderId`, `revision`, `state` (`new`, `suspended`, `ready`, `reviewed`, `saving`, `saved`, `cancelled`), `activeOrderId` (the open request when the update arrived, also on refusals), `cancelled` (how many other requests the turn voided) and `delivered`. Agent calls, preparation workflows, FIC reads/writes and Telegram delivery share its trace. Confirmed-save spans record the confirmed revision. SDK errors are sanitized and media bytes are omitted. Separate turns remain separate traces; use the request ID to follow an order across turns.
+New polling turns have a native Mastra **Channel turn** parent span. For Telegram the service name is still `orderflow-telegram`. Its metadata carries status labels for filtering: `updateId`, `orderId`, `revision`, `state` (`new`, `suspended`, `ready`, `reviewed`, `saving`, `saved`, `cancelled`), `activeOrderId` (the open request when the update arrived, also on refusals), `cancelled` (how many other requests the turn voided) and `delivered`. Agent calls, preparation workflows, FIC reads/writes and Telegram delivery share its trace. Confirmed-save spans record the confirmed revision. SDK errors are sanitized and media bytes are omitted. Separate turns remain separate traces; use the request ID to follow an order across turns.
 
 Historical/imported transport records remain distinct and cannot reconstruct model calls or API operations that were never recorded. Their timestamps and duration are not evidence of historical execution timing.
 

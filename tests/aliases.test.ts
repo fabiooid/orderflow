@@ -32,7 +32,7 @@ it('learns product and client aliases in Mastra memory and uses them in fresh ag
     turn.operatorWords = 'Forget little pebble';
     expect(await tools.rememberAlias!.execute!({ ...product, action: 'forget', quote: 'Forget little pebble' }, ctx)).toEqual({ status: 'forgotten' });
     const { memory } = createOrderAgent(config(), connector, storage);
-    expect(await memory.getWorkingMemory({ threadId: 'unused', resourceId: `${config().deploymentId}:telegram:${config().telegram.groupId}` })).not.toContain('little pebble');
+    expect(await memory.getWorkingMemory({ threadId: 'unused', resourceId: `${config().deploymentId}:telegram:${config().channel.groupId}` })).not.toContain('little pebble');
     turn.operatorWords = 'No, I meant the 250 ml bottle.';
     turn.knownPhrases = ['little pebble'];
     expect(await tools.rememberAlias!.execute!({ ...product, quote: 'No, I meant the 250 ml bottle.' }, ctx)).toEqual({ status: 'remembered' });

@@ -1,7 +1,7 @@
 import { LibSQLStore } from '@mastra/libsql';
 import { connectorMode, loadAppConfig } from '../src/config/load.js';
-import { TELEGRAM_STATE_URL, TelegramStore, telegramMemoryUrl, telegramScopePrefix } from '../src/telegram/store.js';
-import { telegramTraces } from '../src/telegram/traces.js';
+import { TELEGRAM_STATE_URL, TelegramStore, telegramMemoryUrl, telegramScopePrefix } from '../src/channel/store.js';
+import { telegramTraces } from '../src/channels/telegram/traces.js';
 const config=await loadAppConfig();
 const mode=connectorMode();
 const storage=new LibSQLStore({id:'telegram-history',url:telegramMemoryUrl(config,mode)});

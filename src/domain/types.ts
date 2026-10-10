@@ -80,7 +80,7 @@ export const orderLineSchema = z.object({
 export const preparedOrderSchema = z.object({
   type: z.literal('order'),
   policyVersion: z.string(),
-  currency: z.literal('EUR'),
+  currency: z.string().regex(/^[A-Z]{3}$/),
   client: clientSchema,
   lines: z.array(orderLineSchema).min(1),
   delivery: z.object({ country: z.string(), address: z.string() }).strict(),

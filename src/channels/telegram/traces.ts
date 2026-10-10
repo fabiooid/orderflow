@@ -3,7 +3,7 @@ import { Mastra } from '@mastra/core';
 import { SpanType } from '@mastra/core/observability';
 import { Observability, MastraStorageExporter } from '@mastra/observability';
 import type { LibSQLStore } from '@mastra/libsql';
-import type { TelegramStore } from './store.js';
+import type { TelegramStore } from '../../channel/store.js';
 
 /** Rebuildable transport records, distinct from actual model execution traces. */
 export function telegramTraces(storage: LibSQLStore) {
