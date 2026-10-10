@@ -14,6 +14,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # Mastra 1.x voice transcription accepts only AI SDK v2 transcription models; v4 breaks the build.
+      - dependency-name: "@ai-sdk/openai"
+        update-types: ["version-update:semver-major"]
     groups:
       npm-production:
         dependency-type: production

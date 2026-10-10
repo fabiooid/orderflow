@@ -51,7 +51,7 @@ export function remembered(plan: Pick<ReplyPlan, 'texts' | 'agentText'>) {
 }
 
 /** The agent's answer each turn. Reply format and language rules live here, next to the fields they govern. */
-const replySchema = (fallback: AppConfig['locale'], currency: AppConfig['currency']) => z.object({
+export const replySchema = (fallback: AppConfig['locale'], currency: AppConfig['currency']) => z.object({
   // Chosen before the reply is written, so the reply follows it.
   locale: z.enum(['it', 'en']).describe(`The language operatorWords are written in, unless the operator asked for another. Only words with no language of their own ("ok", a product name) keep the conversation's language; with no cue at all, ${fallback === 'it' ? 'Italian' : 'English'}.`),
   reply: z.string().describe(`Your own words in that language, shown above any draft: short, no greeting or recap, or empty when the draft speaks for itself. Answer product questions by listing the matches yourself, one per line, "name — code — ${currency} net" (catalogue prices are net; a tester only when asked for). Never write a draft or summary yourself.`),
