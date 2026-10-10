@@ -175,7 +175,7 @@ it('lets an order take over the open new-customer request, carrying the customer
   const store = new TelegramStore(':memory:', 'takeover'); await store.init();
   let messageId = 100;
   const send = vi.fn(async (_text: string, _reply: number, _keyboard?: unknown) => ({ message_id: messageId++ }));
-  const customer = { name: 'Marcello Bello', street: 'Via Pippo 5', postalCode: '24050', city: 'Popolone', province: 'BG', country: 'IT' };
+  const customer = { name: 'Marco Esempio', street: 'Via Esempio 5', postalCode: '24100', city: 'Bergamo', province: 'BG', country: 'IT' };
   const converse = vi.fn<Converse>()
     .mockImplementationOnce(async (_prompt, act) => { await act.customer(draftSchema.parse({ newClient: customer })); return { reply: '', locale: 'it' }; })
     .mockImplementationOnce(async (prompt, act) => {
@@ -187,12 +187,12 @@ it('lets an order take over the open new-customer request, carrying the customer
     const c = config(); c.clients.requiredFields = [];
     const engine = createConversationEngine(c, new DemoConnector(), storage, { converse });
     const controller = new TelegramController(c, 'bot', store, engine, send);
-    await controller.handle(message(1, '@bot crea cliente Marcello Bello, Via Pippo 5, 24050 Popolone BG'));
+    await controller.handle(message(1, '@bot crea cliente Marco Esempio, Via Esempio 5, 24100 Bergamo BG'));
     expect(await store.order('u1')).toMatchObject({ kind: 'customer', status: 'ready' });
     await controller.handle(message(2, 'ok crea ordine'));
     expect((await store.order('u1'))?.status).toBe('cancelled');
     const order = await store.order('u2');
-    expect(order).toMatchObject({ status: 'ready', draft: { newClient: { name: 'Marcello Bello' } } });
+    expect(order).toMatchObject({ status: 'ready', draft: { newClient: { name: 'Marco Esempio' } } });
     expect(order?.kind).toBeUndefined();
     expect(send.mock.calls[1]![0]).toContain('📦 Anteprima ordine');
   } finally { store.close(); await storage.close(); }

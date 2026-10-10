@@ -20,7 +20,7 @@ export function evalConnector() {
 const email = `Da: Anna Rossi <anna@example-studio.invalid> 08:46
 A: me
 
-Grazie Christian.
+Grazie mille.
 Prima possibile, con express!
 
 2 x Pebble hand wash 250 ml
@@ -108,17 +108,17 @@ export const conversationCases: ConversationCase[] = [
   },
   {
     id: 'customer-then-order',
-    turns: [{ text: 'Crea cliente: Marcello Bello Via Pippo 5, 24050 Popolone BG' }, { text: 'ok crea ordine' }, { text: '2 Pebble hand wash 250 ml, spedizione 8 euro' }],
+    turns: [{ text: 'Crea cliente: Marco Esempio Via Esempio 5, 24100 Bergamo BG' }, { text: 'ok crea ordine' }, { text: '2 Pebble hand wash 250 ml, spedizione 8 euro' }],
     // The country follows from the address; the order replaces the customer just drafted, with nothing to cancel first.
     check: all(neverGaveUp, o => [
-      ...expect(!!o.open && o.open.kind !== 'customer' && o.open.draft.newClient?.name === 'Marcello Bello', `expected an order for the new customer Marcello Bello, got ${o.open?.kind ?? 'order'} for ${o.open?.draft.newClient?.name ?? o.open?.draft.clientQuery ?? 'nobody'}`),
+      ...expect(!!o.open && o.open.kind !== 'customer' && o.open.draft.newClient?.name === 'Marco Esempio', `expected an order for the new customer Marco Esempio, got ${o.open?.kind ?? 'order'} for ${o.open?.draft.newClient?.name ?? o.open?.draft.clientQuery ?? 'nobody'}`),
       ...expect(o.open?.draft.newClient?.country === 'IT', 'country not inferred from the Italian address'),
       ...expect(!o.replies.some(r => /Nessuna richiesta aperta|annullarla/i.test(r)), 'asked to cancel the customer request first'),
     ]),
   },
   {
     id: 'no-copied-template',
-    turns: [{ text: 'crea cliente Marcello Bello, Via Pippo 5, 24050 Popolone BG' }, { press: 'Annulla' }, { text: 'crea cliente Pippo Pippolini Via Pluto 3, 24040 Casazza BG' }],
+    turns: [{ text: 'crea cliente Marco Esempio, Via Esempio 5, 24100 Bergamo BG' }, { press: 'Annulla' }, { text: 'crea cliente Luca Esempio Via Esempio 3, 24100 Bergamo BG' }],
     // With a draft already in the history, the agent must not write one into its own reply: the template shows once.
     check: all(neverGaveUp, o => expect((last(o).match(/👤 Nuovo cliente/g)?.length ?? 0) === 1, 'the draft template appears more than once, or not at all')),
   },
@@ -130,7 +130,7 @@ export const conversationCases: ConversationCase[] = [
   { id: 'off-topic', turns: [{ text: 'che tempo fa domani a Milano?' }], check: all(neverGaveUp, nothingOpen, o => expect(last(o).length < 300, 'long off-topic reply')) },
   {
     id: 'new-order-starts-empty',
-    turns: [{ text: 'crea cliente Pippo Pippolini Via Pluto 3, 24040 Casazza BG' }, { press: 'Annulla' }, { text: 'what type of candles do we have?' }, { text: 'add 20 to a new order' }],
+    turns: [{ text: 'crea cliente Luca Esempio Via Esempio 3, 24100 Bergamo BG' }, { press: 'Annulla' }, { text: 'what type of candles do we have?' }, { text: 'add 20 to a new order' }],
     // The candles were just discussed; the cancelled customer was not, so the new order has no customer and the reply is English.
     check: all(neverGaveUp, o => [
       ...expect(!!o.open?.draft.lines.some(l => (l.productId === '103' || /linen candle/i.test(l.query)) && l.quantity === 20), 'expected 20 Linen candles'),

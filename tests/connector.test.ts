@@ -17,11 +17,11 @@ function sdk() {
 describe('restricted SDK adapter', () => {
   it('creates a customer from a name alone and maps PEC to certified_email', async () => {
     const ports = sdk();
-    ports.clients.createClient.mockResolvedValue({ data: { data: { id: 7, name: 'Scemo chi legge', certified_email: 'a@pec.it', address_street: '', country_iso: '' } } });
+    ports.clients.createClient.mockResolvedValue({ data: { data: { id: 7, name: 'Bottega Esempio', certified_email: 'a@pec.it', address_street: '', country_iso: '' } } });
     const connector = new FattureInCloudConnector(1, ports as unknown as SdkPorts, { clientWritesEnabled: true });
-    const saved = await connector.createClient({ name: 'Scemo chi legge', certifiedEmail: 'a@pec.it', notes: '' });
-    expect(ports.clients.createClient.mock.calls[0]?.[1].data).toMatchObject({ name: 'Scemo chi legge', certified_email: 'a@pec.it', country: undefined });
-    expect(saved).toMatchObject({ id: '7', name: 'Scemo chi legge', certifiedEmail: 'a@pec.it' });
+    const saved = await connector.createClient({ name: 'Bottega Esempio', certifiedEmail: 'a@pec.it', notes: '' });
+    expect(ports.clients.createClient.mock.calls[0]?.[1].data).toMatchObject({ name: 'Bottega Esempio', certified_email: 'a@pec.it', country: undefined });
+    expect(saved).toMatchObject({ id: '7', name: 'Bottega Esempio', certifiedEmail: 'a@pec.it' });
     expect(saved.street).toBeUndefined();
   });
   it('uses preflight totals during a journaled save without another remote read', async () => {

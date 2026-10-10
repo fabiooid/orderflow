@@ -73,13 +73,13 @@ it('enabling authoritative matching rechecks a summary prepared under the legacy
 it('treats a bare name in a customer request as a new customer, not a failed lookup', async () => {
   const storage = new LibSQLStore({ id: 'jev-new-customer', url: ':memory:' });
   const noMatch: SelectMany = async requests => requests.map(r => ({ status: 'no-match', evidence: { requestHash: 'test', promptVersion: 'test', retrieval: r.retrieval, elapsedMs: 0 } } satisfies SelectionResult));
-  const converse: Converse = async (_prompt, act) => { await act.customer(draftSchema.parse({ newClient: { name: 'Scemo chi legge' } })); return { reply: '', locale: 'it' }; };
+  const converse: Converse = async (_prompt, act) => { await act.customer(draftSchema.parse({ newClient: { name: 'Bottega Esempio' } })); return { reply: '', locale: 'it' }; };
   const engine = createConversationEngine(config(), new DemoConnector(), storage, { converse, matching: { config: on, selectMany: noMatch } });
   try {
-    const result = await engine.turn({ text: 'Crea cliente "Scemo chi legge"', operatorText: 'Crea cliente "Scemo chi legge"', senderId: '5', fresh });
+    const result = await engine.turn({ text: 'Crea cliente "Bottega Esempio"', operatorText: 'Crea cliente "Bottega Esempio"', senderId: '5', fresh });
     expect(result.text).not.toContain('Nessun cliente corrisponde');
     expect(result.order?.kind).toBe('customer');
-    expect(result.order?.draft.newClient?.name).toBe('Scemo chi legge');
+    expect(result.order?.draft.newClient?.name).toBe('Bottega Esempio');
     expect(result.order?.draft.clientId).toBeUndefined();
   } finally { await engine.shutdown(); await storage.close(); }
 });

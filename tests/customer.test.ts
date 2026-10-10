@@ -37,9 +37,9 @@ it('allows customer creation without email or VAT when deployment requirements a
 
 it('needs only a name to create a customer and lists what can still be added', () => {
   const c = { ...config(), locale: 'it' as const }; c.clients = { ...c.clients, requiredFields: [] };
-  const newClient = { name: 'Scemo chi legge', street: 'Example Lane 30', city: 'Example City', postalCode: '00000', province: 'EX', email: 'info@example.invalid' };
+  const newClient = { name: 'Bottega Esempio', street: 'Example Lane 30', city: 'Example City', postalCode: '00000', province: 'EX', email: 'info@example.invalid' };
   expect(customerDetails(draftSchema.parse({}), c).missing).toEqual(['name']);
-  expect(customerDetails(draftSchema.parse({ newClient: { name: 'Scemo chi legge' } }), c).client?.name).toBe('Scemo chi legge');
+  expect(customerDetails(draftSchema.parse({ newClient: { name: 'Bottega Esempio' } }), c).client?.name).toBe('Bottega Esempio');
   const client = customerDetails(draftSchema.parse({ newClient }), c).client!;
   expect(optionalCustomerFields(client, true)).toEqual(['Paese', 'Partita IVA / codice fiscale', 'Telefono']);
   expect(optionalCustomerFields({ ...client, country: 'IT' }, true, { sdiCountries: ['IT'], pecCountries: ['IT'] })).toEqual(['Partita IVA / codice fiscale', 'Codice SDI', 'PEC', 'Telefono']);
