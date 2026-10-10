@@ -178,7 +178,7 @@ it('asks for missing facts in an incomplete order without inventing quantities o
 });
 
 it('asks for the delivery country when the delivery address has none, without a misleading VAT question', async () => {
-  const result = await prepareOrder({ ...draft(), delivery: { address: 'Via Tornabuoni 9, 63848 Petritoli' } }, config(), new DemoConnector(), '2026-10-09');
+  const result = await prepareOrder({ ...draft(), delivery: { address: 'Example Road 9, 00000 Example City' } }, config(), new DemoConnector(), '2026-10-09');
   expect(result.ready).toBe(false);
   if (result.ready) return;
   expect(result.issues.map(i => i.field)).toContain('delivery.country');

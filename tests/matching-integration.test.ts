@@ -207,25 +207,25 @@ it('excludes a matching VAT record when its city contradicts the requested catal
 
 it('lets the named customer replace a different company read from a document, like a product correction', async () => {
   const connector = new DemoConnector();
-  connector.clients.push({ id: 300, name: 'Purani Srl', country: 'IT', street: 'Via del Tiziano 13', city: 'San Benedetto del Tronto', postalCode: '63074', vatNumber: '02553330446', notes: '' });
+  connector.clients.push({ id: 300, name: 'Harbor Goods Srl', country: 'IT', street: 'Example Wharf 4', city: 'Example City', postalCode: '00000', vatNumber: 'IT00000000999', notes: '' });
   const selectMany = vi.fn<SelectMany>(async requests => requests.map(r => result('matched', r.kind === 'client' ? 201 : 101)));
-  const purani = { name: 'Purani Srl', country: 'IT', street: 'Via del Tiziano 13', city: 'San Benedetto del Tronto', postalCode: '63074', vatNumber: '02553330446' };
-  const input = { ...draft(), clientQuery: 'Example Studio', newClient: purani, lines: [] };
-  const resolved = await resolver(connector, selectMany).resolve(input, { ...context, operatorText: 'Order for Example Studio\n[Content read from attachments]\nPurani Srl P.IVA 02553330446' });
+  const harbor = { name: 'Harbor Goods Srl', country: 'IT', street: 'Example Wharf 4', city: 'Example City', postalCode: '00000', vatNumber: 'IT00000000999' };
+  const input = { ...draft(), clientQuery: 'Example Studio', newClient: harbor, lines: [] };
+  const resolved = await resolver(connector, selectMany).resolve(input, { ...context, operatorText: 'Order for Example Studio\n[Content read from attachments]\nHarbor Goods Srl P.IVA IT00000000999' });
   expect(resolved.issues).toEqual([]);
   expect(resolved.draft.clientId).toBe(201);
   expect(resolved.draft.newClient).toBeUndefined();
   // The same company under a shorter name keeps its document details.
-  const same = await resolver(connector, selectMany).resolve({ ...input, clientQuery: 'Purani' }, { ...context, operatorText: 'Order for Purani' });
-  expect(same.draft.newClient?.vatNumber).toBe('02553330446');
+  const same = await resolver(connector, selectMany).resolve({ ...input, clientQuery: 'Harbor Goods' }, { ...context, operatorText: 'Order for Harbor Goods' });
+  expect(same.draft.newClient?.vatNumber).toBe('IT00000000999');
 });
 
 it('reads catalogue litres written as "5lt" so a "5 L" request keeps them as candidates', async () => {
   const connector = new DemoConnector();
-  connector.products.push({ id: 500, code: 'MS037', name: 'Vetiver di Java Gel Doccia 5lt', description: '', netPrice: 88 },
-    { id: 501, code: 'MS023', name: 'Vetiver di Java Gel Doccia 500ml', description: '', netPrice: 16 });
+  connector.products.push({ id: 500, code: 'DEMO-5L', name: 'Cedar wash 5lt', description: '', netPrice: 18 },
+    { id: 501, code: 'DEMO-500', name: 'Cedar wash 500ml', description: '', netPrice: 8 });
   const selectMany = vi.fn<SelectMany>(async requests => requests.map(r => result('matched', r.kind === 'client' ? 201 : 500)));
-  await resolver(connector, selectMany).resolve({ ...draft(), clientId: 201, lines: [{ query: 'Refill 5 L Gel Doccia Vetiver di Java', quantity: 1 }] }, context);
+  await resolver(connector, selectMany).resolve({ ...draft(), clientId: 201, lines: [{ query: 'Refill 5 L Cedar wash', quantity: 1 }] }, context);
   const product = selectMany.mock.calls[0]![0].find(r => r.kind === 'product')!;
   expect(product.candidates.map(c => c.id)).toEqual([500]);
 });

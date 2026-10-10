@@ -24,9 +24,7 @@ These are smoke cases, not held-out accuracy evidence or a basis for choosing a
 production confidence threshold. API availability failures are counted separately
 from wrong selections. Unit tests use injected transport and require no credentials.
 
-Initial live run on 7 October 2026: 20/20 checks passed with `jev-1.13.0`, zero
-wrong selections and zero unavailable results. Calls took approximately 0.43–1.33
-seconds. This small fictional smoke run does not measure real-catalogue accuracy.
+Dated smoke-run notes are in [planning/run-log.md](planning/run-log.md). They are not accuracy evidence.
 
 ## Configuration and boundaries
 
@@ -104,8 +102,7 @@ JEV_MODE=on npm run eval:matching:workflow
 
 This runs the shared native order workflow with scripted extraction, fictional API
 records, and real JEV calls. It checks semantic products/customers, ambiguity and
-identity conflicts without FIC access, Telegram, or saves. On 8 October 2026 all
-10 smoke cases passed after a repeat run exposed a city/VAT conflict and a deterministic city constraint was added. This is connection/integration evidence, not production
+identity conflicts without FIC access, Telegram, or saves. Dated results are in [planning/run-log.md](planning/run-log.md). This is connection/integration evidence, not production
 accuracy calibration. Offline tests cover outages, invalid selections, shadow/off,
 resume, original-text preservation, explicit choices and alias authorization.
 
