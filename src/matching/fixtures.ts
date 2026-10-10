@@ -1,9 +1,9 @@
 import type { SelectionRequest } from './types.js';
 
 const products = [
-  { id: 101, code: 'SOAP250', name: 'Cardamomo Sapone Mani 250 ml' },
-  { id: 102, code: 'SOAP500', name: 'Cardamomo Sapone Mani 500 ml' },
-  { id: 103, code: 'SOAP250T', name: 'TESTER Cardamomo Sapone Mani 250 ml' },
+  { id: 101, code: 'SOAP250', name: 'Orrio Sapone Mani 250 ml' },
+  { id: 102, code: 'SOAP500', name: 'Orrio Sapone Mani 500 ml' },
+  { id: 103, code: 'SOAP250T', name: 'TESTER Orrio Sapone Mani 250 ml' },
   { id: 104, code: 'CANDLE', name: 'Foglia di Fico Candela Profumata' },
 ];
 const clients = [
@@ -13,10 +13,10 @@ const clients = [
 export const matchingFixtures: { name: string; request: SelectionRequest; expected: number | 'ambiguous' | 'no-match' }[] = [
   ...[
     ['exact-code', 'SOAP500', 102],
-    ['italian-description', 'sapone al cardamomo da 250 ml, non tester', 101],
-    ['english-description', 'cardamom hand soap 500 ml', 102],
-    ['tester', 'tester sapone cardamomo 250 ml', 103],
-    ['missing-size', 'sapone al cardamomo', 'ambiguous'],
+    ['italian-description', 'sapone al orrio da 250 ml, non tester', 101],
+    ['english-description', 'orrio hand soap 500 ml', 102],
+    ['tester', 'tester sapone orrio 250 ml', 103],
+    ['missing-size', 'sapone al orrio', 'ambiguous'],
     ['missing-product', 'shampoo alla rosa', 'no-match'],
   ].map(([name, query, expected]) => ({ name: String(name),
     request: { kind: 'product' as const, query: String(query), candidates: products,

@@ -22,13 +22,13 @@ it('judges the operator words, never trusts model-written IDs, and settles a pic
   const selectMany = vi.fn(judge);
   // The scripted agent writes IDs of its own; the order API must replace them with judged ones.
   const converse = vi.fn<Converse>()
-    .mockImplementationOnce(async (_prompt, act) => { await act.order({ ...draft(), clientId: 202, lines: [{ query: 'small amber wash', productId: 102 }] }); return { reply: '', locale: 'en' }; })
+    .mockImplementationOnce(async (_prompt, act) => { await act.order({ ...draft(), clientId: 202, lines: [{ query: 'small pebble wash', productId: 102 }] }); return { reply: '', locale: 'en' }; })
     .mockImplementationOnce(async (prompt, act) => { await act.order({ ...prompt.openRequest!.draft, lines: [{ ...prompt.openRequest!.draft.lines[0]!, quantity: 2 }] }); return { reply: '', locale: 'en' }; });
   const engine = createConversationEngine(c, new DemoConnector(), storage, { converse, matching: { config: on, selectMany } });
   let id = 100;
   const controller = new TelegramController(c, 'bot', store, engine, async () => ({ message_id: id++ }));
   try {
-    const original = 'The example shop wants the small amber wash';
+    const original = 'The example shop wants the small pebble wash';
     await controller.handle(message(1, original));
     expect(selectMany.mock.calls[0]![0].every(r => r.context === original)).toBe(true);
     const first = await store.order('u1');

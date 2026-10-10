@@ -31,7 +31,7 @@
 
 Operators describe an order in plain language in an internal Telegram group, in Italian or English:
 
-> *Due Amber hand wash 250 ml per Example Studio, sconto 10%, spedizione 8 euro*
+> *Due Pebble hand wash 250 ml per Example Studio, sconto 10%, spedizione 8 euro*
 
 OrderFlow then:
 
@@ -43,7 +43,7 @@ OrderFlow then:
 
 Operators can also send **voice notes**, **photos and screenshots**, **PDFs** and **forwarded customer messages**. Voice notes are transcribed (the transcript is shown with the reply); images and PDFs are read into text for the agent, kept apart from the operator's own words. Media sent without a caption gets a *Preparo un ordine da questo?* question with yes/no buttons, so nothing is read or charged until someone says yes. Several photos sent together as an album are handled as one message. Media files are not stored; only the text read from them is.
 
-It can also create new customers (with duplicate checks) and answer catalogue questions, such as `@your_bot quali varianti di Sapone Zenzero abbiamo?`
+It can also create new customers (with duplicate checks) and answer catalogue questions, such as `@your_bot quali varianti di Sapone di Esempio abbiamo?`
 
 The agent can consult a resolved customer's recent orders through the read-only `getCustomerOrderHistory` tool in Telegram and Studio (five orders by default, at most twenty). It uses history to ask better product/size questions and compare past prices, citing the order number and date. Previous prices and discounts never become automatic defaults. A failed lookup is reported as unavailable rather than as an empty order history.
 
@@ -165,7 +165,7 @@ npm run connections:check     # read-only checks of bot, group, company, catalog
 npm run telegram:start        # start the poller (Ctrl+C to stop gracefully)
 ```
 
-Talk to the bot naturally in the configured group: "prepara un ordine per Example Studio, 2 Amber 250", "this order but change the client to Northwind", "crea il cliente Bottega Verde". There are no slash commands. The agent works out what you mean, uses the order and customer APIs, and asks when something is missing. Each draft is shown as a 📝 draft order or 👤 new-customer template, with buttons to pick a product or customer when several fit. Saving happens only when someone presses **✅ Conferma e salva** under the latest summary; every change needs a new confirmation.
+Talk to the bot naturally in the configured group: "prepara un ordine per Example Studio, 2 Pebble 250", "this order but change the client to Northwind", "crea il cliente Fable Goods". There are no slash commands. The agent works out what you mean, uses the order and customer APIs, and asks when something is missing. Each draft is shown as a 📝 draft order or 👤 new-customer template, with buttons to pick a product or customer when several fit. Saving happens only when someone presses **✅ Conferma e salva** under the latest summary; every change needs a new confirmation.
 
 The group has one open request at a time. Starting another lists the open ones with a button to cancel them. Say "lascia stare" (or similar) to cancel the open request, or use its ❌ button. The agent declines topics unrelated to orders and customers.
 

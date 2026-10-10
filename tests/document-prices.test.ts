@@ -17,7 +17,7 @@ describe('document prices require clarification', () => {
     // The agent reads both prices from the API; the draft marks the line whose price needs an answer.
     expect(result.issues[0]!.message).toContain('9 EUR');
     expect(result.issues[0]!.message).toContain('12 EUR');
-    expect(orderDraft(result.draft, result.issues, true)).toContain('❓ Da completare: prezzo di Amber hand wash 250 ml');
+    expect(orderDraft(result.draft, result.issues, true)).toContain('❓ Da completare: prezzo di Pebble hand wash 250 ml');
   });
   it('uses current FiC prices when the operator chooses catalogue', async () => {
     const result = await prepare(9, 'net', 'catalogue');

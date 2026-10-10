@@ -8,14 +8,14 @@ import { createDraftApi } from '../src/assistant/drafts.js';
 import { config, draft } from './helpers.js';
 
 const on = matchingConfigSchema.parse({ mode: 'on' });
-const context = { orderId: 'test', revision: 1, operatorText: 'Order for the example shop: two small amber washes. Delivery eight.' };
+const context = { orderId: 'test', revision: 1, operatorText: 'Order for the example shop: two small pebble washes. Delivery eight.' };
 const result = (status: SelectionResult['status'], selectedId?: number): SelectionResult => ({ status, selectedId,
   evidence: { requestHash: 'test', promptVersion: 'test', retrieval: { complete: true, furtherSearchPossible: false }, elapsedMs: 0, model: 'test-model', confidence: 0.9 } });
 const successful: SelectMany = async requests => requests.map(r => result('matched', r.kind === 'client' ? 201 : 101));
 const resolver = (connector = new DemoConnector(), selectMany: SelectMany = successful, mode: 'on' | 'shadow' | 'off' = 'on') => createIdentityResolver(config(), connector, { config: { ...on, mode }, selectMany });
 
 it('replaces model IDs with application-validated decisions and preserves price/quantity data', async () => {
-  const input = { ...draft(), clientId: 202, lines: [{ query: 'small amber wash', productId: 102, quantity: 3, netPrice: 9 }] };
+  const input = { ...draft(), clientId: 202, lines: [{ query: 'small pebble wash', productId: 102, quantity: 3, netPrice: 9 }] };
   const resolved = await resolver().resolve(input, context);
   expect(resolved.issues).toEqual([]);
   expect(resolved.draft).toMatchObject({ clientId: 201, lines: [{ productId: 101, quantity: 3, netPrice: 9 }] });
@@ -25,7 +25,7 @@ it('replaces model IDs with application-validated decisions and preserves price/
 });
 
 it.each(['ambiguous', 'no-match', 'unavailable'] as const)('never falls through to lexical matching on %s', async status => {
-  const resolved = await resolver(new DemoConnector(), async requests => requests.map(() => result(status))).resolve({ ...draft(), clientId: 201, lines: [{ query: 'Amber hand wash 250 ml', productId: 101, quantity: 2 }] }, context);
+  const resolved = await resolver(new DemoConnector(), async requests => requests.map(() => result(status))).resolve({ ...draft(), clientId: 201, lines: [{ query: 'Pebble hand wash 250 ml', productId: 101, quantity: 2 }] }, context);
   expect(resolved.issues).toHaveLength(2);
   expect(resolved.draft.clientId).toBeUndefined();
   expect(resolved.draft.lines[0]?.productId).toBeUndefined();
@@ -37,7 +37,7 @@ it('rejects an ID outside the eligible candidate set even from an injected selec
 });
 
 it('shadow records judgments without changing any draft fields or adding blocking issues', async () => {
-  const input = { ...draft(), clientId: 202, lines: [{ query: 'small amber wash', productId: 102, quantity: 3 }] };
+  const input = { ...draft(), clientId: 202, lines: [{ query: 'small pebble wash', productId: 102, quantity: 3 }] };
   const resolved = await resolver(new DemoConnector(), successful, 'shadow').resolve(input, context);
   expect(resolved.draft).toEqual(input);
   expect(resolved.issues).toEqual([]);
@@ -63,10 +63,10 @@ it('filters shipping, testers and contradictory sizes before semantic selection'
   const connector = new DemoConnector();
   const products = await connector.listProducts();
   vi.spyOn(connector, 'listProducts').mockResolvedValue([...products,
-    { id: 991, code: 'T', name: 'TESTER Amber wash 250 ml', description: '', netPrice: 3 },
-    { id: 992, code: 'BIG', name: 'Amber wash 1 l', description: '', netPrice: 30 }]);
+    { id: 991, code: 'T', name: 'TESTER Pebble wash 250 ml', description: '', netPrice: 3 },
+    { id: 992, code: 'BIG', name: 'Pebble wash 1 l', description: '', netPrice: 30 }]);
   const select = vi.fn(successful);
-  await resolver(connector, select).resolve({ ...draft(), lines: [{ query: 'amber wash 250 ml', quantity: 2 }] }, context);
+  await resolver(connector, select).resolve({ ...draft(), lines: [{ query: 'pebble wash 250 ml', quantity: 2 }] }, context);
   const candidates = select.mock.calls[0]![0].find(r => r.kind === 'product')!.candidates;
   expect(candidates.map(c => c.id)).not.toEqual(expect.arrayContaining([900]));
   expect(candidates.some(c => [900, 991, 992].includes(c.id))).toBe(false);
@@ -127,7 +127,7 @@ it('the order API re-resolves every call and never calculates totals for unresol
   const drafts = createDraftApi(config(), connector, resolver(connector, select));
   const first = await drafts.order({ ...draft(), clientId: 202 }, context, '2026-10-08');
   expect(first.status).toBe('needs'); expect(totals).not.toHaveBeenCalled();
-  const next = await drafts.order({ ...draft(), clientId: 202 }, { ...context, operatorText: 'Use the small amber wash for the example shop', revision: 2 }, '2026-10-08');
+  const next = await drafts.order({ ...draft(), clientId: 202 }, { ...context, operatorText: 'Use the small pebble wash for the example shop', revision: 2 }, '2026-10-08');
   expect(next.status).toBe('ready');
   if (next.status === 'ready') {
     expect(next.order.client.id).toBe(201);
@@ -152,7 +152,7 @@ it('operator button choices bypass the model but remain limited to current recor
 it('an explicit code cannot silently turn into a different size or a tester', async () => {
   const connector = new DemoConnector(); const products = await connector.listProducts();
   const p = products.find(p => p.id === 101)!;
-  vi.spyOn(connector, 'listProducts').mockResolvedValue([...products, { id: 991, code: 'T', name: 'TESTER Amber wash 250 ml', description: '', netPrice: 3 }]);
+  vi.spyOn(connector, 'listProducts').mockResolvedValue([...products, { id: 991, code: 'T', name: 'TESTER Pebble wash 250 ml', description: '', netPrice: 3 }]);
   const select = vi.fn(successful);
   const r = resolver(connector, select);
   await r.resolve({ ...draft(), lines: [{ query: `${p.code} 500 ml`, quantity: 2 }] }, context);
@@ -178,7 +178,7 @@ it('keeps explicit choices stable through quantity/price changes and invalidates
 
 it('does not calculate totals when fresh preparation data differs from the judged snapshot', async () => {
   const connector = new DemoConnector(); const products = await connector.listProducts();
-  vi.spyOn(connector, 'listProducts').mockResolvedValueOnce(products).mockResolvedValue([...products, { id: 993, code: 'OTHER', name: 'Another plausible amber wash', description: '', netPrice: 10 }]);
+  vi.spyOn(connector, 'listProducts').mockResolvedValueOnce(products).mockResolvedValue([...products, { id: 993, code: 'OTHER', name: 'Another plausible pebble wash', description: '', netPrice: 10 }]);
   const totals = vi.spyOn(connector, 'calculateTotals');
   expect((await createDraftApi(config(), connector, resolver(connector)).order(draft(), { ...context, orderId: 'freshness' }, '2026-10-08')).status).toBe('needs');
   expect(totals).not.toHaveBeenCalled();
@@ -186,7 +186,7 @@ it('does not calculate totals when fresh preparation data differs from the judge
 
 it('an explicit ID disambiguates duplicate canonical product names', async () => {
   const connector = new DemoConnector(); connector.products.push({ ...connector.products[0]!, id: 994, code: 'DUPLICATE' });
-  const resolved = await resolver(connector).resolve(draft(), { ...context, operatorText: 'Amber hand wash 250 ml', choice: { field: 'lines.0', id: 994 } });
+  const resolved = await resolver(connector).resolve(draft(), { ...context, operatorText: 'Pebble hand wash 250 ml', choice: { field: 'lines.0', id: 994 } });
   expect(resolved.draft.lines[0]?.productId).toBe(994);
   expect(resolved.decisions[1]?.source).toBe('operator');
 });

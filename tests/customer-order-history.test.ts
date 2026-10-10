@@ -8,7 +8,7 @@ import { config } from './helpers.js';
 
 const client = { id: 42, name: 'Example Shop Ltd', country: 'IT', street: 'Example Street 1', city: 'Rome', postalCode: '00100', notes: '' };
 const order = { id: 81, number: '12', date: '2026-09-30', lines: [
-  { productId: 101, code: 'DEMO-A', name: 'Amber wash 250 ml', quantity: 3, netPrice: 12, discountPercent: 10 },
+  { productId: 101, code: 'DEMO-A', name: 'Pebble wash 250 ml', quantity: 3, netPrice: 12, discountPercent: 10 },
 ] };
 const context = { observe: noopObserve };
 const ports = () => ({ listClients: vi.fn(async () => [client]), listClientOrders: vi.fn(async (_id: number, _limit: number) => [order]) });

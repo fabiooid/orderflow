@@ -70,22 +70,22 @@ it('runs the real order API from scripted agent turns, with a candidate picked b
   const store = new TelegramStore(':memory:', 'engine'); await store.init();
   let messageId = 100;
   const connector = new DemoConnector();
-  connector.products.push({ id: 104, code: 'DEMO-A5', name: 'Amber hand wash 500 ml', description: '', netPrice: 20 });
+  connector.products.push({ id: 104, code: 'DEMO-A5', name: 'Pebble hand wash 500 ml', description: '', netPrice: 20 });
   const send = vi.fn(async (_text: string, _reply: number, _keyboard?: unknown) => ({ message_id: messageId++ }));
   // The scripted agent sends the drafts a model would, starting from the open request it is shown.
   const converse = vi.fn<Converse>()
-    .mockImplementationOnce(async (_prompt, act) => { await act.order(draftSchema.parse({ clientQuery: 'Example Studio', lines: [{ query: 'Amber hand wash', quantity: 2 }] })); return { reply: 'Quale formato?', locale: 'it' }; })
+    .mockImplementationOnce(async (_prompt, act) => { await act.order(draftSchema.parse({ clientQuery: 'Example Studio', lines: [{ query: 'Pebble hand wash', quantity: 2 }] })); return { reply: 'Quale formato?', locale: 'it' }; })
     .mockImplementationOnce(async (prompt, act) => { await act.order({ ...prompt.openRequest!.draft, shippingPrice: 8 }); return { reply: '', locale: 'it' }; });
   try {
     const engine = createConversationEngine(config(), connector, storage, { converse });
     const controller = new TelegramController(config(), 'bot', store, engine, send);
-    await controller.handle(message(1, '@bot ordine per Example Studio: 2 amber hand wash'));
+    await controller.handle(message(1, '@bot ordine per Example Studio: 2 pebble hand wash'));
     const first = await store.order('u1');
     expect(first?.status).toBe('suspended');
     const [text, , keyboard] = send.mock.calls[0]!;
     expect(text).toMatch(/^Quale formato\?\n\n📝 Bozza ordine/);
     expect(text).toContain('🏪 Example Studio');
-    expect(text).toContain('2 × Amber hand wash ❓');
+    expect(text).toContain('2 × Pebble hand wash ❓');
     expect(JSON.stringify(keyboard)).toContain('pick:u1:1:lines.0:104');
     // The pick goes straight to the order API: no agent turn.
     await controller.handle(press(2, 'pick:u1:1:lines.0:104', 100));
@@ -151,7 +151,7 @@ it('lists every open request when the agent is blocked from starting another, an
 });
 it('keeps a request from an earlier configuration, checked again under the current one, for the agent to continue', async () => {
   const store = new TelegramStore(':memory:', 'supersede'); await store.init();
-  const draft = draftSchema.parse({ clientQuery: 'Bottega Verde', lines: [{ query: 'amber', quantity: 20 }] });
+  const draft = draftSchema.parse({ clientQuery: 'Fable Goods', lines: [{ query: 'pebble', quantity: 20 }] });
   await store.plan(90, { replyTo: 90, texts: [], order: { orderId: 'u0', revision: 2, status: 'suspended', draft, policy: 'earlier' } });
   const engine = stubEngine('suspended', 'Draft');
   engine.revise.mockImplementation(async previous => ({ order: { ...previous, revision: previous.revision + 1 }, text: 'Rechecked draft' }));
@@ -180,7 +180,7 @@ it('lets an order take over the open new-customer request, carrying the customer
     .mockImplementationOnce(async (_prompt, act) => { await act.customer(draftSchema.parse({ newClient: customer })); return { reply: '', locale: 'it' }; })
     .mockImplementationOnce(async (prompt, act) => {
       expect(prompt.openRequest).toMatchObject({ kind: 'customer', draft: { newClient: customer } });
-      await act.order(draftSchema.parse({ newClient: prompt.openRequest!.draft.newClient, lines: [{ query: 'Amber hand wash 250 ml', quantity: 2 }], shippingPrice: 8 }));
+      await act.order(draftSchema.parse({ newClient: prompt.openRequest!.draft.newClient, lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 8 }));
       return { reply: '', locale: 'it' };
     });
   try {

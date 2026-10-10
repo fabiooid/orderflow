@@ -19,12 +19,12 @@ it('reports a ready order with its totals, or exactly what is still needed', asy
   const ready = await api.order(draft(), context, '2026-01-15');
   expect(ready.status).toBe('ready');
   if (ready.status === 'ready') expect(ready.totals.gross).toBe(36.11);
-  const needs = await api.order({ ...draft(), lines: [{ query: 'Amber 250', quantity: 2 }], shippingPrice: undefined }, context, '2026-01-15');
+  const needs = await api.order({ ...draft(), lines: [{ query: 'Pebble 250', quantity: 2 }], shippingPrice: undefined }, context, '2026-01-15');
   expect(needs.status).toBe('needs');
   if (needs.status !== 'needs') return;
   expect(needs.issues[0]).toMatchObject({ field: 'lines.0', candidates: expect.arrayContaining([expect.objectContaining({ id: 101 })]) });
   // The agent reads the problems and candidate names; record IDs stay with the application.
-  expect(forAgent(needs)).toMatchObject({ status: 'needs', issues: [{ field: 'lines.0', candidates: expect.arrayContaining(['Amber hand wash 250 ml']) }] });
+  expect(forAgent(needs)).toMatchObject({ status: 'needs', issues: [{ field: 'lines.0', candidates: expect.arrayContaining(['Pebble hand wash 250 ml']) }] });
   expect(JSON.stringify(forAgent(needs))).not.toContain('101');
 });
 
@@ -32,7 +32,7 @@ it('never trusts a model-written identity: matching replaces it with the judged 
   const judge: SelectMany = async requests => requests.map(r => ({ status: 'matched', selectedId: r.kind === 'client' ? 201 : 101, evidence: { requestHash: 't', promptVersion: 't', retrieval: r.retrieval, elapsedMs: 0 } } satisfies SelectionResult));
   const connector = new DemoConnector();
   const on = createIdentityResolver(config(), connector, { config: matchingConfigSchema.parse({ mode: 'on' }), selectMany: judge });
-  const result = await createDraftApi(config(), connector, on).order({ ...draft(), clientId: 999, lines: [{ query: 'the small amber wash', productId: 102, quantity: 2 }] }, { ...context, operatorText: 'the small amber wash for the studio' }, '2026-01-15');
+  const result = await createDraftApi(config(), connector, on).order({ ...draft(), clientId: 999, lines: [{ query: 'the small pebble wash', productId: 102, quantity: 2 }] }, { ...context, operatorText: 'the small pebble wash for the studio' }, '2026-01-15');
   expect(result.status).toBe('ready');
   expect(result.draft.clientId).toBe(201);
   expect(result.draft.lines[0]?.productId).toBe(101);
@@ -43,10 +43,10 @@ it('never trusts a model-written identity: matching replaces it with the judged 
 
 it('drafts a new customer and lists the deployment\'s missing fields', async () => {
   const api = createDraftApi(config(), new DemoConnector(), off);
-  const result = await api.customer(draftSchema.parse({ newClient: { name: 'Bottega Verde' } }), context);
-  expect(result).toMatchObject({ kind: 'customer', status: 'needs', draft: { newClient: { name: 'Bottega Verde' } } });
+  const result = await api.customer(draftSchema.parse({ newClient: { name: 'Fable Goods' } }), context);
+  expect(result).toMatchObject({ kind: 'customer', status: 'needs', draft: { newClient: { name: 'Fable Goods' } } });
   if (result.status === 'needs') expect(result.issues.map(i => i.field)).toEqual(['client.email', 'client.vatNumber']);
-  const ready = await api.customer(draftSchema.parse({ newClient: { name: 'Bottega Verde', email: 'info@bottega.invalid', vatNumber: 'IT1' } }), context);
+  const ready = await api.customer(draftSchema.parse({ newClient: { name: 'Fable Goods', email: 'info@fable.invalid', vatNumber: 'IT1' } }), context);
   expect(ready.status).toBe('ready');
 });
 
