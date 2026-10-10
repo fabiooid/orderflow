@@ -21,7 +21,7 @@ describe('restricted SDK adapter', () => {
     const connector = new FattureInCloudConnector(1, ports as unknown as SdkPorts, { clientWritesEnabled: true });
     const saved = await connector.createClient({ name: 'Scemo chi legge', certifiedEmail: 'a@pec.it', notes: '' });
     expect(ports.clients.createClient.mock.calls[0]?.[1].data).toMatchObject({ name: 'Scemo chi legge', certified_email: 'a@pec.it', country: undefined });
-    expect(saved).toMatchObject({ id: 7, name: 'Scemo chi legge', certifiedEmail: 'a@pec.it' });
+    expect(saved).toMatchObject({ id: '7', name: 'Scemo chi legge', certifiedEmail: 'a@pec.it' });
     expect(saved.street).toBeUndefined();
   });
   it('uses preflight totals during a journaled save without another remote read', async () => {
@@ -49,7 +49,7 @@ describe('restricted SDK adapter', () => {
     const ports = sdk();
     const connector = new FattureInCloudConnector(1, ports as unknown as SdkPorts, { writesEnabled: true });
     const order = await prepared();
-    expect(await connector.createOrder(order)).toEqual({ id: 80, number: '4', url: undefined });
+    expect(await connector.createOrder(order)).toEqual({ id: '80', number: '4', url: undefined });
     const payload = ports.documents.createIssuedDocument.mock.calls[0]![1].data;
     expect(payload.type).toBe('order');
     expect(payload.e_invoice).toBe(false);
@@ -62,7 +62,7 @@ describe('restricted SDK adapter', () => {
     const ports = sdk();
     ports.documents.getIssuedDocument.mockResolvedValue({ data: { data: { id: 80, type: 'invoice' } } });
     const connector = new FattureInCloudConnector(1, ports as unknown as SdkPorts, { writesEnabled: true });
-    await expect(connector.updateOrder(80, await prepared())).rejects.toThrow(/forbidden/);
+    await expect(connector.updateOrder('80', await prepared())).rejects.toThrow(/forbidden/);
     expect(ports.documents.modifyIssuedDocument).not.toHaveBeenCalled();
   });
   it('retrieves all product pages and never substitutes zero for a missing price', async () => {
@@ -71,10 +71,10 @@ describe('restricted SDK adapter', () => {
       .mockResolvedValueOnce({ data: { last_page: 2, data: [{ id: 1, name: 'First', code: 'A', net_price: 2 }] } })
       .mockResolvedValueOnce({ data: { last_page: 2, data: [{ id: 2, name: 'Second', code: 'B', net_price: 3 }] } });
     const connector = new FattureInCloudConnector(1, ports as unknown as SdkPorts);
-    expect((await connector.listProducts()).map(p => p.id)).toEqual([1, 2]);
+    expect((await connector.listProducts()).map(p => p.id)).toEqual(['1', '2']);
     expect(ports.products.listProducts.mock.calls[1]![4]).toBe(2);
     ports.products.listProducts.mockResolvedValue({ data: { data: [{ id: 3, name: 'Missing price' }, { id: 4, name: 'Null price', net_price: null }, { id: 5, name: 'Free sample', net_price: 0 }] } });
-    expect(await connector.listProducts()).toEqual([expect.objectContaining({ id: 5, netPrice: 0 })]);
+    expect(await connector.listProducts()).toEqual([expect.objectContaining({ id: '5', netPrice: 0 })]);
   });
   it('keeps page order when later pages are fetched concurrently', async () => {
     const ports = sdk();
@@ -83,7 +83,7 @@ describe('restricted SDK adapter', () => {
       return { data: { last_page: 6, data: [{ id: page, name: `P${page}`, code: String(page), net_price: 1 }] } };
     });
     const connector = new FattureInCloudConnector(1, ports as unknown as SdkPorts);
-    expect((await connector.listProducts()).map(p => p.id)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect((await connector.listProducts()).map(p => p.id)).toEqual(['1', '2', '3', '4', '5', '6']);
     expect(ports.products.listProducts).toHaveBeenCalledTimes(6);
   });
   it('rejects arbitrary email or unsupported document fields', async () => {

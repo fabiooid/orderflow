@@ -100,8 +100,8 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
       confirmedChoices: confirmedChoices(result.decisions), prepared: undefined, totals: undefined, issues: undefined };
     if (result.kind === 'customer') {
       if (result.status === 'existing') return { order: { ...next, status: 'reviewed' }, text: existingCustomer(result.client, it) };
-      if (result.status === 'ready') return { order: { ...next, status: 'ready' }, text: customerPreview(result.customer, it) };
-      return { order: { ...next, status: 'suspended', issues: result.issues }, text: customerPreview(result.draft.newClient ?? {}, it, result.issues.map(i => i.field.replace(/^client\./, ''))) };
+      if (result.status === 'ready') return { order: { ...next, status: 'ready' }, text: customerPreview(result.customer, it, [], config.tax?.italy) };
+      return { order: { ...next, status: 'suspended', issues: result.issues }, text: customerPreview(result.draft.newClient ?? {}, it, result.issues.map(i => i.field.replace(/^client\./, '')), config.tax?.italy) };
     }
     if (result.status === 'ready') return { order: { ...next, status: 'ready', prepared: result.order, totals: result.totals },
       text: orderPreview(result.order, result.totals, it, result.discrepancies, config.currency) };

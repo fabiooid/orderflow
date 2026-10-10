@@ -43,7 +43,7 @@ export function runConnectorContract(name: string, create: () => OrderConnector)
 runConnectorContract('demo', () => new DemoConnector());
 
 runConnectorContract('fatture-in-cloud', () => {
-  const products = [{ id: 101, name: 'Amber hand wash 250 ml', code: 'DEMO-A', net_price: 12, description: '' }];
+  const products = [{ id: 101, name: 'Pebble hand wash 250 ml', code: 'DEMO-A', net_price: 12, description: '' }];
   const clients: Record<string, unknown>[] = [];
   const orders = new Map<number, Record<string, unknown>>();
   let nextClient = 50;
@@ -80,7 +80,16 @@ runConnectorContract('fatture-in-cloud', () => {
 
 it('still accepts a top-level companyId from older config files', () => {
   const legacy = structuredClone(example) as Record<string, unknown>;
+  const invoicing = legacy.invoicing as { shippingProductId: string; vat: { ruleId: string; vatId: number; nature?: string }[] };
   delete legacy.invoicing;
   legacy.companyId = 42;
-  expect(configSchema.parse(legacy).invoicing).toMatchObject({ provider: 'fatture-in-cloud', companyId: 42, label: 'Fatture in Cloud' });
+  legacy.shipping = { ...(legacy.shipping as object), productId: Number(invoicing.shippingProductId) };
+  legacy.vatRules = (legacy.vatRules as { id: string }[]).map(rule => {
+    const binding = invoicing.vat.find(item => item.ruleId === rule.id);
+    return { ...rule, vatId: binding?.vatId, ...(binding?.nature ? { nature: binding.nature } : {}) };
+  });
+  const parsed = configSchema.parse(legacy);
+  expect(parsed.invoicing).toMatchObject({ provider: 'fatture-in-cloud', companyId: 42, label: 'Fatture in Cloud', shippingProductId: '900' });
+  expect(parsed.vatRules[0]).not.toHaveProperty('vatId');
+  expect(parsed.shipping).not.toHaveProperty('productId');
 });

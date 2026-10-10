@@ -6,7 +6,9 @@ OrderFlow is a reusable orders assistant. Business facts and vendor clients stay
 
 Product names, SKUs, prices, customer names, VAT numbers, addresses and shop wording belong in the operator's own config or in clearly fictional fixtures. Do not commit a real catalogue, a real order, or a prompt written for one shop.
 
-Italian e-invoicing fields (SDI, PEC, VAT nature codes) are generic capabilities an operator turns on in config. They are not one company's rules.
+Product, customer and order ids are opaque strings in the domain and on `OrderConnector`. An adapter converts its own id type at the boundary. Fatture in Cloud keeps numeric ids inside `src/connector/fatture-in-cloud.ts`.
+
+Italian e-invoicing is optional. SDI and PEC country lists live under `tax.italy` and are omitted when a deployment does not collect them. VAT type ids, nature codes and the shipping product id live in the invoicing provider block, not in the generic VAT rules.
 
 ## Adapters behind interfaces
 

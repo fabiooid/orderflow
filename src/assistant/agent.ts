@@ -56,7 +56,7 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
   const searchClients = createTool({
     id: 'search-clients', description: 'Find existing businesses by name or VAT number. Do not create a duplicate when a record exists.',
     inputSchema: z.object({ query: z.string().min(1) }),
-    outputSchema: z.array(z.object({ id: z.number(), name: z.string(), country: z.string(), vatNumber: z.string().optional() })),
+    outputSchema: z.array(z.object({ id: z.string().min(1), name: z.string(), country: z.string(), vatNumber: z.string().optional() })),
     execute: async ({ query }) => {
       const words = normalize(query).split(/\s+/).filter(Boolean);
       const data = await knowledge.read();

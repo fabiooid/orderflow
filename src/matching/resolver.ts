@@ -10,31 +10,31 @@ import { loadMatchingConfig, type MatchingConfig } from './config.js';
 import { createJevBatchSelector, sdkTransport } from './jev-client.js';
 import type { Candidate, SelectionRequest, SelectionResult } from './types.js';
 
-export const confirmedChoiceSchema = z.object({ field: z.string(), id: z.number().int().positive(), queryHash: z.string(), identityHash: z.string() });
+export const confirmedChoiceSchema = z.object({ field: z.string(), id: z.string().min(1), queryHash: z.string(), identityHash: z.string() });
 export type ConfirmedChoice = z.infer<typeof confirmedChoiceSchema>;
 export const resolutionContextSchema = z.object({
   orderId: z.string(), revision: z.number().int().nonnegative().default(0),
   operatorText: z.string().max(12000),
   confirmedChoices: z.array(confirmedChoiceSchema).max(101).optional(),
   /** A candidate the operator picked with a button in this turn: the only way an ID enters from outside the resolver. */
-  choice: z.object({ field: z.string().regex(/^(?:client|lines\.\d+)$/), id: z.number().int().positive() }).optional(),
+  choice: z.object({ field: z.string().regex(/^(?:client|lines\.\d+)$/), id: z.string().min(1) }).optional(),
 });
 export type ResolutionContext = z.infer<typeof resolutionContextSchema>;
 export const decisionSchema = z.object({
   field: z.string(), status: z.enum(['matched', 'ambiguous', 'no-match', 'unavailable']),
-  selectedId: z.number().optional(), queryHash: z.string().optional(), identityHash: z.string().optional(), inputHash: z.string(), candidateHash: z.string(), snapshotHash: z.string().optional(),
+  selectedId: z.string().min(1).optional(), queryHash: z.string().optional(), identityHash: z.string().optional(), inputHash: z.string(), candidateHash: z.string(), snapshotHash: z.string().optional(),
   source: z.enum(['exact', 'operator', 'jev']), model: z.string().optional(), confidence: z.number().optional(),
   strategy: z.string().optional(), requestHash: z.string().optional(), promptVersion: z.string().optional(), reason: z.string().optional(),
-  searchGroups: z.array(z.object({ candidateCount: z.number().optional(), candidateHash: z.string().optional(), reason: z.string().optional(), status: z.enum(['matched', 'ambiguous', 'no-match', 'unavailable']), selectedId: z.number().optional(), evidence: z.unknown() })).optional(),
+  searchGroups: z.array(z.object({ candidateCount: z.number().optional(), candidateHash: z.string().optional(), reason: z.string().optional(), status: z.enum(['matched', 'ambiguous', 'no-match', 'unavailable']), selectedId: z.string().min(1).optional(), evidence: z.unknown() })).optional(),
   probabilities: z.record(z.string(), z.number()).optional(), elapsedMs: z.number().optional(),
 });
 export type Decision = z.infer<typeof decisionSchema>;
 export const confirmedChoices = (decisions: Decision[]) => decisions.flatMap(d => d.source === 'operator' && d.status === 'matched' && d.selectedId && d.queryHash && d.identityHash ? [{ field: d.field, id: d.selectedId, queryHash: d.queryHash, identityHash: d.identityHash }] : []);
-export type AliasData = { aliases: { phrase: string; productId: number }[]; clientAliases: { phrase: string; clientId: number }[] };
+export type AliasData = { aliases: { phrase: string; productId: string }[]; clientAliases: { phrase: string; clientId: string }[] };
 export type SelectMany = (inputs: SelectionRequest[]) => Promise<SelectionResult[]>;
 export type Resolution = { draft: OrderDraft; issues: Issue[]; decisions: Decision[] };
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-const snapshotHash = (candidates: Candidate[]) => hash([...candidates].sort((a, b) => a.id - b.id));
+const snapshotHash = (candidates: Candidate[]) => hash([...candidates].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 const identityHash = (candidate: Candidate) => { const { aliases: _aliases, ...identity } = candidate; return hash(identity); };
 const has = (text: string, value: string) => !!normalize(value) && ` ${normalize(text)} `.includes(` ${normalize(value)} `);
 const units: Record<string, number> = { ml: 1, cl: 10, l: 1000, lt: 1000, litro: 1000, litri: 1000, g: 1, gr: 1, kg: 1000, mm: 1, cm: 10 };
@@ -91,7 +91,7 @@ export function createIdentityResolver(app: AppConfig, connector: OrderConnector
       ...(!clientQuery && choice?.field !== 'client' ? { forced: 'no-match' as const } : {}),
       ...(choice?.field !== 'client' && !confirmedClient && new Set(ca.map(a => a.clientId)).size > 1 ? { forced: 'ambiguous' as const } : {}) });
     for (const [index, line] of draft.lines.entries()) {
-      const all = products.filter(p => p.id !== app.shipping.productId && p.netPrice > 0);
+      const all = products.filter(p => p.id !== app.invoicing.shippingProductId && p.netPrice > 0);
       const confirmed = context.confirmedChoices?.find(c => c.field === `lines.${index}` && c.queryHash === hash(normalize(line.query)) && productCandidates(all).some(record => record.id === c.id && identityHash(record) === c.identityHash));
       const chosen = all.find(p => p.id === (choice?.field === `lines.${index}` ? choice.id : confirmed?.id));
       if (chosen) {

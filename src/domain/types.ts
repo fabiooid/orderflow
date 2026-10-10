@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const clientSchema = z.object({
-  id: z.number().int().positive().optional(),
+  id: z.string().min(1).optional(),
   name: z.string().min(1),
   country: z.string().regex(/^[A-Z]{2}$/),
   street: z.string().min(1),
@@ -23,7 +23,7 @@ export const newCustomerSchema = clientSchema.partial({ country: true, street: t
 export type NewCustomer = z.infer<typeof newCustomerSchema>;
 
 export const productSchema = z.object({
-  id: z.number().int().positive(),
+  id: z.string().min(1),
   code: z.string(),
   name: z.string().min(1),
   description: z.string().default(''),
@@ -38,11 +38,11 @@ export const draftSchema = z.object({
     status: z.enum(['valid', 'invalid']),
   }).strict().optional(),
   clientQuery: z.string().default(''),
-  clientId: z.number().int().positive().optional(),
+  clientId: z.string().min(1).optional(),
   newClient: clientSchema.omit({ id: true }).partial().optional(),
   lines: z.array(z.object({
     query: z.string().min(1),
-    productId: z.number().int().positive().optional(),
+    productId: z.string().min(1).optional(),
     quantity: z.number().finite().positive().max(100000).optional(),
     netPrice: z.number().finite().min(0).max(1000000).optional(),
     documentPrice: z.object({
@@ -66,7 +66,7 @@ export const draftSchema = z.object({
 export type OrderDraft = z.infer<typeof draftSchema>;
 
 export const orderLineSchema = z.object({
-  productId: z.number().int().positive(),
+  productId: z.string().min(1),
   code: z.string(),
   name: z.string().min(1),
   quantity: z.number().finite().positive(),
@@ -95,8 +95,8 @@ export type PreparedOrder = z.infer<typeof preparedOrderSchema>;
 export type OrderLine = z.infer<typeof orderLineSchema>;
 export const totalsSchema = z.object({ net: z.number(), vat: z.number(), gross: z.number() });
 export type Totals = z.infer<typeof totalsSchema>;
-export type SavedOrder = { id: number; number: string; url?: string };
+export type SavedOrder = { id: string; number: string; url?: string };
 /** A client's earlier order, read only to point out differences. */
-export type ClientOrder = { id: number; number: string; date: string; lines: { productId?: number; code: string; name: string; quantity: number; netPrice: number; discountPercent: number }[] };
+export type ClientOrder = { id: string; number: string; date: string; lines: { productId?: string; code: string; name: string; quantity: number; netPrice: number; discountPercent: number }[] };
 export type VatValidation = 'valid' | 'invalid' | 'unavailable' | 'unchecked';
-export type Issue = { matchingStatus?: 'ambiguous' | 'no-match' | 'unavailable'; field: string; message: string; candidates?: { id: number; label: string }[]; priceComparison?: { document: number; catalogue: number; basis: 'net' | 'gross' | 'unclear' }; defaultPrice?: number };
+export type Issue = { matchingStatus?: 'ambiguous' | 'no-match' | 'unavailable'; field: string; message: string; candidates?: { id: string; label: string }[]; priceComparison?: { document: number; catalogue: number; basis: 'net' | 'gross' | 'unclear' }; defaultPrice?: number };

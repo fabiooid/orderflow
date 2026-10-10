@@ -5,7 +5,7 @@ import { missingCustomerFields } from './customer.js';
 import { asksForTester, isTester, matchProducts, namedAlternatives, normalize, sameClient, searchCatalogue } from './matching.js';
 
 /** `draft` is the draft as preparation read it, for example without a delivery address equal to the billing one. */
-export type Preparation = { ready: false; issues: Issue[]; draft: OrderDraft; clientId?: number } | { ready: true; order: PreparedOrder; draft: OrderDraft };
+export type Preparation = { ready: false; issues: Issue[]; draft: OrderDraft; clientId?: string } | { ready: true; order: PreparedOrder; draft: OrderDraft };
 export type ValidationLookup = (country: string, vatNumber: string) => Promise<VatValidation>;
 const toCandidates = (clients: Client[]) => clients.filter(c => c.id).map(c => ({ id: c.id!, label: c.name }));
 
@@ -31,7 +31,7 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
     for (const field of missingCustomerFields(client, config)) issues.push({ field: `client.${field}`, message: `Missing required customer field: ${field}` });
   }
 
-  const shipping = products.find(p => p.id === config.shipping.productId);
+  const shipping = products.find(p => p.id === config.invoicing.shippingProductId);
   if (!shipping) throw new Error('Configured shipping product does not exist');
 
   if (!draft.lines.length) issues.push({ field: 'lines', message: 'Add at least one product and quantity' });
@@ -61,7 +61,7 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
         } else if (documentPrice.decision === 'document' && documentPrice.basis === 'net') {
           netPrice = documentPrice.amount;
         } else {
-          issues.push({ field: `${field}.documentPrice`, message: `Document: ${documentPrice.amount} EUR (${documentPrice.basis}); catalogue: ${chosen.netPrice} EUR net. Choose catalogue prices or explicitly confirm a net document price.`, priceComparison: { document: documentPrice.amount, catalogue: chosen.netPrice, basis: documentPrice.basis } });
+          issues.push({ field: `${field}.documentPrice`, message: `Document: ${documentPrice.amount} ${config.currency} (${documentPrice.basis}); catalogue: ${chosen.netPrice} ${config.currency} net. Choose catalogue prices or explicitly confirm a net document price.`, priceComparison: { document: documentPrice.amount, catalogue: chosen.netPrice, basis: documentPrice.basis } });
         }
       }
       selected.push({ product: chosen, quantity: line.quantity, netPrice, index });
@@ -94,13 +94,15 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
   if (!issues.length && shippingPrice === undefined) issues.push({ field: 'shippingPrice', message: `Confirm the delivery charge (catalogue default ${shipping.netPrice} ${config.currency} excluding VAT) or remove it`, defaultPrice: shipping.netPrice });
   // Report the existing customer already identified, so questions can show who the order is for.
   const existing = !draft.newClient && matches.length === 1 ? matches[0]!.id : undefined;
-  if (issues.length || !client || !delivery || !rule || shippingPrice === undefined) return { ready: false, issues, draft, ...(existing ? { clientId: existing } : {}) };
+  const binding = rule ? config.invoicing.vat.find(item => item.ruleId === rule.id) : undefined;
+  if (rule && !binding) issues.push({ field: 'vat', message: 'No provider VAT binding matches this rule; review required' });
+  if (issues.length || !client || !delivery || !rule || !binding || shippingPrice === undefined) return { ready: false, issues, draft, ...(existing ? { clientId: existing } : {}) };
 
   const makeLine = (product: Product, quantity: number, isShipping: boolean, netPrice?: number): OrderLine => ({
     productId: product.id, code: product.code, name: product.name, quantity,
     netPrice: isShipping ? shippingPrice : netPrice ?? product.netPrice,
     discountPercent: !isShipping || (draft.discountShipping ?? config.shipping.discountByDefault) ? draft.discountPercent : 0,
-    vatId: rule.vatId, vatRate: rule.rate, nature: rule.nature, shipping: isShipping,
+    vatId: binding.vatId, vatRate: rule.rate, nature: binding.nature, shipping: isShipping,
   });
   const due = new Date(`${date}T00:00:00Z`);
   if (Number.isNaN(due.getTime()) || due.toISOString().slice(0, 10) !== date) throw new Error('Invalid order date');

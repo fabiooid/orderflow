@@ -29,13 +29,13 @@ const nullableClient = z.object(Object.fromEntries(Object.entries(clientSchema.o
 
 export const orderDraftInput = z.object({
   clientQuery: z.string().describe('The customer name or VAT number the operator gave, as written. When the operator names the customer, that name wins over any company named in attached content. Empty when no customer is known yet.'),
-  clientId: z.number().int().positive().nullable().describe('Keep the clientId already in the open draft. Otherwise null: the application resolves clientQuery against current records.'),
+  clientId: z.string().min(1).nullable().describe('Keep the clientId already in the open draft. Otherwise null: the application resolves clientQuery against current records.'),
   newClient: nullableClient.nullable().describe('Only when the operator says the customer is new or types its billing details themselves. A customer named, signed or printed in an attached email or document only identifies it: put its name in clientQuery and leave this null.'),
   manualVatCheck: z.object({ country: z.string().regex(/^[A-Z]{2}$/), vatNumber: z.string().min(1), status: z.enum(['valid', 'invalid']) }).strict().nullable()
     .describe('Only after the operator explicitly confirms a completed VIES check and its result, bound to that exact country and VAT number. Never inferred from a name, number format or location.'),
   lines: z.array(z.object({
     query: z.string().min(1).describe("The operator's product words without quantity or price. Operators use short names, synonyms, plurals and typos."),
-    productId: z.number().int().positive().nullable().describe('Keep the productId already in the open draft, or use N from an order-form [productId N] marker. Otherwise null: the application resolves query against the catalogue and offers choices when several fit.'),
+    productId: z.string().min(1).nullable().describe('Keep the productId already in the open draft, or copy the id from an order-form [productId …] marker. Otherwise null: the application resolves query against the catalogue and offers choices when several fit.'),
     quantity: z.number().positive().nullable().describe('Count of items ("5 x", "5 pezzi"). A size or volume such as "5 litri" is part of the product, not the quantity. null when no count is written.'),
     netPrice: z.number().nonnegative().nullable().describe('Net unit price the operator states for this order, including later corrections. null otherwise: catalogue prices apply. Never a price read from a document, never learned for future orders.'),
     documentPrice: z.object({ amount: z.number().nonnegative(), basis: z.enum(['net', 'gross', 'unclear']), decision: z.enum(['pending', 'catalogue', 'document']) }).strict().nullable().default(null)

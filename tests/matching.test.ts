@@ -15,7 +15,7 @@ describe('read-only JEV selection boundary', () => {
   it('maps the validated candidate key to the supplied record ID', async () => {
     const transport = vi.fn().mockResolvedValue(response());
     const result = await createJevSelector(config, transport)(request);
-    expect(result).toMatchObject({ status: 'matched', selectedId: 102, evidence: { model: 'jev-1.13.0' } });
+    expect(result).toMatchObject({ status: 'matched', selectedId: '102', evidence: { model: 'jev-1.13.0' } });
     expect(result.evidence.requestHash).toHaveLength(64);
     expect(transport).toHaveBeenCalledTimes(1);
   });
@@ -43,7 +43,7 @@ describe('read-only JEV selection boundary', () => {
     const transport = vi.fn();
     const select = createJevSelector(config, transport);
     expect((await select({ ...request, retrieval: { complete: false, furtherSearchPossible: true } })).reason).toBe('incomplete-retrieval');
-    expect((await select({ ...request, candidates: Array.from({ length: 254 }, (_, i) => ({ id: i + 1, name: 'test' })) })).reason).toBe('invalid-input');
+    expect((await select({ ...request, candidates: Array.from({ length: 254 }, (_, i) => ({ id: String(i + 1), name: 'test' })) })).reason).toBe('invalid-input');
     expect((await select({ ...request, candidates: [request.candidates[0]!, request.candidates[0]!] })).reason).toBe('invalid-input');
     expect(transport).not.toHaveBeenCalled();
   });
@@ -71,12 +71,12 @@ describe('read-only JEV selection boundary', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
   it('projects identity fields and excludes shipping and zero-priced description items', () => {
-    const products = [{ id: 1, code: 'A', name: 'Soap', description: '', netPrice: 5 },
-      { id: 2, code: 'B', name: 'Delivery', description: '', netPrice: 15 },
-      { id: 3, code: 'C', name: 'Heading', description: '', netPrice: 0 }];
-    expect(productCandidates(products, 2)).toEqual([{ id: 1, code: 'A', name: 'Soap', description: '' }]);
-    expect(clientCandidates([{ id: 1, name: 'Shop', country: 'IT', city: 'Roma', street: 'private', postalCode: '00100', notes: 'private' }]))
-      .toEqual([{ id: 1, name: 'Shop', country: 'IT', city: 'Roma' }]);
+    const products = [{ id: '1', code: 'A', name: 'Soap', description: '', netPrice: 5 },
+      { id: '2', code: 'B', name: 'Delivery', description: '', netPrice: 15 },
+      { id: '3', code: 'C', name: 'Heading', description: '', netPrice: 0 }];
+    expect(productCandidates(products, '2')).toEqual([{ id: '1', code: 'A', name: 'Soap', description: '' }]);
+    expect(clientCandidates([{ id: '1', name: 'Shop', country: 'IT', city: 'Roma', street: 'private', postalCode: '00100', notes: 'private' }]))
+      .toEqual([{ id: '1', name: 'Shop', country: 'IT', city: 'Roma' }]);
   });
   it('bounds SDK retries and does not retry authentication failures', async () => {
     for (const status of [401, 503]) {

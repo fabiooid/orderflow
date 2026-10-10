@@ -80,25 +80,24 @@ const fieldLabels: Record<string, CopyKey> = {
 };
 const fieldLabel = (field: string, it: boolean) => fieldLabels[field] ? say(it, fieldLabels[field]) : field;
 
-/** Optional customer details. SDI and PEC apply to Italian customers, assumed when no country is given. */
-export function optionalCustomerFields(client: Partial<NewCustomer>, it: boolean) {
-  const italian = !client.country || client.country === 'IT';
+/** Optional customer details. SDI and PEC are suggested only for countries listed in the Italy tax section. */
+export function optionalCustomerFields(client: Partial<NewCustomer>, it: boolean, regional: { sdiCountries?: string[]; pecCountries?: string[] } = {}) {
   const fields: string[] = (['street', 'postalCode', 'city', 'country'] as const).filter(field => !client[field]).map(field => fieldLabel(field, it));
   if (!client.vatNumber && !client.taxCode) fields.push(`${fieldLabel('vatNumber', it)} / ${fieldLabel('taxCode', it).toLowerCase()}`);
-  if (italian && !client.sdiCode) fields.push(fieldLabel('sdiCode', it));
-  if (italian && !client.certifiedEmail) fields.push(fieldLabel('certifiedEmail', it));
+  if (client.country && regional.sdiCountries?.includes(client.country) && !client.sdiCode) fields.push(fieldLabel('sdiCode', it));
+  if (client.country && regional.pecCountries?.includes(client.country) && !client.certifiedEmail) fields.push(fieldLabel('certifiedEmail', it));
   if (!client.phone) fields.push(fieldLabel('phone', it));
   if (!client.email) fields.push(fieldLabel('email', it));
   return fields;
 }
 
 /** A customer request that matched an existing customer: nothing is created. */
-export function existingCustomer(client: { id: number; name: string }, it: boolean) {
+export function existingCustomer(client: { id: string; name: string }, it: boolean) {
   return say(it, 'customerAlready', { name: client.name, id: client.id });
 }
 
 /** A new customer: complete and ready to confirm, or a draft with the details still missing. */
-export function customerPreview(client: Partial<NewCustomer>, it: boolean, missing: string[] = []) {
+export function customerPreview(client: Partial<NewCustomer>, it: boolean, missing: string[] = [], regional: { sdiCountries?: string[]; pecCountries?: string[] } = {}) {
   const address = place(client);
   const lines = [say(it, 'newCustomerTitle'), rule, '', `🏪 ${client.name ?? '❓'}`, ...(address ? ['', `📍 ${address}`] : [])];
   const contact = [client.email ? `✉️ ${client.email}` : '', client.certifiedEmail ? `📨 PEC ${client.certifiedEmail}` : '', client.phone ? `📞 ${client.phone}` : ''].filter(Boolean);
@@ -114,7 +113,7 @@ export function customerPreview(client: Partial<NewCustomer>, it: boolean, missi
     lines.push('', `❓ ${say(it, 'draftToComplete')}: ${missing.map(field => fieldLabel(field, it).toLowerCase()).join(' · ')}`);
     return lines.join('\n');
   }
-  const optional = optionalCustomerFields(client, it);
+  const optional = optionalCustomerFields(client, it, regional);
   if (optional.length) lines.push('', say(it, 'optionalHint'), ...optional.map(field => `• ${field}`));
   if (!client.street || !client.city || !client.postalCode || !client.country) lines.push('', say(it, 'orderNeedsAddress'));
   return lines.join('\n');
