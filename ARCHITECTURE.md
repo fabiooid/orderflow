@@ -18,12 +18,16 @@ Italian e-invoicing is optional. SDI and PEC country lists live under `tax.italy
 - Adding a channel or an invoicing backend is a new adapter folder plus config. It does not edit order preparation, totals or the confirmation flow.
 - The demo connector and the contract tests are the reference a new adapter must pass.
 
+## Matchers
+
+Identity matching is optional. `JEV_MODE=off` is the default, and that path does not call a vendor. The resolver takes a `SelectMany` function. It does not import a vendor client. The Typesafe adapter is `src/matching/jev-client.ts`, installed only by `src/matching/wire.ts` from Studio, the channel runner and evals. Another matcher is a new `SelectMany` passed the same way. Do not put a vendor name on core types. The stored decision source `jev` is an existing value; leave it unless a migration is explicit.
+
 ## Locale and currency
 
 Operator-facing language and currency come from config. Italian and English wording lives in `src/channel/locales/`. Do not hardcode a shop's currency symbol or a single language in core logic. Supported languages today are Italian and English (`locale: "it" | "en"`). `currency` is an ISO 4217 code from config, not a fixed `EUR`.
 
 ## What core must not import
 
-Core folders (`src/domain`, `src/assistant`, `src/documents`, `src/channel`) must not import a specific channel package or `src/connector/fatture-in-cloud.ts`. `npm run boundaries` fails the build if they do. Composition roots (`src/mastra`, `src/health`, `scripts/`) may wire an adapter.
+Core folders (`src/domain`, `src/assistant`, `src/documents`, `src/channel`, and `src/matching` except the matcher adapter) must not import a specific channel package, `src/connector/fatture-in-cloud.ts`, or `src/matching/jev-client.ts`. `npm run boundaries` fails the build if they do. Composition roots (`src/mastra`, `src/health`, `src/evals`, `scripts/`) may wire an adapter.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how to add an adapter.

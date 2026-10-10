@@ -14,6 +14,10 @@ const result = (status: SelectionResult['status'], selectedId?: string): Selecti
 const successful: SelectMany = async requests => requests.map(r => result('matched', r.kind === 'client' ? '201' : '101'));
 const resolver = (connector = new DemoConnector(), selectMany: SelectMany = successful, mode: 'on' | 'shadow' | 'off' = 'on') => createIdentityResolver(config(), connector, { config: { ...on, mode }, selectMany });
 
+it('requires an installed matcher when matching is enabled', () => {
+  expect(() => createIdentityResolver(config(), new DemoConnector(), { config: on })).toThrow(/selectMany/);
+});
+
 it('replaces model IDs with application-validated decisions and preserves price/quantity data', async () => {
   const input = { ...draft(), clientId: '202', lines: [{ query: 'small pebble wash', productId: '102', quantity: 3, netPrice: 9 }] };
   const resolved = await resolver().resolve(input, context);

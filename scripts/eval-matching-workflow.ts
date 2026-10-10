@@ -5,6 +5,7 @@ import { draftSchema } from '../src/domain/types.js';
 import { createDraftApi } from '../src/assistant/drafts.js';
 import { createIdentityResolver } from '../src/matching/resolver.js';
 import { loadMatchingConfig } from '../src/matching/config.js';
+import { wireMatching } from '../src/matching/wire.js';
 import { matchingFixtures } from '../src/matching/fixtures.js';
 
 // Fictional records only; no FIC, Telegram, conversational model, or write calls.
@@ -24,7 +25,7 @@ async function main() {
     const draft = draftSchema.parse({ clientQuery: fixture.request.kind === 'client' ? query : 'Example Studio',
       lines: [{ query: fixture.request.kind === 'product' ? query : 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 8 });
     const text = `Prepare an order for ${draft.clientQuery}: ${draft.lines[0]!.query}, two pieces; delivery eight euros.`;
-    const drafts = createDraftApi(app, connector, createIdentityResolver(app, connector, { config: matching }));
+    const drafts = createDraftApi(app, connector, createIdentityResolver(app, connector, { config: matching, selectMany: wireMatching().selectMany }));
     const outcome = await drafts.order(draft, { orderId: `eval-${fixture.name}`, revision: 1, operatorText: text }, '2026-10-08');
     const field = fixture.request.kind === 'client' ? 'client' : 'lines.0';
     const actual: string = outcome.status === 'ready'

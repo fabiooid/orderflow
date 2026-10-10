@@ -7,7 +7,6 @@ import { asksForTester, isTester, normalize } from '../domain/matching.js';
 import { draftSchema, type Client, type Product, type Issue, type OrderDraft } from '../domain/types.js';
 import { productCandidates, clientCandidates } from './candidates.js';
 import { loadMatchingConfig, type MatchingConfig } from './config.js';
-import { createJevBatchSelector, sdkTransport } from './jev-client.js';
 import type { Candidate, SelectionRequest, SelectionResult } from './types.js';
 
 export const confirmedChoiceSchema = z.object({ field: z.string(), id: z.string().min(1), queryHash: z.string(), identityHash: z.string() });
@@ -49,8 +48,8 @@ export function createIdentityResolver(app: AppConfig, connector: OrderConnector
   config?: MatchingConfig; selectMany?: SelectMany; aliases?: () => Promise<AliasData>;
 } = {}) {
   const config = options.config ?? loadMatchingConfig();
-  const selectMany = withCompleteClientSearch(options.selectMany ?? createJevBatchSelector(config,
-    config.mode === 'off' ? undefined : sdkTransport(config, process.env.TYPESAFE_API_KEY ?? '')), config.largeClientSearch);
+  if (config.mode !== 'off' && !options.selectMany) throw new Error('Pass selectMany when matching mode is not off.');
+  const selectMany = options.selectMany ? withCompleteClientSearch(options.selectMany, config.largeClientSearch) : async () => [];
 
   async function resolve(input: OrderDraft, context: ResolutionContext): Promise<Resolution> {
     const original = draftSchema.parse(input);

@@ -13,6 +13,7 @@ import { TelegramApi } from '../src/channels/telegram/api.js';
 import { TELEGRAM_STATE_URL, TelegramStore, pollerLockPath, telegramMemoryUrl, telegramScopePrefix } from '../src/channel/store.js';
 import { TelegramController } from '../src/channel/controller.js';
 import { createConversationEngine } from '../src/channel/engine.js';
+import { wireMatching } from '../src/matching/wire.js';
 import { acquirePollerLock } from '../src/channels/telegram/lock.js';
 import { albumOf, groupAlbums, installTelegramChannel } from '../src/channels/telegram/adapter.js';
 import { DemoConnector } from '../src/connector/demo.js';
@@ -58,7 +59,7 @@ async function main() {
       try { return await work(); } finally { clearInterval(timer); }
     };
     installTelegramChannel();
-    const untyped = createConversationEngine(config, connector, storage, { threadTitle: 'OrderFlow Telegram group' });
+    const untyped = createConversationEngine(config, connector, storage, { threadTitle: 'OrderFlow Telegram group', matching: wireMatching() });
     const engine = { ...untyped, turn: (input: Parameters<typeof untyped.turn>[0]) => typing(() => untyped.turn(input)),
       revise: (...args: Parameters<typeof untyped.revise>) => typing(() => untyped.revise(...args)) };
     engineShutdown = engine.shutdown;
