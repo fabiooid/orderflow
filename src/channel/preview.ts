@@ -1,11 +1,18 @@
 import type { Client, Issue, NewCustomer, OrderDraft, PreparedOrder, Totals } from '../domain/types.js';
 import type { Discrepancy } from '../domain/history.js';
+import { copy, type CopyKey, type CopyVars } from './locales/index.js';
 
 const rule = '━━━━━━━━━━━━━━━━';
 
-function money(amount: number, it: boolean) {
-  const text = amount.toFixed(2);
-  return `€${it ? text.replace('.', ',') : text}`;
+function say(it: boolean, key: CopyKey, vars?: CopyVars) {
+  return copy(it ? 'it' : 'en', key, vars);
+}
+
+/** EUR keeps the existing €12,00 / €12.00 layout. Any other ISO code is shown after the amount. */
+function money(amount: number, it: boolean, currency: string) {
+  const shown = amount.toFixed(2);
+  const text = it ? shown.replace('.', ',') : shown;
+  return currency === 'EUR' ? `€${text}` : `${text} ${currency}`;
 }
 
 function place(client: Partial<Pick<NewCustomer, 'street' | 'postalCode' | 'city' | 'province' | 'country'>>) {
@@ -20,56 +27,58 @@ function openPoint(issue: Issue, draft: OrderDraft, it: boolean) {
   const index = lineIndex(issue.field);
   const query = index === undefined ? undefined : draft.lines[index]?.query;
   if (query !== undefined) {
-    if (issue.field.endsWith('.quantity')) return it ? `quantità per ${query}` : `quantity for ${query}`;
-    if (issue.priceComparison) return it ? `prezzo di ${query}` : `price of ${query}`;
-    return it ? `prodotto per ${query}` : `product for ${query}`;
+    if (issue.field.endsWith('.quantity')) return say(it, 'draftQuantityFor', { query });
+    if (issue.priceComparison) return say(it, 'draftPriceOf', { query });
+    return say(it, 'draftProductFor', { query });
   }
   if (issue.field === 'client' || issue.field.startsWith('client.')) {
     const field = issue.field.slice('client.'.length);
-    return issue.field === 'client' ? (it ? 'cliente' : 'customer') : `${it ? 'cliente' : 'customer'}: ${fieldLabel(field, it).toLowerCase()}`;
+    const customer = say(it, 'draftCustomer');
+    return issue.field === 'client' ? customer : `${customer}: ${fieldLabel(field, it).toLowerCase()}`;
   }
-  const labels: Record<string, [string, string]> = {
-    shippingPrice: ['costo di consegna', 'delivery charge'], 'delivery.country': ['paese di consegna', 'delivery country'],
-    vat: ['controllo IVA', 'VAT check'], priceTier: ['listino prezzi', 'price list'], lines: ['prodotti e quantità', 'products and quantities'],
+  const labels: Record<string, CopyKey> = {
+    shippingPrice: 'issueShipping', 'delivery.country': 'issueCountry',
+    vat: 'issueVat', priceTier: 'issueTier', lines: 'issueLines',
   };
-  return labels[issue.field]?.[it ? 0 : 1] ?? (it ? 'altri dettagli' : 'other details');
+  const key = labels[issue.field];
+  return key ? say(it, key) : say(it, 'draftOther');
 }
 
 /** Fields whose identity the operator can pick with a button under the draft. */
 export const pickable = (issue: Issue) => (issue.field === 'client' || /^lines\.\d+$/.test(issue.field)) && !!issue.candidates?.length;
 
 /** An order still being completed: what is known so far, with ❓ where something is missing. */
-export function orderDraft(draft: OrderDraft, issues: Issue[], it: boolean, client?: Client) {
+export function orderDraft(draft: OrderDraft, issues: Issue[], it: boolean, client?: Client, currency = 'EUR') {
   const open = new Set(issues.map(issue => issue.field));
-  const lines = [it ? '📝 Bozza ordine' : '📝 Draft order', rule, ''];
-  if (client) lines.push(`🏪 ${client.name}`, ...(client.vatNumber ? [`🧾 ${it ? 'P. IVA' : 'VAT'} ${client.vatNumber}`] : []), `📍 ${place(client)}`);
+  const lines = [say(it, 'draftOrder'), rule, ''];
+  if (client) lines.push(`🏪 ${client.name}`, ...(client.vatNumber ? [`🧾 ${say(it, 'vatShort')} ${client.vatNumber}`] : []), `📍 ${place(client)}`);
   else {
     const name = draft.newClient?.name ?? draft.clientQuery.trim();
-    lines.push(`🏪 ${name ? `${name}${draft.newClient ? (it ? ' (nuovo)' : ' (new)') : ''} ❓` : '❓'}`);
+    lines.push(`🏪 ${name ? `${name}${draft.newClient ? say(it, 'draftNew') : ''} ❓` : '❓'}`);
   }
-  lines.push('', it ? '🧴 Prodotti' : '🧴 Products');
+  lines.push('', say(it, 'draftProducts'));
   if (!draft.lines.length) lines.push('❓');
   for (const [index, line] of draft.lines.entries()) {
     const unsure = [...open].some(field => field === `lines.${index}` || field === `lines.${index}.documentPrice`);
     const quantity = line.quantity === undefined ? '❓' : String(line.quantity);
-    const price = line.netPrice === undefined ? '' : ` — ${money(line.netPrice, it)}`;
+    const price = line.netPrice === undefined ? '' : ` — ${money(line.netPrice, it, currency)}`;
     lines.push(`${quantity} × ${line.query}${price}${unsure ? ' ❓' : ''}`);
   }
-  lines.push('', `🚚 ${it ? 'Consegna' : 'Delivery'}: ${draft.shippingPrice === undefined ? '❓' : draft.shippingPrice === 0 ? (it ? 'nessuna' : 'none') : money(draft.shippingPrice, it)}`);
-  if (draft.delivery) lines.push(`📦 ${it ? 'Spedire a' : 'Ship to'}: ${draft.delivery.address}${draft.delivery.country ? `, ${draft.delivery.country}` : ' ❓'}`);
-  if (draft.discountPercent > 0) lines.push(`💸 ${it ? 'Sconto' : 'Discount'} ${draft.discountPercent}%`);
-  if (draft.notes.trim()) lines.push('', it ? '📝 Note' : '📝 Notes', draft.notes.trim());
+  lines.push('', `🚚 ${say(it, 'draftDelivery')}: ${draft.shippingPrice === undefined ? '❓' : draft.shippingPrice === 0 ? say(it, 'draftNone') : money(draft.shippingPrice, it, currency)}`);
+  if (draft.delivery) lines.push(`📦 ${say(it, 'draftShipTo')}: ${draft.delivery.address}${draft.delivery.country ? `, ${draft.delivery.country}` : ' ❓'}`);
+  if (draft.discountPercent > 0) lines.push(`💸 ${say(it, 'draftDiscount')} ${draft.discountPercent}%`);
+  if (draft.notes.trim()) lines.push('', say(it, 'draftNotes'), draft.notes.trim());
   const points = [...new Set(issues.map(issue => openPoint(issue, draft, it)))];
-  if (points.length) lines.push('', `❓ ${it ? 'Da completare' : 'To complete'}: ${points.join(' · ')}`);
+  if (points.length) lines.push('', `❓ ${say(it, 'draftToComplete')}: ${points.join(' · ')}`);
   return lines.join('\n');
 }
 
-const fieldLabels: Record<string, [string, string]> = {
-  name: ['Nome', 'Name'], street: ['Via', 'Street'], postalCode: ['CAP', 'Postal code'], city: ['Città', 'City'], country: ['Paese', 'Country'],
-  vatNumber: ['Partita IVA', 'VAT number'], taxCode: ['Codice fiscale', 'Tax code'], sdiCode: ['Codice SDI', 'SDI code'],
-  certifiedEmail: ['PEC', 'PEC (certified email)'], phone: ['Telefono', 'Phone'], email: ['Email', 'Email'],
+const fieldLabels: Record<string, CopyKey> = {
+  name: 'fieldName', street: 'fieldStreet', postalCode: 'fieldPostalCode', city: 'fieldCity', country: 'fieldCountry',
+  vatNumber: 'fieldVat', taxCode: 'fieldTaxCode', sdiCode: 'fieldSdi',
+  certifiedEmail: 'fieldPec', phone: 'fieldPhone', email: 'fieldEmail',
 };
-const fieldLabel = (field: string, it: boolean) => fieldLabels[field]?.[it ? 0 : 1] ?? field;
+const fieldLabel = (field: string, it: boolean) => fieldLabels[field] ? say(it, fieldLabels[field]) : field;
 
 /** Details Fatture in Cloud accepts but does not require. SDI and PEC apply to Italian customers, assumed when no country is given. */
 export function optionalCustomerFields(client: Partial<NewCustomer>, it: boolean) {
@@ -85,29 +94,29 @@ export function optionalCustomerFields(client: Partial<NewCustomer>, it: boolean
 
 /** A customer request that matched an existing customer: nothing is created. */
 export function existingCustomer(client: { id: number; name: string }, it: boolean) {
-  return it ? `Cliente già presente: ${client.name} (ID ${client.id}). Nessun nuovo cliente creato.` : `Customer already exists: ${client.name} (ID ${client.id}). No new customer created.`;
+  return say(it, 'customerAlready', { name: client.name, id: client.id });
 }
 
 /** A new customer: complete and ready to confirm, or a draft with the details still missing. */
 export function customerPreview(client: Partial<NewCustomer>, it: boolean, missing: string[] = []) {
   const address = place(client);
-  const lines = [it ? '👤 Nuovo cliente' : '👤 New customer', rule, '', `🏪 ${client.name ?? '❓'}`, ...(address ? ['', `📍 ${address}`] : [])];
+  const lines = [say(it, 'newCustomerTitle'), rule, '', `🏪 ${client.name ?? '❓'}`, ...(address ? ['', `📍 ${address}`] : [])];
   const contact = [client.email ? `✉️ ${client.email}` : '', client.certifiedEmail ? `📨 PEC ${client.certifiedEmail}` : '', client.phone ? `📞 ${client.phone}` : ''].filter(Boolean);
   if (contact.length) lines.push('', ...contact);
   const tax = [
-    client.vatNumber ? `🧾 ${it ? 'P. IVA' : 'VAT'} ${client.vatNumber}` : '',
-    client.taxCode ? `👤 ${it ? 'Codice fiscale' : 'Tax code'} ${client.taxCode}` : '',
+    client.vatNumber ? `🧾 ${say(it, 'vatShort')} ${client.vatNumber}` : '',
+    client.taxCode ? `👤 ${fieldLabel('taxCode', it)} ${client.taxCode}` : '',
     client.sdiCode ? `🔢 SDI ${client.sdiCode}` : '',
   ].filter(Boolean);
   if (tax.length) lines.push('', ...tax);
-  if (client.notes?.trim()) lines.push('', it ? '📝 Note' : '📝 Notes', client.notes.trim());
+  if (client.notes?.trim()) lines.push('', say(it, 'draftNotes'), client.notes.trim());
   if (missing.length) {
-    lines.push('', `❓ ${it ? 'Da completare' : 'To complete'}: ${missing.map(field => fieldLabel(field, it).toLowerCase()).join(' · ')}`);
+    lines.push('', `❓ ${say(it, 'draftToComplete')}: ${missing.map(field => fieldLabel(field, it).toLowerCase()).join(' · ')}`);
     return lines.join('\n');
   }
   const optional = optionalCustomerFields(client, it);
-  if (optional.length) lines.push('', it ? '➕ Facoltativi, puoi aggiungere:' : '➕ Optional, you can add:', ...optional.map(field => `• ${field}`));
-  if (!client.street || !client.city || !client.postalCode || !client.country) lines.push('', it ? 'ℹ️ Per fare un ordine servono indirizzo e paese.' : 'ℹ️ Orders need the address and country.');
+  if (optional.length) lines.push('', say(it, 'optionalHint'), ...optional.map(field => `• ${field}`));
+  if (!client.street || !client.city || !client.postalCode || !client.country) lines.push('', say(it, 'orderNeedsAddress'));
   return lines.join('\n');
 }
 
@@ -118,22 +127,22 @@ function day(date: string, it: boolean) {
 }
 
 /** A complete order ready to confirm. Price differences from earlier orders are shown to check; they never block saving. */
-export function orderPreview(order: PreparedOrder, totals: Totals, it: boolean, discrepancies: Discrepancy[] = []) {
+export function orderPreview(order: PreparedOrder, totals: Totals, it: boolean, discrepancies: Discrepancy[] = [], currency = 'EUR') {
   const goods = order.lines.filter(line => !line.shipping);
   const shipping = order.lines.filter(line => line.shipping);
   const rates = [...new Set(order.lines.map(line => `${line.vatRate}%${line.nature ? ` ${line.nature}` : ''}`))];
-  const lines = [it ? '📦 Anteprima ordine' : '📦 Order preview', rule, '', `🏪 ${order.client.name}`];
-  if (order.client.vatNumber) lines.push(`🧾 ${it ? 'P. IVA' : 'VAT'} ${order.client.vatNumber}`);
-  lines.push('', `📍 ${place(order.client)}`, '', it ? '🧴 Prodotti' : '🧴 Products');
+  const lines = [say(it, 'orderPreviewTitle'), rule, '', `🏪 ${order.client.name}`];
+  if (order.client.vatNumber) lines.push(`🧾 ${say(it, 'vatShort')} ${order.client.vatNumber}`);
+  lines.push('', `📍 ${place(order.client)}`, '', say(it, 'draftProducts'));
   for (const line of [...goods, ...shipping]) {
-    const discount = line.discountPercent > 0 ? ` — ${line.discountPercent}% ${it ? 'sconto' : 'discount'}` : '';
-    lines.push(`${line.quantity} × ${line.name} — ${money(line.netPrice, it)}${discount}`);
+    const discount = line.discountPercent > 0 ? ` — ${line.discountPercent}% ${say(it, 'lineDiscount')}` : '';
+    lines.push(`${line.quantity} × ${line.name} — ${money(line.netPrice, it, currency)}${discount}`);
   }
-  lines.push('', it ? '💶 Totali' : '💶 Totals', `${it ? 'Imponibile' : 'Net'} ${money(totals.net, it)}`, `${it ? 'IVA' : 'VAT'} ${rates.join(', ')} ${money(totals.vat, it)}`, `${it ? 'Totale' : 'Total'} ${money(totals.gross, it)}`);
-  if (order.notes.trim()) lines.push('', it ? '📝 Note' : '📝 Notes', order.notes.trim());
-  const checks = discrepancies.map(d => it
-      ? `${d.name}: ora ${money(d.now, it)}, ordine precedente ${money(d.before, it)} (#${d.order.number}, ${day(d.order.date, it)})`
-      : `${d.name}: now ${money(d.now, it)}, previous order ${money(d.before, it)} (#${d.order.number}, ${day(d.order.date, it)})`);
-  if (checks.length) lines.push('', it ? '⚠️ Da verificare' : '⚠️ To check', ...checks.map(c => `• ${c}`));
+  lines.push('', say(it, 'totalsTitle'), `${say(it, 'totalNet')} ${money(totals.net, it, currency)}`, `${say(it, 'totalVat')} ${rates.join(', ')} ${money(totals.vat, it, currency)}`, `${say(it, 'totalGross')} ${money(totals.gross, it, currency)}`);
+  if (order.notes.trim()) lines.push('', say(it, 'draftNotes'), order.notes.trim());
+  const checks = discrepancies.map(d => say(it, 'priceNow', {
+    name: d.name, now: money(d.now, it, currency), before: money(d.before, it, currency), number: d.order.number, date: day(d.order.date, it),
+  }));
+  if (checks.length) lines.push('', say(it, 'toCheck'), ...checks.map(c => `• ${c}`));
   return lines.join('\n');
 }

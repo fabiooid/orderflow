@@ -18,7 +18,7 @@ Italian e-invoicing fields (SDI, PEC, VAT nature codes) are generic capabilities
 
 ## Locale and currency
 
-Operator-facing language and currency come from config. Do not hardcode a shop's currency symbol or a single language in core logic. Supported languages today are Italian and English (`locale: "it" | "en"`). Currency in config is `EUR`.
+Operator-facing language and currency come from config. Italian and English wording lives in `src/channel/locales/`. Do not hardcode a shop's currency symbol or a single language in core logic. Supported languages today are Italian and English (`locale: "it" | "en"`). `currency` is an ISO 4217 code from config, not a fixed `EUR`.
 
 ## What core must not import
 

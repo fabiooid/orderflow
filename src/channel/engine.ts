@@ -104,8 +104,8 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
       return { order: { ...next, status: 'suspended', issues: result.issues }, text: customerPreview(result.draft.newClient ?? {}, it, result.issues.map(i => i.field.replace(/^client\./, ''))) };
     }
     if (result.status === 'ready') return { order: { ...next, status: 'ready', prepared: result.order, totals: result.totals },
-      text: orderPreview(result.order, result.totals, it, result.discrepancies) };
-    return { order: { ...next, status: 'suspended', issues: result.issues }, text: orderDraft(result.draft, result.issues, it, result.client) };
+      text: orderPreview(result.order, result.totals, it, result.discrepancies, config.currency) };
+    return { order: { ...next, status: 'suspended', issues: result.issues }, text: orderDraft(result.draft, result.issues, it, result.client, config.currency) };
   };
 
   const turn = async (input: TurnInput) => {

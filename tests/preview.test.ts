@@ -69,3 +69,10 @@ it('shows the chosen customer on a draft order', () => {
   expect(text).toContain('🚚 Consegna: nessuna');
   expect(text).toContain('❓ Da completare: controllo IVA');
 });
+
+it('shows a configured currency other than euro after the amount', async () => {
+  const order = await prepared();
+  const text = orderPreview(order, { net: 29.6, vat: 6.51, gross: 36.11 }, false, [], 'USD');
+  expect(text).toContain('12.00 USD');
+  expect(text).not.toContain('€');
+});

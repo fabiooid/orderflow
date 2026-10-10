@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { traceOperation } from '../assistant/execution-trace.js';
-import { translate, type AppConfig } from '../config/schema.js';
+import type { AppConfig } from '../config/schema.js';
+import { copy, type CopyKey, type CopyVars } from './locales/index.js';
 import { callbackData, mediaCallbackData, pickData } from './callbacks.js';
 import { inboundOf } from './inbound.js';
 import type { MessageEvent, Keyboard } from './contract.js';
@@ -75,7 +76,9 @@ export class TelegramController {
     this.locale = config.locale;
   }
 
-  private t(itText: string, en: string) { return translate({ locale: this.locale }, itText, en); }
+  private books() { return 'Fatture in Cloud'; }
+
+  private t(key: CopyKey, vars?: CopyVars) { return copy(this.locale, key, vars); }
 
   /**
    * Caller must serialize updates. Polling entry point uses an exclusive process lock.
@@ -101,12 +104,12 @@ export class TelegramController {
         loaded.active = await this.store.activeRequest();
         if (!callback.action.accept) {
           effects.consume = pending.message;
-          action = { kind: 'answer', text: this.t('Ok, lo ignoro.', 'OK, ignoring it.') };
+          action = { kind: 'answer', text: this.t('ignore') };
         } else if (pending.value.target === undefined || (pending.value.target === null
           ? loaded.active !== undefined
           : loaded.active?.orderId !== pending.value.target.orderId || loaded.active.revision !== pending.value.target.revision)) {
           effects.consume = pending.message;
-          action = { kind: 'answer', text: this.t('La richiesta è cambiata. Invia di nuovo l’allegato per scegliere a quale richiesta applicarlo.', 'The request has changed. Send the attachment again to choose which request it belongs to.') };
+          action = { kind: 'answer', text: this.t('attachmentStale') };
         } else {
           const result = pending.value.read ? { read: pending.value.read } : await this.read(pending.value.event);
           if ('read' in result) {
@@ -115,7 +118,7 @@ export class TelegramController {
             effects.consume = pending.message;
             const active = loaded.active;
             // The button answered the question it was asked, so that answer is the operator's instruction.
-            action = { kind: 'converse', text: read.text, operatorText: active ? this.t('Sì, aggiungilo alla richiesta aperta.', 'Yes, add it to the open request.') : this.t('Sì, prepara un ordine da questo.', 'Yes, prepare an order from this.') };
+            action = { kind: 'converse', text: read.text, operatorText: active ? this.t('addToOpen') : this.t('prepareFromThis') };
           } else action = result.failed;
         }
       } else if (callback && callback.action.kind === 'cancelAll') {
@@ -194,10 +197,10 @@ export class TelegramController {
   /** Media and forwards as text. Failures become a reply; the media stays unanswered so it can be sent again. */
   private async read(event: MessageEvent): Promise<{ read: ReadMedia } | { failed: Action }> {
     const fail = (text: string) => ({ failed: { kind: 'answer' as const, text } });
-    if (!this.media) return fail(this.t('Allegati e note vocali non sono attivi in questa installazione.', 'Attachments and voice notes are not enabled in this deployment.'));
+    if (!this.media) return fail(this.t('mediaDisabled'));
     try { return { read: await this.media(event, this.locale) }; }
     catch (error) {
-      return fail(error instanceof MediaError ? error.message : this.t('Non sono riuscito a leggere l’allegato. Nessun dato salvato: invialo di nuovo o scrivi i dettagli.', 'I could not read the attachment. Nothing was saved: send it again or type the details.'));
+      return fail(error instanceof MediaError ? error.message : this.t('attachmentUnreadable'));
     }
   }
 
@@ -205,25 +208,25 @@ export class TelegramController {
     const load = async (orderId: string) => orderId === linked?.orderId ? linked : orderId === active?.orderId ? active : this.store.order(orderId);
     switch (action.kind) {
       case 'answer': return { texts: chunks(action.text) };
-      case 'stale': return say(this.t('Questo messaggio riguarda una versione precedente. Rispondi al riepilogo più recente.', 'This message refers to an older revision. Reply to the latest summary.'));
+      case 'stale': return say(this.t('staleMessage'));
       case 'prompt': return {
-        texts: [active ? this.t('Aggiungo questo alla richiesta aperta?', 'Add this to the open request?') : this.t('Preparo un ordine da questo?', 'Prepare an order from this?')],
+        texts: [active ? this.t('addThisToOpen') : this.t('prepareOrderFromThis')],
         prompt: { message: event.messageId, active: Boolean(active) },
       };
       case 'converse': return this.converse(action, event, id, action.target ? linked : active);
       case 'cancel': return this.cancel(action.target ? await load(action.target.orderId) : active);
       case 'cancelAll': return action.target && (active?.orderId !== action.target.orderId || active.revision !== action.target.revision)
-        ? this.openList(this.t('Le richieste aperte sono cambiate.', 'The open requests have changed.'))
+        ? this.openList(this.t('openRequestsChanged'))
         : this.cancelAll();
       default: {
         const previous = await load(action.target.orderId);
-        if (!previous || action.target.revision !== previous.revision) return say(this.t('Questo pulsante riguarda una versione precedente. Usa il riepilogo più recente.', 'This button belongs to an older revision. Use the latest summary.'));
-        if (previous.status === 'cancelled') return say(this.t('Richiesta annullata. Scrivimi se ne vuoi iniziare una nuova.', 'This request was cancelled. Tell me if you want to start a new one.'), previous);
+        if (!previous || action.target.revision !== previous.revision) return say(this.t('staleButton'));
+        if (previous.status === 'cancelled') return say(this.t('requestCancelled'), previous);
         // A button on a request from an earlier configuration shows it rechecked, to be confirmed anew.
         if (previous.policy !== this.policy) {
-          if (!editable(previous)) return say(this.t('La configurazione è cambiata. Inizia un nuovo ordine per ricalcolare i dati.', 'Configuration changed. Start a new order to recalculate its data.'));
+          if (!editable(previous)) return say(this.t('configChangedRestart'));
           try { const { request, notice, draft } = await this.current(previous); return { texts: chunks(`${notice}\n\n${draft}`), order: request }; }
-          catch { return say(this.t('La configurazione è cambiata e non sono riuscito a ricontrollare la richiesta. Nessun dato salvato: riprova.', 'The configuration changed and I could not check the request again. Nothing was saved: try again.')); }
+          catch { return say(this.t('configChangedRecheckFailed')); }
         }
         const localized = { ...previous, locale: this.locale };
         if (action.kind === 'pick') return this.pick(action, localized);
@@ -244,12 +247,12 @@ export class TelegramController {
   private async current(request: Conversation): Promise<{ request: Conversation; notice?: string; draft?: string }> {
     if (request.policy === this.policy) return { request };
     const rechecked = await this.engine.revise({ ...request, policy: this.policy, locale: this.locale });
-    return { request: rechecked.order, notice: this.t('La configurazione è cambiata: ho ricontrollato la richiesta aperta.', 'The configuration changed: I checked the open request again.'), draft: rechecked.text };
+    return { request: rechecked.order, notice: this.t('configRechecked'), draft: rechecked.text };
   }
 
   /** The agent's turn. It works on the selected request when that can still change, and may start one when none is open. */
   private async converse(action: Extract<Action, { kind: 'converse' }>, event: MessageEvent, id: number, selected?: Conversation): Promise<Reply> {
-    const failed = say(this.t('Non riesco a elaborare il messaggio. Riprova; la richiesta aperta non è stata modificata.', 'Unable to process this message. Please retry; the open request is unchanged.'));
+    const failed = say(this.t('processFailed'));
     let request = selected && editable(selected) ? selected : undefined, notice: string | undefined, draft: string | undefined;
     if (request) {
       try { ({ request, notice, draft } = await this.current(request)); } catch { return failed; }
@@ -273,38 +276,38 @@ export class TelegramController {
 
   /** A candidate button: the APIs check the operator's pick, with no model involved. */
   private async pick(action: Extract<Action, { kind: 'pick' }>, previous: Conversation): Promise<Reply> {
-    if (!editable(previous)) return say(this.t('Questa richiesta non si può più modificare.', 'This request can no longer be changed.'), previous);
+    if (!editable(previous)) return say(this.t('requestLocked'), previous);
     try {
       const result = await this.engine.revise(previous, action.choice);
       return { texts: chunks(result.text), order: result.order };
     } catch {
-      return say(this.t('Non sono riuscito ad applicare la scelta. Nessun dato salvato: riprova.', 'I could not apply that choice. Nothing was saved: try again.'), previous);
+      return say(this.t('choiceFailed'), previous);
     }
   }
 
   private cancel(previous?: Conversation): Reply {
-    if (!previous || previous.status === 'cancelled') return say(this.t('Nessuna richiesta aperta da annullare.', 'No open request to cancel.'));
-    if (previous.status === 'saving') return say(this.t('Salvataggio da verificare in Fatture in Cloud: non si può annullare qui.', 'Save needs checking in Fatture in Cloud; it cannot be cancelled here.'), previous);
-    if (previous.status === 'saved' || (previous.kind === 'customer' && previous.status === 'reviewed')) return say(this.t('Già salvato in Fatture in Cloud: non si può annullare qui.', 'Already saved in Fatture in Cloud; it cannot be cancelled here.'), previous);
-    return say(this.t('Annullato. Nulla è stato salvato.', 'Cancelled. Nothing was saved.'), { ...previous, status: 'cancelled' });
+    if (!previous || previous.status === 'cancelled') return say(this.t('nothingToCancel'));
+    if (previous.status === 'saving') return say(this.t('saveNeedsCheck', { books: this.books() }), previous);
+    if (previous.status === 'saved' || (previous.kind === 'customer' && previous.status === 'reviewed')) return say(this.t('alreadySaved', { books: this.books() }), previous);
+    return say(this.t('cancelledNothingSaved'), { ...previous, status: 'cancelled' });
   }
 
   /** Lists every open request so a forgotten one cannot silently block new work, with a button to void them all. */
   private async openList(note?: string, open?: Conversation[]): Promise<Reply> {
     open ??= await this.store.openRequests();
-    if (!open.length) return say([note, this.t('Nessuna richiesta aperta.', 'No open requests.')].filter(Boolean).join('\n'));
+    if (!open.length) return say([note, this.t('noOpenRequests')].filter(Boolean).join('\n'));
     const shown = open.slice(0, 10).map(c => `• ${this.describe(c)}`);
-    if (open.length > shown.length) shown.push(this.t(`…e altre ${open.length - shown.length}`, `…and ${open.length - shown.length} more`));
+    if (open.length > shown.length) shown.push(this.t('andMore', { count: open.length - shown.length }));
     const voidable = open.filter(c => c.status !== 'saving').length;
     const lines = [
       ...(note ? [note, ''] : []),
-      open.length === 1 ? this.t('C’è già una richiesta aperta:', 'A request is already open:') : this.t(`Ci sono ${open.length} richieste aperte:`, `${open.length} requests are open:`),
+      open.length === 1 ? this.t('oneAlreadyOpen') : this.t('manyOpen', { count: open.length }),
       ...shown, '',
       voidable
         ? voidable === 1
-          ? this.t('Completa quella richiesta, oppure annullala con il pulsante.', 'Complete that request, or cancel it with the button.')
-          : this.t('Completa quella che ti serve, oppure annullale tutte con il pulsante.', 'Complete the one you need, or cancel them all with the button.')
-        : this.t('Verifica il salvataggio in Fatture in Cloud prima di iniziarne un’altra.', 'Check the save in Fatture in Cloud before starting another.'),
+          ? this.t('completeOrCancelOne')
+          : this.t('completeOrCancelAll')
+        : this.t('checkSaveBeforeAnother', { books: this.books() }),
     ];
     return { texts: chunks(lines.join('\n')), ...(voidable ? { voidAll: { orderId: open[0]!.orderId, revision: open[0]!.revision, count: voidable } } : {}) };
   }
@@ -313,13 +316,13 @@ export class TelegramController {
     const open = await this.store.openRequests();
     const voided = open.filter(c => c.status !== 'saving').map(c => ({ ...c, status: 'cancelled' as const }));
     const unverified = open.length - voided.length;
-    if (!open.length) return say(this.t('Nessuna richiesta aperta da annullare.', 'No open request to cancel.'));
+    if (!open.length) return say(this.t('nothingToCancel'));
     const text = [
-      voided.length === 1 ? this.t('Annullata 1 richiesta. Nulla è stato salvato.', 'Cancelled 1 request. Nothing was saved.')
-        : this.t(`Annullate ${voided.length} richieste. Nulla è stato salvato.`, `Cancelled ${voided.length} requests. Nothing was saved.`),
+      voided.length === 1 ? this.t('cancelledOne')
+        : this.t('cancelledMany', { count: voided.length }),
       ...(unverified ? [unverified === 1
-        ? this.t('1 salvataggio da verificare in Fatture in Cloud resta aperto.', '1 save needing a check in Fatture in Cloud stays open.')
-        : this.t(`${unverified} salvataggi da verificare in Fatture in Cloud restano aperti.`, `${unverified} saves needing a check in Fatture in Cloud stay open.`)] : []),
+        ? this.t('oneSaveStaysOpen', { books: this.books() })
+        : this.t('manySavesStayOpen', { count: unverified, books: this.books() })] : []),
     ].join('\n');
     return { texts: [text], cancelled: voided };
   }
@@ -328,53 +331,53 @@ export class TelegramController {
     const who = (c.kind === 'customer' ? c.draft.newClient?.name : undefined) || c.draft.clientQuery;
     // "Ordine" and "nuovo cliente" are masculine; agree with that label, not with "richiesta".
     const status = {
-      new: this.t('appena iniziato', 'just started'), suspended: this.t('in attesa di dettagli', 'waiting for details'),
-      ready: this.t('pronto da confermare', 'ready to confirm'), saving: this.t('salvataggio da verificare', 'save needs checking'),
+      new: this.t('statusNew'), suspended: this.t('statusWaiting'),
+      ready: this.t('statusReady'), saving: this.t('statusSaving'),
     }[c.status as 'new'] ?? c.status;
     const date = c.startedAt ? new Date(c.startedAt).toLocaleDateString(this.locale === 'it' ? 'it-IT' : 'en-GB', { day: '2-digit', month: '2-digit' }) : undefined;
     return [
-      c.kind === 'customer' ? this.t('Nuovo cliente', 'New customer') : this.t('Ordine', 'Order'),
-      who || undefined, status, date, c.policy !== this.policy ? this.t('configurazione precedente', 'earlier configuration') : undefined,
+      c.kind === 'customer' ? this.t('newCustomer') : this.t('orderLabel'),
+      who || undefined, status, date, c.policy !== this.policy ? this.t('earlierConfig') : undefined,
     ].filter(Boolean).join(' — ');
   }
 
   private async orderAction(action: Exclude<ButtonAction, { kind: 'pick' }>, previous: Conversation): Promise<Reply> {
     if (action.kind === 'confirmOrder') {
-      if (previous.status === 'saved') return say(this.t(`Ordine già salvato: ${previous.savedOrder?.number}. Nessun duplicato creato.`, `Order already saved: ${previous.savedOrder?.number}. No duplicate created.`), previous);
-      if (!this.saveOrder || !this.sendPdf || !['ready', 'saving'].includes(previous.status) || !previous.prepared) return say(this.t('Completa i dati e conferma il riepilogo più recente.', 'Complete the details and confirm the latest summary.'), previous);
+      if (previous.status === 'saved') return say(this.t('orderAlreadySaved', { number: previous.savedOrder?.number ?? '' }), previous);
+      if (!this.saveOrder || !this.sendPdf || !['ready', 'saving'].includes(previous.status) || !previous.prepared) return say(this.t('confirmLatest'), previous);
       try {
         const saved = await traceOperation('Confirmed order save', () => this.saveOrder!(previous), { orderId: previous.orderId, revision: previous.revision, policy: previous.policy });
-        return { texts: [this.t(`Ordine ${saved.number} salvato in Fatture in Cloud. Il PDF segue in questo gruppo; nessun invio al cliente.`, `Order ${saved.number} saved in Fatture in Cloud. The PDF follows in this group; nothing was sent to the customer.`)], pdfOrderId: saved.id, order: { ...previous, status: 'saved', savedOrder: saved, revision: previous.revision + 1 } };
+        return { texts: [this.t('orderSaved', { number: saved.number, books: this.books() })], pdfOrderId: saved.id, order: { ...previous, status: 'saved', savedOrder: saved, revision: previous.revision + 1 } };
       } catch (error) {
         if (error instanceof PreflightFailed) return say(error.needsReview
-          ? this.t('I dati sono cambiati. Nessun salvataggio tentato: rispondi per aggiornare il riepilogo prima di confermare.', 'Details changed. No save was attempted: reply to refresh the summary before confirming.')
-          : this.t('Controlli temporaneamente non disponibili. Nessun salvataggio tentato: puoi riprovare a confermare.', 'Checks are temporarily unavailable. No save was attempted: you can confirm again.'),
+          ? this.t('detailsChanged')
+          : this.t('checksUnavailable'),
           error.needsReview ? { ...previous, revision: previous.revision + 1, status: 'new', prepared: undefined, totals: undefined } : previous);
-        return say(this.t('Salvataggio non confermato. Non creare una nuova richiesta: occorre verificare Fatture in Cloud prima di riprovare per evitare duplicati.', 'Save not confirmed. Do not start a new request: check Fatture in Cloud before retrying to avoid duplicates.'), { ...previous, status: 'saving' });
+        return say(this.t('saveNotConfirmed', { books: this.books() }), { ...previous, status: 'saving' });
       }
     }
-    if (action.kind === 'review' && previous.status === 'ready') return say(this.t('Revisione registrata. Nessun ordine salvato o inviato al cliente (modalità anteprima).', 'Review recorded. No order saved or sent to the customer (preview mode).'), { ...previous, status: 'reviewed' });
-    return say(previous.status === 'reviewed' ? this.t('Ordine già revisionato. Rispondi con le modifiche per riaprirlo.', 'Order already reviewed. Reply with changes to reopen it.')
-      : this.t('Completa prima i dati mancanti.', 'Resolve missing details first.'), previous);
+    if (action.kind === 'review' && previous.status === 'ready') return say(this.t('reviewRecorded'), { ...previous, status: 'reviewed' });
+    return say(previous.status === 'reviewed' ? this.t('alreadyReviewed')
+      : this.t('resolveMissing'), previous);
   }
 
   private async customerAction(action: Exclude<ButtonAction, { kind: 'pick' }>, previous: Conversation): Promise<Reply> {
-    if (previous.status === 'saving') return say(this.t('Creazione cliente da verificare in Fatture in Cloud. Modifiche e nuovi tentativi bloccati fino alla riconciliazione.', 'Customer creation needs checking in Fatture in Cloud. Edits and retries are blocked until reconciliation.'), previous);
-    if (previous.status === 'reviewed') return say(this.t('Richiesta cliente conclusa.', 'Customer request completed.'), previous);
-    if (action.kind !== 'confirmCustomer' || previous.status !== 'ready' || !this.createCustomer) return say(this.t('Creazione non disponibile: completa i dati e controlla il riepilogo.', 'Creation unavailable: complete the details and check the summary.'), previous);
+    if (previous.status === 'saving') return say(this.t('customerSaveNeedsCheck', { books: this.books() }), previous);
+    if (previous.status === 'reviewed') return say(this.t('customerCompleted'), previous);
+    if (action.kind !== 'confirmCustomer' || previous.status !== 'ready' || !this.createCustomer) return say(this.t('creationUnavailable'), previous);
     try {
       return say(await traceOperation('Confirmed customer save', () => this.createCustomer!(previous), { orderId: previous.orderId, revision: previous.revision, policy: previous.policy }), { ...previous, status: 'reviewed', revision: previous.revision + 1 });
     } catch (error) {
-      if (error instanceof PreflightFailed) return say(this.t('Controlli temporaneamente non disponibili. Nessun salvataggio tentato: puoi riprovare a confermare.', 'Checks are temporarily unavailable. No save was attempted: you can confirm again.'), previous);
-      return say(this.t('Creazione cliente non confermata. Non ripetere la richiesta: controlla Fatture in Cloud prima di riprovare. Nessun ordine o fattura creato.', 'Customer creation was not confirmed. Do not repeat the request: reconcile Fatture in Cloud before retrying. No order or invoice created.'), { ...previous, status: 'saving' });
+      if (error instanceof PreflightFailed) return say(this.t('checksUnavailable'), previous);
+      return say(this.t('customerNotConfirmed', { books: this.books() }), { ...previous, status: 'saving' });
     }
   }
 
   private keyboard({ order, prompt, voidAll }: ReplyPlan): Keyboard | undefined {
-    if (voidAll) return { inline_keyboard: [[{ text: voidAll.count === 1 ? this.t('🗑 Annulla', '🗑 Cancel') : this.t(`🗑 Annulla tutte (${voidAll.count})`, `🗑 Cancel all (${voidAll.count})`), callback_data: callbackData('cancelall', voidAll) }]] };
+    if (voidAll) return { inline_keyboard: [[{ text: voidAll.count === 1 ? this.t('cancelOne') : this.t('cancelAll', { count: voidAll.count }), callback_data: callbackData('cancelall', voidAll) }]] };
     if (prompt) return { inline_keyboard: [[
-      { text: this.t('✅ Sì', '✅ Yes'), callback_data: mediaCallbackData(prompt.message, true) },
-      { text: this.t('✖️ No', '✖️ No'), callback_data: mediaCallbackData(prompt.message, false) },
+      { text: this.t('yes'), callback_data: mediaCallbackData(prompt.message, true) },
+      { text: this.t('no'), callback_data: mediaCallbackData(prompt.message, false) },
     ]] };
     if (!order || !['new', 'suspended', 'ready'].includes(order.status)) return undefined;
     const link = { orderId: order.orderId, revision: order.revision };
@@ -385,9 +388,9 @@ export class TelegramController {
       return issue.candidates!.slice(0, MAX_CHOICES).map(c => [{ text: `${about}${c.label}`.slice(0, 60), callback_data: pickData(link, issue.field, c.id) }]);
     });
     const row = [];
-    if (order.status === 'ready' && (order.kind === 'customer' ? this.createCustomer : this.saveOrder && this.sendPdf)) row.push({ text: this.t('✅ Conferma e salva', '✅ Confirm and save'), callback_data: callbackData(order.kind === 'customer' ? 'customer' : 'save', link) });
-    else if (order.status === 'ready' && order.kind !== 'customer') row.push({ text: this.t('👀 Segna come controllato', '👀 Mark as checked'), callback_data: callbackData('review', link) });
-    row.push({ text: this.t('❌ Annulla', '❌ Cancel'), callback_data: callbackData('cancel', link) });
+    if (order.status === 'ready' && (order.kind === 'customer' ? this.createCustomer : this.saveOrder && this.sendPdf)) row.push({ text: this.t('confirmAndSave'), callback_data: callbackData(order.kind === 'customer' ? 'customer' : 'save', link) });
+    else if (order.status === 'ready' && order.kind !== 'customer') row.push({ text: this.t('markChecked'), callback_data: callbackData('review', link) });
+    row.push({ text: this.t('cancelButton'), callback_data: callbackData('cancel', link) });
     return { inline_keyboard: [...picks, row] };
   }
 }

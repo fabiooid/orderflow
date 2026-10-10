@@ -68,7 +68,7 @@ const configObject = z.object({
   policyVersion: z.string().min(1),
   companyId: positiveId,
   locale: z.enum(['it', 'en']),
-  currency: z.literal('EUR'),
+  currency: z.string().regex(/^[A-Z]{3}$/),
   priceBasis: z.literal('net'),
   /** Which conversation to join. Add a provider by extending this object. */
   channel: telegramChannelSchema,
@@ -119,9 +119,6 @@ const configObject = z.object({
 export const configSchema = z.preprocess(liftChannel, configObject);
 
 export type AppConfig = z.infer<typeof configSchema>;
-
-/** Picks the user-facing string for the configured locale. */
-export function translate(config: Pick<AppConfig, 'locale'>, it: string, en: string) { return config.locale === 'it' ? it : en; }
 
 /** Tier of a client, if any. */
 export function clientTier(config: Pick<AppConfig, 'priceTiers'>, clientId?: number) {
