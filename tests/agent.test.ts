@@ -1,6 +1,8 @@
 import { expect, it } from 'vitest';
+import { z } from 'zod';
 import { LibSQLStore } from '@mastra/libsql';
-import { createOrderAgent } from '../src/assistant/agent.js';
+import { createOrderAgent, sharedKnowledgeSchema } from '../src/assistant/agent.js';
+import { replySchema } from '../src/channel/engine.js';
 import { orderDraftInput } from '../src/assistant/draft-schema.js';
 import { systemPrompt } from '../src/assistant/system-prompt.js';
 import { DemoConnector } from '../src/connector/demo.js';
@@ -27,4 +29,22 @@ it('keeps business rules in the prompt and field rules in the API schema, with n
   expect(fields.newClient.description).toContain('attached email');
   expect(fields.notes.description).toContain('operator sees it in the draft');
   expect(fields.delivery.description).toContain('never a delivery address');
+});
+
+/**
+ * Every schema the model receives becomes JSON Schema at call time. A transform or other unrepresentable step passes
+ * the scripted tests but fails every live turn, so each one is converted here.
+ */
+it('sends the model only schemas that convert to JSON Schema', async () => {
+  const storage = new LibSQLStore({ id: 'agent-schemas', url: ':memory:' });
+  try {
+    const c = config();
+    const tools = await createOrderAgent(c, new DemoConnector(), storage).agent.listTools();
+    const schemas: [string, unknown][] = [
+      ...Object.entries(tools).map(([id, tool]): [string, unknown] => [id, tool.inputSchema]),
+      ['working memory', sharedKnowledgeSchema],
+      ['reply', replySchema(c.locale, c.currency)],
+    ];
+    for (const [name, schema] of schemas) expect(() => z.toJSONSchema(schema as z.ZodType), name).not.toThrow();
+  } finally { await storage.close(); }
 });
