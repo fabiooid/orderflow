@@ -2,19 +2,19 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { tracedConnector, traceOperation } from '../src/assistant/execution-trace.js';
 import { turnCachedConnector, withTurnCache } from '../src/connector/turn-cache.js';
 import type { OrderConnector } from '../src/connector/contract.js';
-import { orderCreator } from '../src/telegram/order.js';
-import { telegramTraces } from '../src/telegram/traces.js';
-import { customerCreator } from '../src/telegram/customer.js';
+import { orderCreator } from '../src/channel/order.js';
+import { telegramTraces } from '../src/channels/telegram/traces.js';
+import { customerCreator } from '../src/channel/customer.js';
 import { WriteJournal } from '../src/storage/write-journal.js';
 import { mkdir } from 'node:fs/promises';
 import { LibSQLStore } from '@mastra/libsql';
 import { connectorMode, loadAppConfig } from '../src/config/load.js';
-import { TelegramApi } from '../src/telegram/api.js';
-import { TELEGRAM_STATE_URL, TelegramStore, pollerLockPath, telegramMemoryUrl, telegramScopePrefix } from '../src/telegram/store.js';
-import { TelegramController } from '../src/telegram/controller.js';
-import { createConversationEngine } from '../src/telegram/engine.js';
-import { acquirePollerLock } from '../src/telegram/lock.js';
-import { albumOf, groupAlbums } from '../src/telegram/adapter.js';
+import { TelegramApi } from '../src/channels/telegram/api.js';
+import { TELEGRAM_STATE_URL, TelegramStore, pollerLockPath, telegramMemoryUrl, telegramScopePrefix } from '../src/channel/store.js';
+import { TelegramController } from '../src/channel/controller.js';
+import { createConversationEngine } from '../src/channel/engine.js';
+import { acquirePollerLock } from '../src/channels/telegram/lock.js';
+import { albumOf, groupAlbums, installTelegramChannel } from '../src/channels/telegram/adapter.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { FattureInCloudConnector } from '../src/connector/fatture-in-cloud.js';
 import { checkConnections } from '../src/health/check.js';
@@ -52,24 +52,25 @@ async function main() {
     // Only around engine calls, so chatter the bot ignores never shows it, nor triggers the list reads started here.
     const typing = async <T>(work: () => Promise<T>) => {
       connector.prefetch();
-      const show = () => { api.typing(config.telegram.groupId).catch(() => undefined); };
+      const show = () => { api.typing(config.channel.groupId).catch(() => undefined); };
       show();
       const timer = setInterval(show, 4500);
       try { return await work(); } finally { clearInterval(timer); }
     };
-    const untyped = createConversationEngine(config, connector, storage);
+    installTelegramChannel();
+    const untyped = createConversationEngine(config, connector, storage, { threadTitle: 'OrderFlow Telegram group' });
     const engine = { ...untyped, turn: (input: Parameters<typeof untyped.turn>[0]) => typing(() => untyped.turn(input)),
       revise: (...args: Parameters<typeof untyped.revise>) => typing(() => untyped.revise(...args)) };
     engineShutdown = engine.shutdown;
     const readMedia = engine.media((id, max) => traceOperation('Telegram download media', () => api.download(id, max)));
     const orderConnector: OrderConnector = mode === 'demo' ? connector : tracedConnector(fic({ writesEnabled: config.orderSavingEnabled }));
-    const controller = new TelegramController(config, me.username, store, engine, (text, reply, keyboard) => traceOperation('Telegram deliver text', () => api.sendText(config.telegram.groupId, text, reply, keyboard)), mode === 'read-only' ? customerCreator(config, tracedConnector(fic({ clientWritesEnabled: true })), journal) : undefined,
+    const controller = new TelegramController(config, me.username, store, engine, (text, reply, keyboard) => traceOperation('Telegram deliver text', () => api.sendText(config.channel.groupId, text, reply, keyboard)), mode === 'read-only' ? customerCreator(config, tracedConnector(fic({ clientWritesEnabled: true })), journal) : undefined,
       mode === 'read-only' && config.orderSavingEnabled ? orderCreator(config, orderConnector, journal) : undefined,
       async (id, locale = config.locale) => {
         const saved = await orderConnector.getOrder(id);
         if (!saved.url) throw new Error('Saved order PDF not available; reconcile delivery without recreating order');
-        return traceOperation('Telegram deliver order PDF', () => api.sendOrderPdf(config.telegram.groupId, saved.url!, `${locale === 'it' ? 'Ordine' : 'Order'} ${saved.number}`), { orderId: id });
-      }, {answer: id => api.answerCallback(id), clear: id => api.clearButtons(config.telegram.groupId, id)},
+        return traceOperation('Telegram deliver order PDF', () => api.sendOrderPdf(config.channel.groupId, saved.url!, `${locale === 'it' ? 'Ordine' : 'Order'} ${saved.number}`), { orderId: id });
+      }, {answer: id => api.answerCallback(id), clear: id => api.clearButtons(config.channel.groupId, id)},
       (event, locale) => typing(() => readMedia(event, locale)));
     console.log(`OrderFlow Telegram ${mode} running. Saving needs the confirmation button. Order saving: ${config.orderSavingEnabled ? 'enabled' : 'disabled'}. Stop with Ctrl+C.`);
     while (!stopping) {
@@ -104,7 +105,7 @@ async function main() {
 }
 main().catch(error => {
   // SDK/model exceptions can contain authenticated headers; never dump them.
-  const safe = error instanceof Error && /^(CONNECTOR_MODE|A Telegram poller|Telegram delivery|Telegram getUpdates|Telegram send|Telegram group checks|Account checks|TELEGRAM_BOT_TOKEN)/.test(error.message);
+  const safe = error instanceof Error && /^(CONNECTOR_MODE|A Telegram poller|Channel delivery|Telegram delivery|Telegram getUpdates|Telegram send|Telegram group checks|Account checks|TELEGRAM_BOT_TOKEN)/.test(error.message);
   console.error(safe ? error.message : 'Telegram stopped. Check config/credentials and local state; inspect write and delivery state before retrying.');
   process.exitCode = 1;
 });

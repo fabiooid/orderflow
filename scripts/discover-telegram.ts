@@ -1,4 +1,4 @@
-import { TelegramApi } from '../src/telegram/api.js';
+import { TelegramApi } from '../src/channels/telegram/api.js';
 try {
   const api = new TelegramApi(process.env.TELEGRAM_BOT_TOKEN ?? '');
   const me = await api.getMe();

@@ -1,5 +1,5 @@
 import { confirmedChoices } from '../matching/resolver.js';
-import { tracingContext, traceTelegramTurn } from '../assistant/execution-trace.js';
+import { tracingContext, traceChannelTurn } from '../assistant/execution-trace.js';
 import { z } from 'zod';
 import { Mastra } from '@mastra/core';
 import type { RequestContext } from '@mastra/core/request-context';
@@ -51,10 +51,10 @@ export function remembered(plan: Pick<ReplyPlan, 'texts' | 'agentText'>) {
 }
 
 /** The agent's answer each turn. Reply format and language rules live here, next to the fields they govern. */
-const replySchema = (fallback: AppConfig['locale']) => z.object({
+const replySchema = (fallback: AppConfig['locale'], currency: AppConfig['currency']) => z.object({
   // Chosen before the reply is written, so the reply follows it.
   locale: z.enum(['it', 'en']).describe(`The language operatorWords are written in, unless the operator asked for another. Only words with no language of their own ("ok", a product name) keep the conversation's language; with no cue at all, ${fallback === 'it' ? 'Italian' : 'English'}.`),
-  reply: z.string().describe('Your own words in that language, shown above any draft: short, no greeting or recap, or empty when the draft speaks for itself. Answer product questions by listing the matches yourself, one per line, "name — code — €net" (catalogue prices are net; a tester only when asked for). Never write a draft or summary yourself.'),
+  reply: z.string().describe(`Your own words in that language, shown above any draft: short, no greeting or recap, or empty when the draft speaks for itself. Answer product questions by listing the matches yourself, one per line, "name — code — ${currency} net" (catalogue prices are net; a tester only when asked for). Never write a draft or summary yourself.`),
 });
 
 /**
@@ -62,10 +62,10 @@ const replySchema = (fallback: AppConfig['locale']) => z.object({
  * fit, and replies. The application renders whatever the APIs last reported as the draft or summary under that reply.
  * `converse` replaces the model with a script, for tests and offline evaluation.
  */
-export function createConversationEngine(config: AppConfig, connector: OrderConnector, storage: LibSQLStore, options: { converse?: Converse; matching?: Parameters<typeof createOrderAgent>[4] } = {}): ConversationEngine & { traceTurn: <T>(id: number, action: () => Promise<T>) => Promise<T>; shutdown: () => Promise<void>; media: (download: Download) => MediaReader } {
+export function createConversationEngine(config: AppConfig, connector: OrderConnector, storage: LibSQLStore, options: { converse?: Converse; threadTitle?: string; matching?: Parameters<typeof createOrderAgent>[4] } = {}): ConversationEngine & { traceTurn: <T>(id: number, action: () => Promise<T>) => Promise<T>; shutdown: () => Promise<void>; media: (download: Download) => MediaReader } {
   const live = options.converse ? { enabled: false, rate: 0 } : liveEvalSettings();
   const { agent, memory, scorers, matching, drafts, calls } = createOrderAgent(config, connector, storage, live, options.matching);
-  const observability = new Observability({ configs: { default: { serviceName: "orderflow-telegram", exporters: [new MastraStorageExporter()], spanOutputProcessors: [omitMedia] } } });
+  const observability = new Observability({ configs: { default: { serviceName: `orderflow-${config.channel.provider}`, exporters: [new MastraStorageExporter()], spanOutputProcessors: [omitMedia] } } });
   const deliveredReply = createDeliveredReplyWorkflow(scorers, live);
   const { mediaReader, formReader } = createMediaAgents(config);
   const readOrderForm = createDocumentWorkflow(documentTemplates(config.orderForms), modelVision(formReader));
@@ -79,10 +79,10 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
   // The shared thread is never deleted, so one successful check per process is enough.
   let sharedThread: Promise<void> | undefined;
   const ensureSharedThread = () => sharedThread ??= (async () => {
-    if (!await memory.getThreadById({threadId:shared.thread})) await memory.createThread({threadId:shared.thread,resourceId:shared.resource,title:'OrderFlow Telegram group'});
+    if (!await memory.getThreadById({threadId:shared.thread})) await memory.createThread({threadId:shared.thread,resourceId:shared.resource,title: options.threadTitle ?? 'OrderFlow conversation'});
   })().catch(error => { sharedThread = undefined; throw error; });
 
-  const reply = replySchema(config.locale);
+  const reply = replySchema(config.locale, config.currency);
   const converse: Converse = options.converse ?? (async (prompt, _act, requestContext) => {
     await ensureSharedThread();
     const response = await agent.generate(JSON.stringify(prompt), {
@@ -104,8 +104,8 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
       return { order: { ...next, status: 'suspended', issues: result.issues }, text: customerPreview(result.draft.newClient ?? {}, it, result.issues.map(i => i.field.replace(/^client\./, ''))) };
     }
     if (result.status === 'ready') return { order: { ...next, status: 'ready', prepared: result.order, totals: result.totals },
-      text: orderPreview(result.order, result.totals, it, result.discrepancies) };
-    return { order: { ...next, status: 'suspended', issues: result.issues }, text: orderDraft(result.draft, result.issues, it, result.client) };
+      text: orderPreview(result.order, result.totals, it, result.discrepancies, config.currency) };
+    return { order: { ...next, status: 'suspended', issues: result.issues }, text: orderDraft(result.draft, result.issues, it, result.client, config.currency) };
   };
 
   const turn = async (input: TurnInput) => {
@@ -158,7 +158,8 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
     let canEvaluate = live.enabled;
     if (live.enabled) {
       try {
-        const previous = await memory.recall({ threadId: shared.thread, perPage: 1, filter: { metadata: { telegramUpdateId: id } } });
+        let previous = await memory.recall({ threadId: shared.thread, perPage: 1, filter: { metadata: { channelMessageId: id } } });
+        if (!previous.messages.length) previous = await memory.recall({ threadId: shared.thread, perPage: 1, filter: { metadata: { telegramUpdateId: id } } });
         canEvaluate = previous.messages.length === 0;
         if (canEvaluate) history = (await memory.recall({ threadId: shared.thread, perPage: config.memory.lastMessages, orderBy: { field: 'createdAt', direction: 'DESC' } })).messages; // The newest page, already in conversation order.
       } catch {
@@ -174,8 +175,8 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
     const at = Date.now();
     const messages: MastraDBMessage[] = values.map((value,index) => ({
       id:`${shared.thread}:update:${id}:${index}`,threadId:shared.thread,resourceId:shared.resource,createdAt:new Date(at + index),role:value.role,
-      content:{format:2 as const,parts:[{type:'text' as const,text:value.text}], metadata: index === 1 ? { telegramUpdateId: id, applicationEvidence: {
-        source: 'telegram-controller', delivery: 'delivered', updateId: id,
+      content:{format:2 as const,parts:[{type:'text' as const,text:value.text}], metadata: index === 1 ? { channelMessageId: id, telegramUpdateId: id, applicationEvidence: {
+        source: 'channel-controller', delivery: 'delivered', updateId: id,
         orderId: plan.order?.orderId, revision: plan.order?.revision,
         kind: plan.order?.kind ?? (plan.order ? 'order' : undefined), status: plan.order?.status,
         draft: plan.order?.draft, prepared: plan.order?.prepared, totals: plan.order?.totals,
@@ -186,7 +187,7 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
     await memory.saveMessages({messages});
     if (canEvaluate && plan.incomingText) {
       try {
-        const run = await mastra.getWorkflow('deliveredReply').createRun({ runId: `telegram-eval-${id}` });
+        const run = await mastra.getWorkflow('deliveredReply').createRun({ runId: `channel-eval-${id}` });
         await run.start({ tracingContext: tracingContext(), inputData: {
           input: { inputMessages: [messages[0]!], rememberedMessages: history, systemMessages: [], taggedSystemMessages: {} },
           output: [messages[1]!],
@@ -203,5 +204,5 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
     await observability.flush();
     await mastra.shutdown({ drainTimeout: 30000 });
   };
-  return { turn, revise, ...(matching.mode === 'on' ? { matchingPolicy: matching.policy } : {}), record, media, traceTurn: <T>(id: number, action: () => Promise<T>) => traceTelegramTurn(observability.getDefaultInstance(), id, action), shutdown };
+  return { turn, revise, ...(matching.mode === 'on' ? { matchingPolicy: matching.policy } : {}), record, media, traceTurn: <T>(id: number, action: () => Promise<T>) => traceChannelTurn(observability.getDefaultInstance(), id, action), shutdown };
 }

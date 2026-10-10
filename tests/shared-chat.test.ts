@@ -1,8 +1,8 @@
 import {expect,it,vi} from 'vitest';
-import {TelegramController} from '../src/telegram/controller.js';
-import {TelegramStore} from '../src/telegram/store.js';
+import {TelegramController} from '../src/channel/controller.js';
+import {TelegramStore} from '../src/channel/store.js';
 import {config,message,prepared,press,stubEngine} from './helpers.js';
-import type {Keyboard} from '../src/telegram/api.js';
+import type {Keyboard} from '../src/channels/telegram/api.js';
 
 /** A stub agent whose turns prepare a ready order, except a question, which it answers without touching the request. */
 async function orderingEngine(){
@@ -16,7 +16,7 @@ async function orderingEngine(){
  return engine;
 }
 it('shares context with colleagues, preserves drafts during questions and saves only a current button once',async()=>{
- const c=config(); c.orderSavingEnabled=true;c.telegram.respondToAllMessages=true;
+ const c=config(); c.orderSavingEnabled=true;c.channel.respondToAllMessages=true;
  const store=new TelegramStore(':memory:','shared');await store.init();
  const engine=await orderingEngine();
  let mid=100;
@@ -40,7 +40,7 @@ it('shares context with colleagues, preserves drafts during questions and saves 
  }finally{store.close();}
 });
 it('accepts natural cancellation without writing a customer or order',async()=>{
- const c=config();c.telegram.respondToAllMessages=true;
+ const c=config();c.channel.respondToAllMessages=true;
  const store=new TelegramStore(':memory:','cancel');await store.init();
  const engine=stubEngine('suspended','Which size?');
  const controller=new TelegramController(c,'bot',store,engine,async()=>({message_id:100}));

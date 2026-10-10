@@ -2,18 +2,18 @@ import { mixedPdf } from './pdf-fixture.js';
 import { createVisionDocumentProvider } from '../src/documents/reader.js';
 import { expect, it, vi } from 'vitest';
 import { config, draft, prepared, stubEngine } from './helpers.js';
-import { TelegramStore, type Conversation } from '../src/telegram/store.js';
-import { TelegramController } from '../src/telegram/controller.js';
-import { orderCreator } from '../src/telegram/order.js';
-import { customerCreator } from '../src/telegram/customer.js';
+import { TelegramStore, type Conversation } from '../src/channel/store.js';
+import { TelegramController } from '../src/channel/controller.js';
+import { orderCreator } from '../src/channel/order.js';
+import { customerCreator } from '../src/channel/customer.js';
 import { customerDetails } from '../src/domain/customer.js';
 import { WriteJournal, PreflightFailed } from '../src/storage/write-journal.js';
 import { DemoConnector } from '../src/connector/demo.js';
-import { createMediaReader, modelReader } from '../src/telegram/media.js';
+import { createMediaReader, modelReader } from '../src/channel/media.js';
 import type { Agent } from '@mastra/core/agent';
-import { customerPreview, orderPreview } from '../src/telegram/preview.js';
+import { customerPreview, orderPreview } from '../src/channel/preview.js';
 
-const chat = { id: Number(config().telegram.groupId), type: 'supergroup' };
+const chat = { id: Number(config().channel.groupId), type: 'supergroup' };
 const from = { id: 5, is_bot: false };
 const message = (id: number, text: string) => ({ update_id: id, message: { message_id: id, chat, from, text } });
 const photo = (id: number) => ({ update_id: id, message: { message_id: id, chat, from, photo: [{ file_id: 'test' }] } });
@@ -124,7 +124,7 @@ it('renders every PDF page for the general reader when no templates are configur
   const data = mixedPdf();
   const read = vi.fn(async () => '2 bottles; deliver to another address');
   const media = createMediaReader(c, new DemoConnector(), async () => data, { documents: createVisionDocumentProvider({ read }) });
-  const result = await media({ updateId: 1, groupId: c.telegram.groupId, senderId: '5', messageId: 1, text: '', attachments: [{ kind: 'pdf', fileId: 'pdf', mimeType: 'application/pdf' }] });
+  const result = await media({ updateId: 1, groupId: c.channel.groupId, senderId: '5', messageId: 1, text: '', attachments: [{ kind: 'pdf', fileId: 'pdf', mimeType: 'application/pdf' }] });
   expect(read).toHaveBeenCalledTimes(2);
   expect(read).toHaveBeenCalledWith([{ data: expect.any(Buffer), mimeType: 'image/png' }], false);
   expect(result.text).toContain('another address');
@@ -133,7 +133,7 @@ it('renders every PDF page for the general reader when no templates are configur
 it('rejects overlong document readings rather than accepting a truncated order', async () => {
   const c = config();
   const read = createMediaReader(c, new DemoConnector(), async () => mixedPdf(), { documents: createVisionDocumentProvider({ read: async () => 'A'.repeat(8000) + '\nDelivery address and discount' }) });
-  await expect(read({ updateId: 1, groupId: c.telegram.groupId, senderId: '5', messageId: 1, text: '', attachments: [{ kind: 'pdf', fileId: 'pdf', mimeType: 'application/pdf' }] }, 'en')).rejects.toThrow('No draft updated');
+  await expect(read({ updateId: 1, groupId: c.channel.groupId, senderId: '5', messageId: 1, text: '', attachments: [{ kind: 'pdf', fileId: 'pdf', mimeType: 'application/pdf' }] }, 'en')).rejects.toThrow('No draft updated');
 });
 
 it('rejects a model reading stopped at its output limit', async () => {
@@ -142,7 +142,7 @@ it('rejects a model reading stopped at its output limit', async () => {
 });
 
 it('persists the agent\'s reply language through restart, confirmation buttons and cancellation', async () => {
-  const c = config(); c.telegram.respondToAllMessages = true;
+  const c = config(); c.channel.respondToAllMessages = true;
   const store = new TelegramStore(':memory:', 'language'); await store.init();
   let mid = 100;
   const engine = stubEngine('ready', 'Summary', 'customer');

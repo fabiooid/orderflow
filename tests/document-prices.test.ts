@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { prepareOrder } from '../src/domain/prepare.js';
 import { draftSchema } from '../src/domain/types.js';
 import { DemoConnector } from '../src/connector/demo.js';
-import { orderDraft } from '../src/telegram/preview.js';
+import { orderDraft } from '../src/channel/preview.js';
 import { config, draft } from './helpers.js';
 
 const prepare = (amount: number, basis: 'net' | 'gross' | 'unclear' = 'net', decision: 'pending' | 'catalogue' | 'document' = 'pending') =>

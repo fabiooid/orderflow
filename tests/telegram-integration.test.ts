@@ -3,9 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { LibSQLStore } from '@mastra/libsql';
-import { TelegramController } from '../src/telegram/controller.js';
-import { TelegramStore } from '../src/telegram/store.js';
-import { createConversationEngine, type Converse } from '../src/telegram/engine.js';
+import { TelegramController } from '../src/channel/controller.js';
+import { TelegramStore } from '../src/channel/store.js';
+import { createConversationEngine, type Converse } from '../src/channel/engine.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { draftSchema } from '../src/domain/types.js';
 import { config, message, press, stubEngine } from './helpers.js';
@@ -211,7 +211,7 @@ it('lists the request that blocks a new one instead of saying none is open', asy
   } finally { store.close(); }
 });
 it('remembers the agent\'s own words, and application drafts only as a labelled first line', async () => {
-  const { remembered } = await import('../src/telegram/engine.js');
+  const { remembered } = await import('../src/channel/engine.js');
   expect(remembered({ texts: ['Manca il paese?\n\n👤 Nuovo cliente\n━━━━\n\n🏪 Pippo'], agentText: 'Manca il paese?' })).toBe('Manca il paese?\n[Application message: 👤 Nuovo cliente]');
   expect(remembered({ texts: ['Annullato. Nulla è stato salvato.'] })).toBe('[Application message: Annullato. Nulla è stato salvato.]');
   expect(remembered({ texts: ['Linen candle 200 g — DEMO-B — €20,00'], agentText: 'Linen candle 200 g — DEMO-B — €20,00' })).toBe('Linen candle 200 g — DEMO-B — €20,00');

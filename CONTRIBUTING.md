@@ -14,11 +14,11 @@ The project is in foundation development and is licensed under the [MIT License]
 
 A channel turns a provider's updates into the conversation core and sends replies back. It does not prepare orders.
 
-1. Add a folder under the channel adapters (today the only one is `src/telegram/`; the conversation core still lives there and is being split out).
-2. Implement inbound parsing (message, media, button) and outbound delivery (text, choices, edits) behind the channel interface. Leave order drafts, totals and confirmation in the shared conversation code.
-3. Read who may speak, and which conversation to join, from config. Do not hardcode a chat id.
-4. Register the adapter from the process entrypoint (`scripts/` or `src/mastra/`). Core folders must not import it.
-5. Add the adapter to the shared channel contract tests, and document the config keys in `.env.example` and the README.
+1. Add a folder under `src/channels/<name>/`. Telegram lives in `src/channels/telegram/`.
+2. Implement `ChannelAdapter` from `src/channel/contract.ts`: parse inbound messages and buttons, and send text back. Leave drafts, totals and confirmation in `src/channel/`.
+3. Read who may speak, and which conversation to join, from `config.channel`. Do not hardcode a chat id.
+4. Call `installInbound` from the process entrypoint (`scripts/` or `src/mastra/`). Core folders must not import the adapter. `npm run boundaries` checks this.
+5. Add the adapter to `tests/channel-contract.test.ts`, and document the config keys in `.env.example` and the README.
 
 ## How to add an invoicing connector
 

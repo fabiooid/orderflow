@@ -6,7 +6,8 @@
   "locale": "it",
   "currency": "EUR",
   "priceBasis": "net",
-  "telegram": {
+  "channel": {
+    "provider": "telegram",
     "groupId": "-1000000000001",
     "access": "all-group-members"
   },
