@@ -163,7 +163,8 @@ it('keeps a request from an earlier configuration, checked again under the curre
     // The agent sees the same order, now under the current configuration; nothing was cancelled.
     expect(engine.turn.mock.calls[0]![0].request).toMatchObject({ orderId: 'u0', revision: 3, draft, policy: expect.not.stringMatching(/^earlier$/) });
     expect((await store.order('u0'))).toMatchObject({ status: 'suspended', revision: 3 });
-    expect(send.mock.calls[0]![0]).toBe('La configurazione è cambiata: ho ricontrollato la richiesta aperta.\n\nNot created yet.\n\nRechecked draft');
+    // The recheck is silent: the operator reads only the answer to what they asked.
+    expect(send.mock.calls[0]![0]).toBe('Not created yet.');
     // A button from before the change is stale: it is dropped without saving or replying.
     await controller.handle(press(2, 'save:u0:2', 90));
     expect(send).toHaveBeenCalledTimes(1);

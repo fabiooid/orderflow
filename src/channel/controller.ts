@@ -242,8 +242,8 @@ export class TelegramController {
   }
 
   /**
-   * A request prepared under an earlier configuration, checked again under the current one so its context stays. The
-   * notice and the rechecked draft are shown with whatever comes next.
+   * A request prepared under an earlier configuration, checked again under the current one so its context stays. A
+   * message continues it silently; a button shows the notice and the rechecked draft, to be confirmed anew.
    */
   private async current(request: Conversation): Promise<{ request: Conversation; notice?: string; draft?: string }> {
     if (request.policy === this.policy) return { request };
@@ -254,25 +254,22 @@ export class TelegramController {
   /** The agent's turn. It works on the selected request when that can still change, and may start one when none is open. */
   private async converse(action: Extract<Action, { kind: 'converse' }>, event: MessageEvent, id: number, selected?: Conversation): Promise<Reply> {
     const failed = say(this.t('processFailed'));
-    let request = selected && editable(selected) ? selected : undefined, notice: string | undefined, draft: string | undefined;
-    if (request) {
-      try { ({ request, notice, draft } = await this.current(request)); } catch { return failed; }
+    let request = selected && editable(selected) ? selected : undefined, rechecked: Conversation | undefined;
+    if (request?.policy !== undefined && request.policy !== this.policy) {
+      try { rechecked = request = (await this.current(request)).request; } catch { return failed; }
     }
-    const rechecked = notice ? request : undefined;
     const others = (await this.store.openRequests()).filter(c => c.orderId !== request?.orderId);
     let out: TurnOutput;
     try {
       out = await this.engine.turn({ text: action.text, operatorText: action.operatorText, senderId: event.senderId, request, fresh: kind => this.fresh(kind, event, id),
         ...(!request && others.length ? { locked: others.map(c => this.describe(c)).join('; ') } : {}) });
     } catch {
-      return rechecked ? { texts: chunks([notice, draft, failed.texts[0]].join('\n\n')), order: rechecked } : failed;
+      return rechecked ? { ...failed, order: rechecked } : failed;
     }
     this.locale = out.locale;
-    // Unless the agent changed it, the rechecked draft is shown after its reply.
-    const around = (texts: string[]) => chunks([notice, ...texts, out.order ? undefined : draft].filter(Boolean).join('\n\n'));
-    if (out.cancel) { const reply = this.cancel(request); return { ...reply, texts: chunks([notice, ...reply.texts].filter(Boolean).join('\n\n')) }; }
+    if (out.cancel) return this.cancel(request);
     if (out.blocked) return { ...await this.openList(out.text, request ? [request, ...others] : others), agentText: out.reply, ...(rechecked ? { order: rechecked } : {}) };
-    return { texts: around([out.text]), agentText: out.reply, order: out.order ?? rechecked, ...(out.replaced ? { cancelled: [{ ...out.replaced, status: 'cancelled' as const }] } : {}) };
+    return { texts: chunks(out.text), agentText: out.reply, order: out.order ?? rechecked, ...(out.replaced ? { cancelled: [{ ...out.replaced, status: 'cancelled' as const }] } : {}) };
   }
 
   /** A candidate button: the APIs check the operator's pick, with no model involved. */
