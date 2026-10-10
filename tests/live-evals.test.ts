@@ -55,13 +55,13 @@ it('native workflow attachments persist scores from delivered text, retain histo
       expect(rows.scores[0]!.score).toBe(1);
     });
     await engine.record!(2, { incomingText: 'No, the address is wrong', senderId: '7', texts: ['Please provide the corrected address'], replyTo: 2,
-      order: { orderId: 'o1', revision: 2, status: 'saved', draft: draftSchema.parse({}), policy: 'test', savedOrder: { id: 42, number: '1' } },
+      order: { orderId: 'o1', revision: 2, status: 'saved', draft: draftSchema.parse({}), policy: 'test', savedOrder: { id: '42', number: '1' } },
     });
     await vi.waitFor(() => expect(observed.calls).toHaveLength(10));
     const correction = observed.calls.filter(c => c.id === 'user-reported-mistakes').at(-1)!;
     expect(correction.input.rememberedMessages.map((m: any) => m.role)).toEqual(['user', 'assistant']);
     expect(correction.input.rememberedMessages[1].content.parts[0].text).toBe('Order: five soaps');
-    expect(correction.output[0].content.metadata.applicationEvidence.savedOrder.id).toBe(42);
+    expect(correction.output[0].content.metadata.applicationEvidence.savedOrder.id).toBe('42');
     await engine.record!(2, { incomingText: 'No, the address is wrong', senderId: '7', texts: ['Please provide the corrected address'], replyTo: 2 });
     await new Promise(resolve => setTimeout(resolve, 30));
     expect(observed.calls).toHaveLength(10);

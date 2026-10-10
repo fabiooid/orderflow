@@ -21,7 +21,7 @@ it('shares context with colleagues, preserves drafts during questions and saves 
  const engine=await orderingEngine();
  let mid=100;
  const send=vi.fn(async(_text:string,_reply:number,_keyboard?:Keyboard)=>({message_id:mid++}));
- const save=vi.fn(async()=>({id:321,number:'42'}));const pdf=vi.fn(async()=>({message_id:500}));
+ const save=vi.fn(async()=>({id:'321',number:'42'}));const pdf=vi.fn(async()=>({message_id:500}));
  const controller=new TelegramController(c,'bot',store,engine,send,undefined,save,pdf);
  try {
   await controller.handle(message(1,'start'));
@@ -56,7 +56,7 @@ it('resumes a saved callback delivery after restart without repeating the write'
  const store=new TelegramStore(':memory:','replay');await store.init();
  const engine=await orderingEngine();
  let mid=100;const send=async()=>({message_id:mid++});
- const save=vi.fn(async()=>({id:321,number:'42'}));
+ const save=vi.fn(async()=>({id:'321',number:'42'}));
  const pdf=vi.fn().mockRejectedValueOnce(new Error('timeout')).mockResolvedValue({message_id:500});
  const controller=new TelegramController(c,'bot',store,engine,send,undefined,save,pdf);
  try{

@@ -158,12 +158,12 @@ it('persists the agent\'s reply language through restart, confirmation buttons a
 });
 
 it('renders customer validation, saved results and order labels in the resolved language', async () => {
-  const c = config(); c.locale = 'en'; c.clients.requiredFields = []; c.clients.sdiCountries = [];
+  const c = config(); c.locale = 'en'; c.clients.requiredFields = [];
   expect(customerDetails(draft(), c).missing).toEqual(['name']);
   const { id: _id, ...newClient } = (await new DemoConnector().listClients())[0]!;
   const journal = new WriteJournal(':memory:'); await journal.init();
   try {
-    const creator = customerCreator(config(), { listClients: async () => [], createClient: async client => ({ ...client, id: 999 }) }, journal);
+    const creator = customerCreator(config(), { listClients: async () => [], createClient: async client => ({ ...client, id: '999' }) }, journal);
     const text = await creator({ orderId: 'en', kind: 'customer', locale: 'en', revision: 1, status: 'ready', draft: { ...draft(), newClient }, policy: '' });
     expect(text).toContain('Customer created');
     expect(customerPreview({ ...newClient, notes: 'Test' }, false)).toContain('📝 Notes');

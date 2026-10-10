@@ -98,10 +98,10 @@ export function normalizeCallback(input: unknown, config: AppConfig) {
     const event: MessageEvent = { ...base, text: accept ? '✅' : '✖️' };
     return { id: q.id, messageId: q.message.message_id, event, action: { kind: 'pending', message: Number(media[1]), accept } as const };
   }
-  const pick = /^pick:([a-zA-Z0-9_-]+):(\d+):(client|lines\.\d+):(\d+)$/.exec(q.data);
+  const pick = /^pick:([a-zA-Z0-9_-]+):(\d+):(client|lines\.\d+):([^:]+)$/.exec(q.data);
   if (pick) {
     const target: OrderLink = { orderId: pick[1]!, revision: Number(pick[2]) };
-    const choice = { field: pick[3]!, id: Number(pick[4]) };
+    const choice = { field: pick[3]!, id: pick[4]! };
     return { id: q.id, messageId: q.message.message_id, target, event: { ...base, text: `👉 ${choice.field}: ${choice.id}` }, action: { kind: 'pick', target, choice } as const };
   }
   const match = /^(save|customer|review|cancel|cancelall):([a-zA-Z0-9_-]+):(\d+)$/.exec(q.data);

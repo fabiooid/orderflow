@@ -30,9 +30,10 @@ async function main() {
       if (!values['verified-absent']) throw new Error('Verify every uncertain child write is absent in Fatture in Cloud before approving retry');
       await journal.approveRetry(key, evidence);
     } else {
-      const remote = Number(remoteId);
-      if (!Number.isSafeInteger(remote) || remote <= 0) throw new Error('Provide the verified remote record ID');
-      const connector = FattureInCloudConnector.fromToken(config.companyId, process.env.FIC_ACCESS_TOKEN ?? '');
+      const remoteNumber = Number(remoteId);
+      if (!Number.isSafeInteger(remoteNumber) || remoteNumber <= 0) throw new Error('Provide the verified remote record ID');
+      const remote = String(remoteNumber);
+      const connector = FattureInCloudConnector.fromToken(config.invoicing.companyId, process.env.FIC_ACCESS_TOKEN ?? '');
       if (conversation.kind === 'customer' || action === 'client-found') {
         const expected = clientSchema.parse(conversation.kind === 'customer' ? conversation.draft.newClient : conversation.prepared?.client);
         const client = (await connector.listClients()).find(c => c.id === remote);

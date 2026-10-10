@@ -15,21 +15,22 @@ async function main() {
   const prices = tierPrices(config, values.tier);
   if (!prices.size) { console.error(`No order form gives prices for tier "${values.tier}". Import one with --tier ${values.tier} and list it in orderForms.`); process.exit(1); }
   const token = process.env.FIC_ACCESS_TOKEN ?? '';
-  const connector = FattureInCloudConnector.fromToken(config.companyId, token);
-  const catalogue = new Map((await connector.listProducts()).map(p => [p.id, p.netPrice]));
+  const connector = FattureInCloudConnector.fromToken(config.invoicing.companyId, token);
+  const catalogue = new Map((await connector.listProducts()).map(p => [p.id, p.netPrice] as const));
   const api = new IssuedDocumentsApi(new Configuration({ accessToken: token, baseOptions: { timeout: 20000 } }));
   
   const wanted = Number(values.orders);
-  const score = new Map<number, { name: string; tier: number; standard: number; orders: number }>();
+  const score = new Map<string, { name: string; tier: number; standard: number; orders: number }>();
   for (let page = 1, seen = 0; seen < wanted; page++) {
-    const { data } = await api.listIssuedDocuments(config.companyId, 'order', undefined, 'detailed', '-date', page, 100);
+    const { data } = await api.listIssuedDocuments(config.invoicing.companyId, 'order', undefined, 'detailed', '-date', page, 100);
     for (const order of data.data ?? []) {
-      const id = order.entity?.id;
+      const id = order.entity?.id == null ? undefined : String(order.entity.id);
       if (!id || seen++ >= wanted) continue;
       const entry = score.get(id) ?? { name: order.entity?.name ?? '?', tier: 0, standard: 0, orders: 0 };
       entry.orders++;
       for (const item of order.items_list ?? []) {
-        const tier = item.product_id ? prices.get(item.product_id) : undefined, standard = item.product_id ? catalogue.get(item.product_id) : undefined;
+        const productId = item.product_id == null ? undefined : String(item.product_id);
+        const tier = productId ? prices.get(productId) : undefined, standard = productId ? catalogue.get(productId) : undefined;
         // Only products whose tier price differs from the catalogue say anything about the client.
         if (tier === undefined || standard === undefined || tier === standard) continue;
         if (item.net_price === tier) entry.tier++;
@@ -42,7 +43,7 @@ async function main() {
   const suggested = [...score.entries()].filter(([, s]) => s.tier >= 2 && s.tier > s.standard).sort((a, b) => b[1].tier - a[1].tier);
   console.log(`Clients charged "${values.tier}" prices in the last ${wanted} orders (lines at tier price / at catalogue price):\n`);
   for (const [id, s] of suggested) console.log(`  ${id}\t${s.tier}/${s.standard}\t${s.orders} orders\t${s.name}`);
-  console.log(`\nReview this list, then add the IDs you agree with to priceTiers → "${values.tier}" → clientIds:\n  [${suggested.map(([id]) => id).join(', ')}]`);
+  console.log(`\nReview this list, then add the IDs you agree with to priceTiers → "${values.tier}" → clientIds:\n  ${JSON.stringify(suggested.map(([id]) => id))}`);
 }
 
 main().catch(error => {

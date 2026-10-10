@@ -37,7 +37,7 @@ export function createJevSelector(config: MatchingConfig, transport?: JudgmentTr
       retrieval: parsed.success ? parsed.data.retrieval : { complete: false, furtherSearchPossible: true },
       elapsedMs: 0,
     };
-    const result = (status: SelectionResult['status'], reason?: SelectionResult['reason'], selectedId?: number): SelectionResult =>
+    const result = (status: SelectionResult['status'], reason?: SelectionResult['reason'], selectedId?: string): SelectionResult =>
       ({ status, ...(reason ? { reason } : {}), ...(selectedId === undefined ? {} : { selectedId }),
         evidence: { ...evidence, elapsedMs: Math.round(performance.now() - start) } });
     if (!parsed.success) return result('unavailable', 'invalid-input');

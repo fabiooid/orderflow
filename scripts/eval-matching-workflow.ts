@@ -27,7 +27,7 @@ async function main() {
     const drafts = createDraftApi(app, connector, createIdentityResolver(app, connector, { config: matching }));
     const outcome = await drafts.order(draft, { orderId: `eval-${fixture.name}`, revision: 1, operatorText: text }, '2026-10-08');
     const field = fixture.request.kind === 'client' ? 'client' : 'lines.0';
-    const actual: number | string = outcome.status === 'ready'
+    const actual: string = outcome.status === 'ready'
       ? fixture.request.kind === 'client' ? outcome.order.client.id ?? 'missing-client' : outcome.order.lines[0]!.productId
       : outcome.decisions.find(d => d.field === field)?.status ?? 'missing-decision';
     const ok = actual === fixture.expected && connector.createCalls === 0;

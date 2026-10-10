@@ -53,7 +53,7 @@ describe('document service boundary', () => {
   });
 
   it('retains two raw readings through the traced workflow, mapping products only afterwards', async () => {
-    const form = { ...template, schemaVersion: 1 as const, rows: [{ ...template.rows[0]!, cells: { qty: { productId: 101 } } }] };
+    const form = { ...template, schemaVersion: 1 as const, rows: [{ ...template.rows[0]!, cells: { qty: { productId: '101' } } }] };
     const templates = documentTemplates([form]);
     expect(JSON.stringify(templates)).not.toContain('productId');
     let calls = 0;
@@ -67,7 +67,7 @@ describe('document service boundary', () => {
     const result = await provider.read([{ data: await image(), mimeType: 'image/jpeg' }]);
     expect(result.pages[0]!.template).toEqual({ id: 'test', readings: expect.arrayContaining([[{ row: 1, qty: 3 }], [{ row: 1, qty: 8 }]]) });
     expect(JSON.stringify(result)).not.toContain('productId');
-    expect(documentForms(result, [form])[0]!.lines).toEqual([{ kind: 'unsure', productId: 101, readings: expect.arrayContaining([3, 8]) }]);
+    expect(documentForms(result, [form])[0]!.lines).toEqual([{ kind: 'unsure', productId: '101', readings: expect.arrayContaining([3, 8]) }]);
   });
 
   it('accepts a replacement provider without accessing the catalogue for general documents', async () => {

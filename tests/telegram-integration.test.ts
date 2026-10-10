@@ -70,7 +70,7 @@ it('runs the real order API from scripted agent turns, with a candidate picked b
   const store = new TelegramStore(':memory:', 'engine'); await store.init();
   let messageId = 100;
   const connector = new DemoConnector();
-  connector.products.push({ id: 104, code: 'DEMO-A5', name: 'Pebble hand wash 500 ml', description: '', netPrice: 20 });
+  connector.products.push({ id: '104', code: 'DEMO-A5', name: 'Pebble hand wash 500 ml', description: '', netPrice: 20 });
   const send = vi.fn(async (_text: string, _reply: number, _keyboard?: unknown) => ({ message_id: messageId++ }));
   // The scripted agent sends the drafts a model would, starting from the open request it is shown.
   const converse = vi.fn<Converse>()
@@ -90,12 +90,12 @@ it('runs the real order API from scripted agent turns, with a candidate picked b
     // The pick goes straight to the order API: no agent turn.
     await controller.handle(press(2, 'pick:u1:1:lines.0:104', 100));
     expect(converse).toHaveBeenCalledTimes(1);
-    expect((await store.order('u1'))?.draft.lines[0]?.productId).toBe(104);
+    expect((await store.order('u1'))?.draft.lines[0]?.productId).toBe('104');
     expect(send.mock.calls[1]![0]).toContain('🚚 Consegna: ❓');
     await controller.handle(message(3, 'spedizione 8', 101, 7));
     const ready = await store.order('u1');
     expect(ready?.status).toBe('ready');
-    expect(ready?.prepared?.lines.map(l => [l.productId, l.quantity])).toEqual([[104, 2], [900, 1]]);
+    expect(ready?.prepared?.lines.map(l => [l.productId, l.quantity])).toEqual([['104', 2], ['900', 1]]);
     expect(send.mock.calls[2]![0]).toContain('📦 Anteprima ordine');
     expect(connector.createCalls).toBe(0);
   } finally { store.close(); await storage.close(); }

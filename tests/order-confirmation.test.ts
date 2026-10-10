@@ -14,7 +14,7 @@ it('saves the reviewed payload once and blocks changed payload retries', async (
   const state:Conversation={orderId:'test',revision:1,status:'ready',draft:draft(),policy:policyFingerprint(c),prepared:order,totals};
   const save=orderCreator(c,connector,journal);
   await expect(save({...state,status:'suspended'})).rejects.toThrow();
-  const saved=await save(state);expect(saved.id).toBeGreaterThan(0);
+  const saved=await save(state);expect(Number(saved.id)).toBeGreaterThan(0);
   expect(await save(state)).toEqual(saved);expect(connector.createCalls).toBe(1);
   await expect(save({...state,prepared:{...order,notes:'Changed'}})).rejects.toThrow();
   expect(connector.createCalls).toBe(1);
@@ -25,7 +25,7 @@ it('rejects stale confirmations and does not re-save or resend after uncertain P
  const c=config();c.orderSavingEnabled=true;const store=new TelegramStore(':memory:','orders');await store.init();
  let mid=100;
  const send=vi.fn(async()=>({message_id:mid++}));
- const save=vi.fn(async()=>({id:321,number:'42'}));
+ const save=vi.fn(async()=>({id:'321',number:'42'}));
  const pdf=vi.fn(async()=>{throw new Error('timeout');});
  const engine=stubEngine();
  engine.turn.mockImplementation(async input=>{const p=input.request??input.fresh('order');return {text:'Summary',reply:'',locale:'it',order:{...p,revision:p.revision+1,status:'ready' as const,prepared:await prepared(),totals:{net:29.6,vat:6.51,gross:36.11}}};});

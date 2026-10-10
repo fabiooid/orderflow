@@ -9,8 +9,8 @@ export interface OrderConnector {
   calculateTotals(order: PreparedOrder): Promise<Totals>;
   /** Pass totals already obtained from calculateTotals to avoid a read inside a journaled write. */
   createOrder(order: PreparedOrder, validatedTotals?: Totals): Promise<SavedOrder>;
-  updateOrder(id: number, order: PreparedOrder): Promise<SavedOrder>;
-  getOrder(id: number): Promise<SavedOrder>;
+  updateOrder(id: string, order: PreparedOrder): Promise<SavedOrder>;
+  getOrder(id: string): Promise<SavedOrder>;
   /** Most recent orders of one client, newest first. Read-only. */
-  listClientOrders(clientId: number, limit: number): Promise<ClientOrder[]>;
+  listClientOrders(clientId: string, limit: number): Promise<ClientOrder[]>;
 }

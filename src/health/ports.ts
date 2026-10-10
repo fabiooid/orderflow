@@ -10,7 +10,7 @@ export function liveHealthPorts(config: AppConfig, env: NodeJS.ProcessEnv): Heal
     if (!env.FIC_ACCESS_TOKEN) throw new Error('FIC_ACCESS_TOKEN is missing');
     return new Configuration({ accessToken: env.FIC_ACCESS_TOKEN, baseOptions: { timeout: 15000 } });
   };
-  const connector = () => FattureInCloudConnector.fromToken(config.companyId, env.FIC_ACCESS_TOKEN ?? '');
+  const connector = () => FattureInCloudConnector.fromToken(config.invoicing.companyId, env.FIC_ACCESS_TOKEN ?? '');
   return {
     telegram: async () => {
       const api = telegram(); const me = await api.getMe();
@@ -24,9 +24,9 @@ export function liveHealthPorts(config: AppConfig, env: NodeJS.ProcessEnv): Heal
         readsAll: admin || me.can_read_all_group_messages === true,
       };
     },
-    company: async () => Boolean((await new CompaniesApi(sdk()).getCompanyInfo(config.companyId)).data.data),
+    company: async () => Boolean((await new CompaniesApi(sdk()).getCompanyInfo(config.invoicing.companyId)).data.data),
     products: () => connector().listProducts(), clients: () => connector().listClients(),
-    vat: async () => (await new InfoApi(sdk()).listVatTypes(config.companyId, 'detailed')).data.data ?? [],
-    payments: async () => (await new InfoApi(sdk()).listPaymentMethods(config.companyId)).data.data ?? [],
+    vat: async () => (await new InfoApi(sdk()).listVatTypes(config.invoicing.companyId, 'detailed')).data.data ?? [],
+    payments: async () => (await new InfoApi(sdk()).listPaymentMethods(config.invoicing.companyId)).data.data ?? [],
   };
 }

@@ -14,7 +14,7 @@ import { lineIndex, pickable } from './preview.js';
 import { PreflightFailed } from '../storage/write-journal.js';
 
 /** A candidate the operator picked with a button. */
-export type Choice = { field: string; id: number };
+export type Choice = { field: string; id: string };
 export type TurnInput = {
   /** The message, including anything read from its attachments or forward. */
   text: string;
@@ -69,14 +69,15 @@ export class TelegramController {
     private readonly send: (text: string, replyTo: number, keyboard?: Keyboard) => Promise<{ message_id: number }>,
     private readonly createCustomer?: (previous: Conversation) => Promise<string>,
     private readonly saveOrder?: (previous: Conversation) => Promise<SavedOrder>,
-    private readonly sendPdf?: (orderId: number, locale?: AppConfig['locale']) => Promise<{ message_id: number }>,
+    private readonly sendPdf?: (orderId: string, locale?: AppConfig['locale']) => Promise<{ message_id: number }>,
     private readonly buttons?: { answer: (id: string) => Promise<unknown>; clear: (messageId: number) => Promise<unknown> },
     private readonly media?: MediaReader) {
     this.policy = engine.matchingPolicy ? createHash('sha256').update(JSON.stringify({ config, matchingPolicy: engine.matchingPolicy })).digest('hex') : policyFingerprint(config);
     this.locale = config.locale;
   }
 
-  private books() { return 'Fatture in Cloud'; }
+  /** Operator-facing name of the invoicing system, from config. */
+  private books() { return this.config.invoicing.label; }
 
   private t(key: CopyKey, vars?: CopyVars) { return copy(this.locale, key, vars); }
 

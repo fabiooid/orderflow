@@ -47,9 +47,9 @@ it('validates the full remote order before offering found-record recovery', asyn
   const document = { ...toFicOrder(order), id: 91, number: 5, entity: toFicClient(order.client), amount_net: totals.net, amount_vat: totals.vat, amount_gross: totals.gross, payments_list: [{ amount: totals.gross, due_date: order.dueDate }] };
   const read = vi.fn(async () => ({ data: { data: document } }));
   const connector = new FattureInCloudConnector(1, { documents: { getIssuedDocument: read } } as unknown as SdkPorts);
-  expect(await connector.verifySavedOrder(91, order, totals)).toMatchObject({ id: 91 });
+  expect(await connector.verifySavedOrder('91', order, totals)).toMatchObject({ id: '91' });
   document.items_list![0]!.qty = 99;
-  await expect(connector.verifySavedOrder(91, order, totals)).rejects.toThrow('differs');
+  await expect(connector.verifySavedOrder('91', order, totals)).rejects.toThrow('differs');
   document.type = 'invoice';
-  await expect(connector.verifySavedOrder(91, order, totals)).rejects.toThrow('forbidden');
+  await expect(connector.verifySavedOrder('91', order, totals)).rejects.toThrow('forbidden');
 });
