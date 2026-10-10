@@ -34,7 +34,7 @@ it('uses the shop, person and number icons on a new customer', () => {
 });
 
 it('shows a draft customer with what is still missing', () => {
-  const text = customerPreview({ name: 'Bottega Verde' }, true, ['email', 'vatNumber']);
+  const text = customerPreview({ name: 'Fable Goods' }, true, ['email', 'vatNumber']);
   expect(text).toContain('👤 Nuovo cliente');
   expect(text).toContain('❓ Da completare: email · partita iva');
   expect(text).not.toContain('Facoltativi');
@@ -63,7 +63,7 @@ it('shows a draft order with what is known and marks each missing piece', () => 
 });
 
 it('shows the chosen customer on a draft order', () => {
-  const draft = draftSchema.parse({ clientQuery: 'Example Studio', clientId: 201, lines: [{ query: 'Amber hand wash 250 ml', quantity: 2 }], shippingPrice: 0 });
+  const draft = draftSchema.parse({ clientQuery: 'Example Studio', clientId: 201, lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 0 });
   const text = orderDraft(draft, [{ field: 'vat', message: 'Check VAT' }], true, { id: 201, name: 'Example Studio', country: 'IT', street: 'Example Street 1', city: 'Example City', postalCode: '00000', notes: '' });
   expect(text).toMatch(/🏪 Example Studio\n📍 Example Street 1, 00000 Example City, IT/);
   expect(text).toContain('🚚 Consegna: nessuna');

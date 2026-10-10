@@ -8,7 +8,7 @@ import type { TurnInput, TurnOutput } from '../src/telegram/controller.js';
 import type { Conversation } from '../src/telegram/store.js';
 export const config = () => configSchema.parse(structuredClone(example));
 export const draft = () => draftSchema.parse({
-  clientQuery: 'Example Studio', lines: [{ query: 'Amber hand wash 250 ml', quantity: 2 }], shippingPrice: 8, discountPercent: 10,
+  clientQuery: 'Example Studio', lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 8, discountPercent: 10,
 });
 export async function prepared() {
   const result = await prepareOrder(draft(), config(), new DemoConnector(), '2026-01-15');

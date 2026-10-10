@@ -59,9 +59,9 @@ Use `CONNECTOR_MODE=demo` with the example product and tax settings to start aga
 npm run telegram:start
 ```
 
-Example input: `@YOUR_BOT_USERNAME order two Amber hand wash 250 ml for Example Studio, 10% discount, delivery 8 euros`.
+Example input: `@YOUR_BOT_USERNAME order two Pebble hand wash 250 ml for Example Studio, 10% discount, delivery 8 euros`.
 
-Ask for “Amber 250” to exercise variant clarification: pick the variant with its button, then give the delivery charge. A colleague can answer too. Starting a second request while one is open lists the open requests with a cancel button. In preview mode the **👀 Segna come controllato** button marks a complete preview reviewed; replying with changes reopens it. Replies to an older revision are rejected.
+Ask for “Pebble 250” to exercise variant clarification: pick the variant with its button, then give the delivery charge. A colleague can answer too. Starting a second request while one is open lists the open requests with a cancel button. In preview mode the **👀 Segna come controllato** button marks a complete preview reviewed; replying with changes reopens it. Replies to an older revision are rejected.
 
 Then set `CONNECTOR_MODE=read-only`, restore the real account mappings, run the checks, and restart the runner. It uses the real catalogue and client data but **never creates or modifies records**. It returns a clearly labelled preview, not a saved-order claim or a fabricated PDF.
 
@@ -115,14 +115,14 @@ Fatture in Cloud's default VAT entry may have ID `0`; this is supported. Account
 
 ### Customer creation from Telegram
 
-In account (`CONNECTOR_MODE=read-only`) mode, ask the bot to create a customer (for example “crea il cliente Bottega Verde, Via Roma 1, Bergamo”). Press **✅ Conferma e salva** under the latest customer summary to authorize creation. This is the sole enabled write in this mode; order creation and updates remain disabled. Required customer fields are deployment-configured and still apply to test records. No fake VAT or SDI identifiers are generated. Duplicate names or VAT numbers return existing records instead of creating another.
+In account (`CONNECTOR_MODE=read-only`) mode, ask the bot to create a customer (for example “crea il cliente Fable Goods, Via Roma 1, Bergamo”). Press **✅ Conferma e salva** under the latest customer summary to authorize creation. This is the sole enabled write in this mode; order creation and updates remain disabled. Required customer fields are deployment-configured and still apply to test records. No fake VAT or SDI identifiers are generated. Duplicate names or VAT numbers return existing records instead of creating another.
 
 Customer writes use `.data/customer-writes.db` for durable retry protection. If a write is uncertain, stop and reconcile the customer in Fatture in Cloud before retrying; do not start another request to bypass the journal. No customer emails are sent. Demo mode cannot create real customers.
 
 
 ### Natural catalogue questions
 
-Mention the configured bot in the approved group, for example `@your_bot quali varianti di Sapone Zenzero abbiamo?`. The shared Mastra agent answers using product-search tools and conversation memory. Reply to its answer for follow-up questions. Unaddressed group chatter remains ignored. Answering a question never changes the open request; orders and customers are saved only with their confirmation buttons. Product search returns names, codes, descriptions and net prices to the configured model provider.
+Mention the configured bot in the approved group, for example `@your_bot quali varianti di Sapone di Esempio abbiamo?`. The shared Mastra agent answers using product-search tools and conversation memory. Reply to its answer for follow-up questions. Unaddressed group chatter remains ignored. Answering a question never changes the open request; orders and customers are saved only with their confirmation buttons. Product search returns names, codes, descriptions and net prices to the configured model provider.
 
 There are no slash commands: write to the bot naturally, and confirm with the buttons under the latest summary.
 

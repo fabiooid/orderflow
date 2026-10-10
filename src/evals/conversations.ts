@@ -10,7 +10,7 @@ export const northwind = {
 export function evalConnector() {
   const connector = new DemoConnector();
   connector.clients.push(structuredClone(northwind));
-  connector.products.push({ id: 104, code: 'DEMO-A5', name: 'Amber hand wash 500 ml', description: '', netPrice: 20 });
+  connector.products.push({ id: 104, code: 'DEMO-A5', name: 'Pebble hand wash 500 ml', description: '', netPrice: 20 });
   // Italian words in a description, as a real catalogue has, so Italian questions can find the English-named candle.
   connector.products.find(p => p.id === 103)!.description = 'Candela profumata al lino';
   return connector;
@@ -23,7 +23,7 @@ A: me
 Grazie Christian.
 Prima possibile, con express!
 
-2 x Amber hand wash 250 ml
+2 x Pebble hand wash 250 ml
 1 x Linen candle 200 g
 
 Example Studio
@@ -36,7 +36,7 @@ const giveUps = [/Non riesco a elaborare/i, /Unable to process this message/i, /
 type Check = (o: ConversationOutcome) => string[];
 const last = (o: ConversationOutcome) => o.replies.at(-1) ?? '';
 const neverGaveUp: Check = o => o.replies.flatMap(reply => expect(!giveUps.some(p => p.test(reply)), `gave up: ${reply.split('\n')[0]}`));
-const keptAttachmentLines: Check = o => expect(!!o.open?.draft.lines.some(l => l.productId === 101 || /amber/i.test(l.query)), 'the attachment lines were lost');
+const keptAttachmentLines: Check = o => expect(!!o.open?.draft.lines.some(l => l.productId === 101 || /pebble/i.test(l.query)), 'the attachment lines were lost');
 const orderFor = (id: number): Check => o => [
   ...expect(o.open?.draft.clientId === id, `client is ${o.open?.draft.clientId ?? `"${o.open?.draft.clientQuery ?? 'none'}"`}, expected ${id}`),
   ...expect(!o.open?.draft.newClient, `proposes creating new customer "${o.open?.draft.newClient?.name}"`),
@@ -69,11 +69,11 @@ export const conversationCases: ConversationCase[] = [
   { id: 'cancel-in-words', turns: [{ text: 'ordine', attachment: email }, { text: 'lascia stare, non serve più' }], check: all(neverGaveUp, nothingOpen) },
   {
     id: 'create-customer-then-edit',
-    turns: [{ text: 'Crea un nuovo cliente: Bottega Verde srl, Via Roma 1, 24100 Bergamo, Italia, P.IVA IT01234567890' }, { text: 'aggiungi la mail info@bottegaverde.invalid' }],
+    turns: [{ text: 'Crea un nuovo cliente: Fable Goods srl, Via Roma 1, 24100 Bergamo, Italia, P.IVA IT01234567890' }, { text: 'aggiungi la mail info@fablegoods.invalid' }],
     check: all(neverGaveUp, o => [
       ...expect(o.open?.kind === 'customer' && o.open.status === 'ready', `expected a customer ready to confirm, got ${o.open?.kind ?? 'order'} ${o.open?.status ?? 'none'}`),
-      ...expect(/bottega verde/i.test(o.open?.draft.newClient?.name ?? ''), 'customer name lost'),
-      ...expect(o.open?.draft.newClient?.email === 'info@bottegaverde.invalid', 'email not added'),
+      ...expect(/fable goods/i.test(o.open?.draft.newClient?.name ?? ''), 'customer name lost'),
+      ...expect(o.open?.draft.newClient?.email === 'info@fablegoods.invalid', 'email not added'),
     ]),
   },
   {
@@ -83,17 +83,17 @@ export const conversationCases: ConversationCase[] = [
   },
   {
     id: 'pick-size-with-button',
-    turns: [{ text: 'ordine per Example Studio: 2 amber hand wash, spedizione 8 euro' }, { press: '500 ml' }],
+    turns: [{ text: 'ordine per Example Studio: 2 pebble hand wash, spedizione 8 euro' }, { press: '500 ml' }],
     check: all(neverGaveUp, orderFor(201), o => expect(o.open?.status === 'ready' && !!o.open.prepared?.lines.some(l => l.productId === 104 && l.quantity === 2), `expected a ready order with 2 × 500 ml, got ${o.open?.status ?? 'none'}`)),
   },
   {
     id: 'price-correction',
-    turns: [{ text: 'ordine per Example Studio: 2 Amber hand wash 250 ml, spedizione 8 euro' }, { text: 'metti il prezzo a 10 euro' }],
+    turns: [{ text: 'ordine per Example Studio: 2 Pebble hand wash 250 ml, spedizione 8 euro' }, { text: 'metti il prezzo a 10 euro' }],
     check: all(neverGaveUp, o => expect(!!o.open?.prepared?.lines.some(l => l.productId === 101 && l.netPrice === 10), 'the 10 euro price was not applied')),
   },
   {
     id: 'catalogue-question-mid-order',
-    turns: [{ text: 'ordine per Example Studio: 2 Amber hand wash 250 ml, spedizione 8 euro' }, { text: 'che candele avete?' }],
+    turns: [{ text: 'ordine per Example Studio: 2 Pebble hand wash 250 ml, spedizione 8 euro' }, { text: 'che candele avete?' }],
     check: all(neverGaveUp, o => [
       ...expect(last(o).includes('Linen candle'), 'the candle question was not answered'),
       ...expect(o.open?.status === 'ready' && o.open.draft.lines.length === 1, 'the open order changed'),
@@ -108,7 +108,7 @@ export const conversationCases: ConversationCase[] = [
   },
   {
     id: 'customer-then-order',
-    turns: [{ text: 'Crea cliente: Marcello Bello Via Pippo 5, 24050 Popolone BG' }, { text: 'ok crea ordine' }, { text: '2 Amber hand wash 250 ml, spedizione 8 euro' }],
+    turns: [{ text: 'Crea cliente: Marcello Bello Via Pippo 5, 24050 Popolone BG' }, { text: 'ok crea ordine' }, { text: '2 Pebble hand wash 250 ml, spedizione 8 euro' }],
     // The country follows from the address; the order replaces the customer just drafted, with nothing to cancel first.
     check: all(neverGaveUp, o => [
       ...expect(!!o.open && o.open.kind !== 'customer' && o.open.draft.newClient?.name === 'Marcello Bello', `expected an order for the new customer Marcello Bello, got ${o.open?.kind ?? 'order'} for ${o.open?.draft.newClient?.name ?? o.open?.draft.clientQuery ?? 'nobody'}`),
@@ -124,7 +124,7 @@ export const conversationCases: ConversationCase[] = [
   },
   {
     id: 'show-the-order',
-    turns: [{ text: 'ordine per Example Studio: 2 Amber hand wash 250 ml' }, { text: 'che tempo fa domani?' }, { text: 'ok mostrami l\'ordine' }],
+    turns: [{ text: 'ordine per Example Studio: 2 Pebble hand wash 250 ml' }, { text: 'che tempo fa domani?' }, { text: 'ok mostrami l\'ordine' }],
     check: all(neverGaveUp, orderFor(201), o => expect(/Bozza ordine|Anteprima ordine/.test(last(o)), 'the open order was not shown')),
   },
   { id: 'off-topic', turns: [{ text: 'che tempo fa domani a Milano?' }], check: all(neverGaveUp, nothingOpen, o => expect(last(o).length < 300, 'long off-topic reply')) },

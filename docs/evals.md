@@ -185,7 +185,7 @@ Offline mode replaces the model with each case's scripted drafts, so it checks a
 
 These cases do not certify media accuracy, conversational understanding, actual save permissions or every VAT scenario. The offline Vitest suite separately tests confirmation/revisions, duplicate prevention, alias persistence, PDF page rendering and recovery. `eval:orderforms` measures real document reading. A supervised live order remains the final integration check.
 
-Initial baseline, 7 October 2026: `openai/gpt-5-mini` passed five of six cases on the first full run. The custom-price case left the customer unresolved. An isolated retry passed, so the precise cause was not established. Existing-customer guidance was clarified, and the next full run passed six of six. Treat this as a small, nondeterministic baseline, not a reliability percentage. Failed runs print the fictional draft for diagnosis. Use `--case custom-price` to rerun one scenario.
+Dated baselines are in [planning/run-log.md](planning/run-log.md). Treat them as a small, nondeterministic sample, not a reliability percentage. Failed runs print the fictional draft for diagnosis. Use `--case custom-price` to rerun one scenario.
 
 ## Conversations with the live agent
 
@@ -194,9 +194,9 @@ npm run eval:conversations
 npm run eval:conversations -- --case pick-size-with-button
 ```
 
-Replays multi-turn group conversations, modelled on real failures, through the real controller, engine and agent with fictional data (`src/evals/conversations.ts`). Both suites share one harness: `--case <id>` runs one case, `--offline` uses scripted drafts where a case has them, and up to four cases run at once. Cases cover an email screenshot whose customer the operator overrides, "this order but change the client", an unnamed change (the agent must ask), cancelling in words, creating and editing a customer, an existing customer, a candidate picked with a button, a price correction, a catalogue question mid-order, an off-topic message and an English request. Each case checks the resulting request deterministically: customer, lines and no give-up reply. Notes and delivery are left to the agent's judgement, since the operator reviews them in the draft. Model charges apply; nothing is written or sent.
+Replays multi-turn group conversations, modelled on fictional situations, through the real controller, engine and agent with fictional data (`src/evals/conversations.ts`). Both suites share one harness: `--case <id>` runs one case, `--offline` uses scripted drafts where a case has them, and up to four cases run at once. Cases cover an email screenshot whose customer the operator overrides, "this order but change the client", an unnamed change (the agent must ask), cancelling in words, creating and editing a customer, an existing customer, a candidate picked with a button, a price correction, a catalogue question mid-order, an off-topic message and an English request. Each case checks the resulting request deterministically: customer, lines and no give-up reply. Notes and delivery are left to the agent's judgement, since the operator reviews them in the draft. Model charges apply; nothing is written or sent.
 
-On 9 October 2026, `openai/gpt-5-mini` passed 14 of 14 after the prompt and API fixes it prompted. Like the acceptance cases, it is a small nondeterministic sample.
+Dated results are in [planning/run-log.md](planning/run-log.md). Like the acceptance cases, this is a small nondeterministic sample.
 
 ## Interpreting live traces
 
@@ -221,7 +221,7 @@ Traces explain what executed. Deterministic acceptance checks compare observable
 
 The document reader now exposes a provider boundary in `src/documents/contract.ts`.
 The existing order-form evaluation shares its recognition/cell-reading primitives but
-does not test the complete document provider. See [ADR 0001](docs/decisions/0001-document-reading.md#provider-benchmark-plan)
+does not test the complete document provider. See [ADR 0001](decisions/0001-document-reading.md#provider-benchmark-plan)
 for the planned held-out scan corpus, Azure comparison and separate measurements of
 silent errors, missed rows, operator effort, latency and cost. No comparative OCR
 accuracy is claimed by the offline regression suite.
@@ -230,6 +230,6 @@ accuracy is claimed by the offline regression suite.
 
 `JEV_MODE=on npm run eval:matching:workflow` sends fictional product/customer cases
 through the same order API used by Telegram and Studio. Drafts are scripted; JEV calls are real and billed normally. No FIC or
-Telegram access or writes occur. Ten cases passed on 8 October 2026; this is smoke
+Telegram access or writes occur. Dated smoke notes are in [planning/run-log.md](planning/run-log.md). This is smoke
 evidence, not held-out calibration. `npm test` covers authoritative IDs, explicit
 button choices, shadow/off, re-resolution, operator-text evidence, alias guards, and failures.

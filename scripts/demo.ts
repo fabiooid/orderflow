@@ -17,13 +17,13 @@ try {
   const connector = new DemoConnector();
   // Scripted drafts and no identity model make this an offline demo of the order API, not a model-quality test.
   const drafts = createDraftApi(config, connector, createIdentityResolver(config, connector, { config: matchingConfigSchema.parse({ mode: 'off' }) }));
-  const context = { orderId: 'demo-1', revision: 1, operatorText: 'Two Amber 250 for Example Studio, discount 10%' };
-  const draft = draftSchema.parse({ clientQuery: 'Example Studio', lines: [{ query: 'Amber 250', quantity: 2 }], discountPercent: 10 });
+  const context = { orderId: 'demo-1', revision: 1, operatorText: 'Two Pebble 250 for Example Studio, discount 10%' };
+  const draft = draftSchema.parse({ clientQuery: 'Example Studio', lines: [{ query: 'Pebble 250', quantity: 2 }], discountPercent: 10 });
   const initial = await drafts.order(draft, context, '2026-01-15');
   console.log('Offline demo: scripted drafts, fictional catalogue, no API calls.');
   console.log('First pass:', initial.status, '(ambiguous variant and delivery price require clarification)');
   if (initial.status !== 'needs') throw new Error('Expected clarification');
-  const result = await drafts.order({ ...draft, lines: [{ query: 'Amber hand wash 250 ml', quantity: 2 }], shippingPrice: 8 }, { ...context, revision: 2 }, '2026-01-15');
+  const result = await drafts.order({ ...draft, lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 8 }, { ...context, revision: 2 }, '2026-01-15');
   if (result.status !== 'ready') throw new Error(`Unexpected result: ${result.status}`);
   console.log('Resolved order:', result.order.lines.map(l => `${l.quantity} × ${l.name} (${l.discountPercent}% discount)`).join('; '));
   console.log('Totals:', result.totals);

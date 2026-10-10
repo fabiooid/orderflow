@@ -31,7 +31,7 @@
 
 Operators describe an order in plain language in an internal Telegram group, in Italian or English:
 
-> *Due Amber hand wash 250 ml per Example Studio, sconto 10%, spedizione 8 euro*
+> *Due Pebble hand wash 250 ml per Example Studio, sconto 10%, spedizione 8 euro*
 
 OrderFlow then:
 
@@ -43,7 +43,7 @@ OrderFlow then:
 
 Operators can also send **voice notes**, **photos and screenshots**, **PDFs** and **forwarded customer messages**. Voice notes are transcribed (the transcript is shown with the reply); images and PDFs are read into text for the agent, kept apart from the operator's own words. Media sent without a caption gets a *Preparo un ordine da questo?* question with yes/no buttons, so nothing is read or charged until someone says yes. Several photos sent together as an album are handled as one message. Media files are not stored; only the text read from them is.
 
-It can also create new customers (with duplicate checks) and answer catalogue questions, such as `@your_bot quali varianti di Sapone Zenzero abbiamo?`
+It can also create new customers (with duplicate checks) and answer catalogue questions, such as `@your_bot quali varianti di Sapone di Esempio abbiamo?`
 
 The agent can consult a resolved customer's recent orders through the read-only `getCustomerOrderHistory` tool in Telegram and Studio (five orders by default, at most twenty). It uses history to ask better product/size questions and compare past prices, citing the order number and date. Previous prices and discounts never become automatic defaults. A failed lookup is reported as unavailable rather than as an empty order history.
 
@@ -85,7 +85,7 @@ npm run orderform:import -- path/to/clean-price-list.pdf --id my-form           
 
 The import maps each fill-in cell to a catalogue product using printed codes and the form's own printed notes. Review each generated file, then list it in your business config under `orderForms` (paths are fine). The importer reads Fatture in Cloud without writing records. Templates describe your business, so keep them out of git (`private/` is ignored). When the printed form changes, import it again.
 
-When a photo or scanned image arrives, OrderFlow turns it upright, recognises the form, enlarges small scans and reads it **twice** at full image detail. The two readings are compared by product: agreed quantities are used and disagreements become questions. Another reading preserves customer details, delivery instructions, visible unit prices and notes. PDFs are always rendered as complete pages (including text, images and overlays), with or without templates; the limit is ten pages per request and 2400 pixels on the longest PDF-page edge. JPEG, PNG, WebP, static GIF and TIFF are normalized into page images; multi-page TIFF is supported. Animated images are rejected. Overlong readings are rejected instead of silently truncated. Two readings can still make the same mistake; check the summary against the original. `npm run eval:orderforms` measures accuracy on forms with known answers (see [EVALS.md](EVALS.md)).
+When a photo or scanned image arrives, OrderFlow turns it upright, recognises the form, enlarges small scans and reads it **twice** at full image detail. The two readings are compared by product: agreed quantities are used and disagreements become questions. Another reading preserves customer details, delivery instructions, visible unit prices and notes. PDFs are always rendered as complete pages (including text, images and overlays), with or without templates; the limit is ten pages per request and 2400 pixels on the longest PDF-page edge. JPEG, PNG, WebP, static GIF and TIFF are normalized into page images; multi-page TIFF is supported. Animated images are rejected. Overlong readings are rejected instead of silently truncated. Two readings can still make the same mistake; check the summary against the original. `npm run eval:orderforms` measures accuracy on forms with known answers (see [docs/evals.md](docs/evals.md)).
 
 Document reading lives in `src/documents` behind a replaceable `DocumentProvider`. It returns page text and raw template-cell observations; OrderFlow resolves catalogue IDs afterwards. The current provider uses direct vision and always marks its output as requiring review. See [ADR 0001](docs/decisions/0001-document-reading.md) for the boundary, limitations and planned comparison with a document-AI provider.
 
@@ -165,7 +165,7 @@ npm run connections:check     # read-only checks of bot, group, company, catalog
 npm run telegram:start        # start the poller (Ctrl+C to stop gracefully)
 ```
 
-Talk to the bot naturally in the configured group: "prepara un ordine per Example Studio, 2 Amber 250", "this order but change the client to Northwind", "crea il cliente Bottega Verde". There are no slash commands. The agent works out what you mean, uses the order and customer APIs, and asks when something is missing. Each draft is shown as a 📝 draft order or 👤 new-customer template, with buttons to pick a product or customer when several fit. Saving happens only when someone presses **✅ Conferma e salva** under the latest summary; every change needs a new confirmation.
+Talk to the bot naturally in the configured group: "prepara un ordine per Example Studio, 2 Pebble 250", "this order but change the client to Northwind", "crea il cliente Fable Goods". There are no slash commands. The agent works out what you mean, uses the order and customer APIs, and asks when something is missing. Each draft is shown as a 📝 draft order or 👤 new-customer template, with buttons to pick a product or customer when several fit. Saving happens only when someone presses **✅ Conferma e salva** under the latest summary; every change needs a new confirmation.
 
 The group has one open request at a time. Starting another lists the open ones with a button to cancel them. Say "lascia stare" (or similar) to cancel the open request, or use its ❌ button. The agent declines topics unrelated to orders and customers.
 
@@ -175,7 +175,7 @@ The agent replies in the language of the operator's latest message; the applicat
 
 **If a delivery is uncertain** (for example, Telegram timed out), the poller stops instead of resending. Check the group, then run `npm run telegram:recover`. CONNECTIONS.md describes the steps.
 
-**If a Fatture in Cloud save is uncertain**, keep the request blocked and use the operator-only [write recovery runbook](RECOVERY.md). Recovery records evidence locally; it never creates or sends anything itself.
+**If a Fatture in Cloud save is uncertain**, keep the request blocked and use the operator-only [write recovery runbook](docs/recovery.md). Recovery records evidence locally; it never creates or sends anything itself.
 
 ## Scripts
 
@@ -234,7 +234,7 @@ Six Mastra scorers are included:
 - context retention
 - user-reported mistakes
 
-They run in the background on model runs and on delivered Telegram replies, and they never affect saves or replies. Set `EVALS_ENABLED=false` to score manually only. See **[EVALS.md](EVALS.md)** for what each score means and its limits.
+They run in the background on model runs and on delivered Telegram replies, and they never affect saves or replies. Set `EVALS_ENABLED=false` to score manually only. See **[docs/evals.md](docs/evals.md)** for what each score means and its limits.
 
 ## Project status
 
@@ -263,7 +263,7 @@ OrderFlow is in **foundation / pre-pilot** stage.
 - [ ] Live-model accuracy evaluation
 - [ ] Hosting, plus authentication for a deployed server
 
-Offline tests use fictional data and injected transports. **They do not show live-model accuracy or prove behavior against a real account.** The longer-term design is in [IMPLEMENTATION-PROPOSAL.md](IMPLEMENTATION-PROPOSAL.md).
+Offline tests use fictional data and injected transports. **They do not show live-model accuracy or prove behavior against a real account.** The longer-term design notes are in [docs/planning/implementation-proposal.md](docs/planning/implementation-proposal.md). Rules for keeping the core generic are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Contributing
 
@@ -287,4 +287,4 @@ Never paste tokens into Telegram, issues or pull requests.
 
 ## JEV data selection
 
-JEV product/customer identity resolution is shared by Telegram and Studio. `JEV_MODE=off` preserves legacy matching, `shadow` records judgments without applying them, and `on` applies validated selections before preparation and on clarification resumes. See [JEV.md](JEV.md) for configuration, explicit choices and `npm run eval:matching:workflow`; [the implementation plan](JEV-IMPLEMENTATION-PLAN.md) tracks historical-order selection and rollout.
+JEV product/customer identity resolution is shared by Telegram and Studio. `JEV_MODE=off` preserves legacy matching, `shadow` records judgments without applying them, and `on` applies validated selections before preparation and on clarification resumes. See [docs/jev.md](docs/jev.md) for configuration and `npm run eval:matching:workflow`. Historical rollout notes are in [docs/planning/jev-implementation-plan.md](docs/planning/jev-implementation-plan.md).

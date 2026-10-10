@@ -22,7 +22,7 @@ async function main() {
     }
     const query = fixture.request.query;
     const draft = draftSchema.parse({ clientQuery: fixture.request.kind === 'client' ? query : 'Example Studio',
-      lines: [{ query: fixture.request.kind === 'product' ? query : 'Amber hand wash 250 ml', quantity: 2 }], shippingPrice: 8 });
+      lines: [{ query: fixture.request.kind === 'product' ? query : 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 8 });
     const text = `Prepare an order for ${draft.clientQuery}: ${draft.lines[0]!.query}, two pieces; delivery eight euros.`;
     const drafts = createDraftApi(app, connector, createIdentityResolver(app, connector, { config: matching }));
     const outcome = await drafts.order(draft, { orderId: `eval-${fixture.name}`, revision: 1, operatorText: text }, '2026-10-08');

@@ -5,8 +5,8 @@ import { preparedOrderSchema, type Client, type ClientOrder, type NewCustomer, t
 /** Fictional in-memory service. Never contacts Fatture in Cloud. */
 export class DemoConnector implements OrderConnector {
   readonly products: Product[] = [
-    { id: 101, code: 'DEMO-A', name: 'Amber hand wash 250 ml', description: '', netPrice: 12 },
-    { id: 102, code: 'SAMPLE-A', name: 'Amber hand wash 250 ml sample', description: '', netPrice: 4 },
+    { id: 101, code: 'DEMO-A', name: 'Pebble hand wash 250 ml', description: '', netPrice: 12 },
+    { id: 102, code: 'SAMPLE-A', name: 'Pebble hand wash 250 ml sample', description: '', netPrice: 4 },
     { id: 103, code: 'DEMO-B', name: 'Linen candle 200 g', description: '', netPrice: 20 },
     { id: 900, code: 'DELIVERY', name: 'Delivery', description: '', netPrice: 8 },
   ];

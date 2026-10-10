@@ -14,7 +14,7 @@ import { draftSchema, type ClientOrder } from '../src/domain/types.js';
 import { orderPreview } from '../src/telegram/preview.js';
 import { draft, prepared } from './helpers.js';
 
-const tradeForm = { schemaVersion: 1, id: 'trade-list', name: 'Trade list', priceTier: 'trade', columns: [{ id: 'order', heading: 'Order', value: 'quantity' }], rows: [{ code: 'DEMO-A', label: 'Amber', cells: { order: { productId: 101, netPrice: 15 } } }] };
+const tradeForm = { schemaVersion: 1, id: 'trade-list', name: 'Trade list', priceTier: 'trade', columns: [{ id: 'order', heading: 'Order', value: 'quantity' }], rows: [{ code: 'DEMO-A', label: 'Pebble', cells: { order: { productId: 101, netPrice: 15 } } }] };
 const tiered = (clientIds = [201]) => configSchema.parse({ ...structuredClone(example), priceTiers: [{ id: 'trade', name: 'Trade', clientIds }], orderForms: [tradeForm] });
 const prepare = (input: Partial<ReturnType<typeof draft>>, config = tiered()) => prepareOrder(draftSchema.parse({ ...draft(), ...input }), config, new DemoConnector(), '2026-01-15');
 
@@ -28,13 +28,13 @@ describe('price tiers', () => {
     expect(other.ready && other.order.priceTier).toBeUndefined();
   });
   it('lets a stated price, or an explicit standard tier, win', async () => {
-    const stated = await prepare({ lines: [{ query: 'Amber hand wash 250 ml', quantity: 2, netPrice: 9 }] });
+    const stated = await prepare({ lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2, netPrice: 9 }] });
     expect(stated.ready && stated.order.lines[0]?.netPrice).toBe(9);
     const standard = await prepare({ priceTier: 'standard' });
     expect(standard.ready && standard.order.lines[0]?.netPrice).toBe(12);
   });
   it('does not require template prices, but asks about explicitly requested unsupported price lists', async () => {
-    const missing = await prepare({ lines: [{ query: 'Amber hand wash 250 ml', quantity: 2 }, { query: 'Linen candle 200 g', quantity: 1 }] });
+    const missing = await prepare({ lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }, { query: 'Linen candle 200 g', quantity: 1 }] });
     expect(missing.ready && missing.order.lines[1]?.netPrice).toBe(20);
     const unknown = await prepare({ priceTier: 'wholesale' });
     expect(!unknown.ready && unknown.issues.map(i => i.field)).toEqual(['priceTier']);
@@ -66,23 +66,23 @@ describe('price tiers', () => {
 
 it('offers exactly the named products for an "A oppure B" line', async () => {
   const products = await new DemoConnector().listProducts();
-  expect(namedAlternatives('da chiarire (A1, order): Amber hand wash 250 ml oppure Linen candle 200 g', products).map(p => p.id)).toEqual([101, 103]);
-  expect(namedAlternatives('Amber hand wash 250 ml or something else', products)).toEqual([]);
-  const result = await prepare({ lines: [{ query: 'Amber hand wash 250 ml oppure Linen candle 200 g', quantity: 1 }] }, tiered([]));
-  expect(!result.ready && result.issues[0]?.candidates).toEqual([{ id: 101, label: 'Amber hand wash 250 ml' }, { id: 103, label: 'Linen candle 200 g' }]);
+  expect(namedAlternatives('da chiarire (A1, order): Pebble hand wash 250 ml oppure Linen candle 200 g', products).map(p => p.id)).toEqual([101, 103]);
+  expect(namedAlternatives('Pebble hand wash 250 ml or something else', products)).toEqual([]);
+  const result = await prepare({ lines: [{ query: 'Pebble hand wash 250 ml oppure Linen candle 200 g', quantity: 1 }] }, tiered([]));
+  expect(!result.ready && result.issues[0]?.candidates).toEqual([{ id: 101, label: 'Pebble hand wash 250 ml' }, { id: 103, label: 'Linen candle 200 g' }]);
 });
 
 describe('previous orders', () => {
   const earlier = (number: string, date: string, lines: Partial<ClientOrder['lines'][number]>[]): ClientOrder =>
     ({ id: Number(number), number, date, lines: lines.map(l => ({ code: '', name: '', quantity: 1, netPrice: 0, discountPercent: 0, ...l })) });
   it('compares unit prices after discount with the latest paid line, skipping free ones', async () => {
-    const order = await prepared(); // Amber at €12 with 10% off, delivery at €8 with no discount.
+    const order = await prepared(); // Pebble at €12 with 10% off, delivery at €8 with no discount.
     const found = priceDiscrepancies(order, [
       earlier('9', '2026-01-10', [{ productId: 101, netPrice: 0 }, { productId: 900, netPrice: 8 }]),
       earlier('8', '2025-12-01', [{ productId: 101, netPrice: 12, discountPercent: 20 }]),
       earlier('7', '2025-11-01', [{ productId: 101, netPrice: 30 }]),
     ]);
-    expect(found).toEqual([{ name: 'Amber hand wash 250 ml', now: 10.8, before: 9.6, order: { number: '8', date: '2025-12-01' } }]);
+    expect(found).toEqual([{ name: 'Pebble hand wash 250 ml', now: 10.8, before: 9.6, order: { number: '8', date: '2025-12-01' } }]);
   });
   it('shows price differences from earlier orders in the summary without blocking it', async () => {
     const order = await prepared();

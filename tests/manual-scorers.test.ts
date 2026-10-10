@@ -63,15 +63,15 @@ it('grades the final prose while carrying language preference and API provenance
   const api = message('tool', 'assistant', '');
   api.content.parts.push({ type: 'tool-invocation', toolInvocation: {
     state: 'result', toolCallId: 'lookup', toolName: 'searchProducts', args: { query: 'ginger' },
-    result: [{ name: 'Sapone Zenzero', address: 'Via Roma 1' }],
+    result: [{ name: 'Sapone di Esempio', address: 'Via Roma 1' }],
   } });
   const history = [message('u1', 'user', 'Please reply in English'), api];
   await createManualScorers(tools).languageConsistency.run({
     input: input([message('u2', 'user', 'ok')], history),
-    output: [message('a', 'assistant', 'Available: Sapone Zenzero.')],
+    output: [message('a', 'assistant', 'Available: Sapone di Esempio.')],
   });
   const call = observed.calls[0]!;
-  expect(call.run.output).toBe('Available: Sapone Zenzero.');
+  expect(call.run.output).toBe('Available: Sapone di Esempio.');
   expect(call.run.input).toContain('Please reply in English');
   expect(call.run.input).toContain('"apiAndToolEvidence":[{"type":"tool-invocation"');
   expect(call.options.criteria[0].description).toContain('Ignore ALL content copied from APIs');
