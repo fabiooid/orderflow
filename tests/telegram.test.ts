@@ -1,14 +1,14 @@
 import { expect, it } from 'vitest';
-import { normalizeCallback, normalizeMessage } from '../src/telegram/adapter.js';
-import { routeMessage, type RoutingContext } from '../src/telegram/routing.js';
-import type { Conversation } from '../src/telegram/store.js';
+import { normalizeCallback, normalizeMessage } from '../src/channels/telegram/adapter.js';
+import { routeMessage, type RoutingContext } from '../src/channel/routing.js';
+import type { Conversation } from '../src/channel/store.js';
 import { draftSchema } from '../src/domain/types.js';
 import { config } from './helpers.js';
 const update = () => ({ update_id: 1, message: { message_id: 2, chat: { id: -1000000000001, type: 'supergroup' }, from: { id: 5, is_bot: false }, text: 'two notebooks' } });
 const event = () => normalizeMessage(update(), config())!;
 const conv = (orderId: string, revision: number): Conversation => ({ orderId, revision, status: 'ready', draft: draftSchema.parse({}), policy: '' });
 const ctx = (extra: Partial<RoutingContext> = {}): RoutingContext => ({ config: config(), botUsername: 'demo_bot', ...extra });
-const everything = () => { const c = config(); c.telegram.respondToAllMessages = true; return c; };
+const everything = () => { const c = config(); c.channel.respondToAllMessages = true; return c; };
 
 it('accepts any human member of the configured group, rejects other chats and bots', () => {
   expect(normalizeMessage(update(), config())?.senderId).toBe('5');

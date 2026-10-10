@@ -5,8 +5,8 @@ import { mixedPdf } from './pdf-fixture.js';
 import { describe, expect, it, vi } from 'vitest';
 import type { z } from 'zod';
 import { configSchema, type OrderForm } from '../src/config/schema.js';
-import { documentTemplates, createOrderFormWorkflow, formText, identify, readForm, scannedPages, type Vision } from '../src/telegram/order-forms.js';
-import { createMediaReader, type Read } from '../src/telegram/media.js';
+import { documentTemplates, createOrderFormWorkflow, formText, identify, readForm, scannedPages, type Vision } from '../src/channel/order-forms.js';
+import { createMediaReader, type Read } from '../src/channel/media.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import example from '../config/example.json';
 
@@ -126,7 +126,7 @@ it('reads configured forms against their template and passes other images to the
   }) as unknown as Vision;
   const read = vi.fn<Read>(async (_files, contextOnly) => contextOnly ? 'Example Studio; consegna Via Nuova 2; sconto 10%' : 'Ciao, vorrei due candele');
   const media = createMediaReader(config, new DemoConnector(), async id => new Uint8Array(files[id]!), { documents: createVisionDocumentProvider({ read, templates: directTemplatePages(documentTemplates(config.orderForms), vision) }) });
-  const result = await media({ updateId: 1, groupId: config.telegram.groupId, senderId: '5', messageId: 1, text: '', attachments: [
+  const result = await media({ updateId: 1, groupId: config.channel.groupId, senderId: '5', messageId: 1, text: '', attachments: [
     { kind: 'image', fileId: 'form', mimeType: 'image/jpeg' }, { kind: 'image', fileId: 'photo', mimeType: 'image/jpeg' },
   ] });
   expect(result.text).toContain('4 × Pebble hand wash 250 ml [productId 101]');
@@ -145,7 +145,7 @@ it('routes complete rendered PDF pages through templates and retains other pages
     : { image });
   const read = vi.fn(async (_files: { data: Uint8Array; mimeType: string }[], contextOnly?: boolean) => contextOnly ? 'Ship to Fictional Road; DEMO-A net unit price EUR 9' : 'Customer instructions on page two');
   const media = createMediaReader(config, new DemoConnector(), async () => mixedPdf(), { documents: createVisionDocumentProvider({ templates: forms, read }) });
-  const result = await media({ updateId: 1, groupId: config.telegram.groupId, senderId: '5', messageId: 1, text: '', attachments: [{ kind: 'pdf', fileId: 'fixture', mimeType: 'application/pdf' }] });
+  const result = await media({ updateId: 1, groupId: config.channel.groupId, senderId: '5', messageId: 1, text: '', attachments: [{ kind: 'pdf', fileId: 'fixture', mimeType: 'application/pdf' }] });
   expect(forms).toHaveBeenCalledTimes(2);
   expect(read).toHaveBeenCalledTimes(2);
   expect(read.mock.calls.every(([files]) => files.length === 1 && files[0]?.mimeType === 'image/png')).toBe(true);

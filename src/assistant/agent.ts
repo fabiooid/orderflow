@@ -22,7 +22,7 @@ import { liveAgentScorers, type LiveEvalSettings } from './live-evals.js';
 
 /** The shared Mastra memory of one Telegram group: its conversation thread and the resource holding learned aliases. */
 export function groupMemory(config: AppConfig) {
-  const resource = `${config.deploymentId}:telegram:${config.telegram.groupId}`;
+  const resource = `${config.deploymentId}:${config.channel.provider}:${config.channel.groupId}`;
   return { resource, thread: `${resource}:chat` };
 }
 

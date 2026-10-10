@@ -6,7 +6,7 @@ import { AISDKTranscription } from '@mastra/core/voice';
 import { translate, type AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
 import { normalize } from '../domain/matching.js';
-import { MAX_FILE_BYTES, type Attachment, type MessageEvent } from './adapter.js';
+import { MAX_FILE_BYTES, type Attachment, type MessageEvent } from './contract.js';
 import { formText, documentForms } from './order-forms.js';
 import type { DocumentProvider } from '../documents/contract.js';
 import { READER_INSTRUCTIONS } from '../documents/vision.js';

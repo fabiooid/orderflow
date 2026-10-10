@@ -1,7 +1,7 @@
 import { createClient, type Client } from '@libsql/client';
 import type { Issue, OrderDraft, PreparedOrder, Totals, SavedOrder } from '../domain/types.js';
 import type { ConfirmedChoice, Decision } from '../matching/resolver.js';
-import type { MessageEvent, OrderLink } from './adapter.js';
+import type { MessageEvent, OrderLink } from './contract.js';
 import type { AppConfig } from '../config/schema.js';
 import type { ConnectorMode } from '../config/load.js';
 /** Requests stored before customer requests existed have no kind: they are orders. */
@@ -12,12 +12,12 @@ export const appendSource = (source: string | undefined, text: string) => [sourc
 export type Conversation = { confirmedChoices?: ConfirmedChoice[]; sourceText?: string; matchingDecisions?: Decision[]; locale?: AppConfig['locale']; orderId: string; startedBy?: string; startedAt?: string; kind?: 'customer'; revision: number; status: 'new' | 'suspended' | 'ready' | 'reviewed' | 'saving' | 'saved' | 'cancelled'; prepared?: PreparedOrder; totals?: Totals; savedOrder?: SavedOrder; draft: OrderDraft; issues?: Issue[]; policy: string };
 // Local state locations. Scopes include the mode so fictional state stays separate from account data.
 export const TELEGRAM_STATE_URL = 'file:.data/telegram.db';
-export const telegramScopePrefix = (config: AppConfig, mode: ConnectorMode) => `${config.deploymentId}:${config.telegram.groupId}:${mode}:`;
+export const telegramScopePrefix = (config: AppConfig, mode: ConnectorMode) => `${config.deploymentId}:${config.channel.groupId}:${mode}:`;
 export const telegramMemoryUrl = (config: AppConfig, mode: ConnectorMode) => `file:.data/telegram-${config.deploymentId}-${mode}.db`;
 export const pollerLockPath = (config: AppConfig) => `.data/telegram-${config.deploymentId}.lock`;
 /** Stable application-owned prefix for journaled writes; changing it would orphan stored journal entries. */
 export function journalKey(config: AppConfig, conversationId: string) {
-  return `${config.deploymentId}:${config.companyId}:${config.telegram.groupId}:${conversationId}`;
+  return `${config.deploymentId}:${config.companyId}:${config.channel.groupId}:${conversationId}`;
 }
 export type ReplyPlan ={ locale?: AppConfig['locale']; incomingText?: string; senderId?: string; receivedAt?: string; texts: string[];
   /** The agent's own words within `texts`; the rest was written by the application (drafts, summaries, confirmations). */

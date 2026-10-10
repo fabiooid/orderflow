@@ -1,7 +1,7 @@
 import { connectorMode, loadAppConfig } from '../src/config/load.js';
-import { TelegramApi } from '../src/telegram/api.js';
-import { TELEGRAM_STATE_URL, TelegramStore, pollerLockPath, telegramScopePrefix } from '../src/telegram/store.js';
-import { acquirePollerLock } from '../src/telegram/lock.js';
+import { TelegramApi } from '../src/channels/telegram/api.js';
+import { TELEGRAM_STATE_URL, TelegramStore, pollerLockPath, telegramScopePrefix } from '../src/channel/store.js';
+import { acquirePollerLock } from '../src/channels/telegram/lock.js';
 async function main() {
   const [idText, action, messageText] = process.argv.slice(2);
   const id = Number(idText); const message = Number(messageText);

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { customerPreview, orderDraft, orderPreview, pickable } from '../src/telegram/preview.js';
+import { customerPreview, orderDraft, orderPreview, pickable } from '../src/channel/preview.js';
 import { draftSchema } from '../src/domain/types.js';
 import { prepared } from './helpers.js';
 

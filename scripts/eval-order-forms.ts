@@ -5,8 +5,8 @@ import { runEvals } from '@mastra/core/evals';
 import { z } from 'zod';
 import { loadAppConfig } from '../src/config/load.js';
 import { orderFormScorers } from '../src/assistant/order-form-scorers.js';
-import { createMediaAgents, modelVision } from '../src/telegram/media.js';
-import { createOrderFormWorkflow, scannedPages } from '../src/telegram/order-forms.js';
+import { createMediaAgents, modelVision } from '../src/channel/media.js';
+import { createOrderFormWorkflow, scannedPages } from '../src/channel/order-forms.js';
 
 /**
  * Runs the `read-order-form` workflow on filled-in forms whose correct order is known and scores it with Mastra

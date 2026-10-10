@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { checkConnections, type HealthPorts } from '../src/health/check.js';
-import { TelegramApi } from '../src/telegram/api.js';
+import { TelegramApi } from '../src/channels/telegram/api.js';
 import { config } from './helpers.js';
 function ports(): HealthPorts {
   return { telegram: async () => ({ member: true, canSend: true, polling: true }), company: async () => true,

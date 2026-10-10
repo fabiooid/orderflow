@@ -1,6 +1,6 @@
 import { loadAppConfig } from '../src/config/load.js';
 import { FattureInCloudConnector } from '../src/connector/fatture-in-cloud.js';
-import { TelegramApi } from '../src/telegram/api.js';
+import { TelegramApi } from '../src/channels/telegram/api.js';
 import { liveHealthPorts } from '../src/health/ports.js';
 async function main() {
   const [flag, value] = process.argv.slice(2);
@@ -13,7 +13,7 @@ async function main() {
   const order = await connector.getOrder(id);
   if (!order.url) throw new Error();
   // No order write, no customer email, no model-supplied URL or destination.
-  await new TelegramApi(process.env.TELEGRAM_BOT_TOKEN ?? '').sendOrderPdf(config.telegram.groupId, order.url, `Order ${order.number} — internal review`);
+  await new TelegramApi(process.env.TELEGRAM_BOT_TOKEN ?? '').sendOrderPdf(config.channel.groupId, order.url, `Order ${order.number} — internal review`);
   console.log('Existing order PDF posted to the configured internal group. No order modified or customer email sent.');
 }
 main().catch(() => {

@@ -1,5 +1,5 @@
 import type { AppConfig } from '../config/schema.js';
-import type { MessageEvent, OrderLink } from './adapter.js';
+import type { MessageEvent, OrderLink } from './contract.js';
 import type { Conversation } from './store.js';
 
 /** Everything the controller can do in response to a message or button. */
@@ -38,7 +38,7 @@ export function asksFirst(event: MessageEvent, ctx: Pick<RoutingContext, 'config
   const files = event.attachments ?? [];
   if (!files.length || event.text.trim() || ctx.link) return false;
   const spoken = files.every(f => f.kind === 'voice');
-  return !(spoken && (ctx.config.telegram.respondToAllMessages || (ctx.active !== undefined && event.replyTo === undefined)));
+  return !(spoken && (ctx.config.channel.respondToAllMessages || (ctx.active !== undefined && event.replyTo === undefined)));
 }
 
 /** Decides only whether a message is for the agent; what it means is the agent's job. */
@@ -46,7 +46,7 @@ export function routeMessage(event: MessageEvent, ctx: RoutingContext): Action {
   const { config, link, linked, active } = ctx;
   if (link && linked && linked.revision !== link.revision) return { kind: 'stale' };
   const mention = new RegExp(`(^|\\s)@${ctx.botUsername}\\b`, 'i');
-  const addressed = Boolean(link) || mention.test(event.text) || config.telegram.respondToAllMessages || (active !== undefined && event.replyTo === undefined);
+  const addressed = Boolean(link) || mention.test(event.text) || config.channel.respondToAllMessages || (active !== undefined && event.replyTo === undefined);
   // Forwarded customer messages and files are rarely chat between colleagues: ask rather than drop them.
   if (!addressed) return event.attachments?.length || event.forwardedFrom ? { kind: 'prompt' } : { kind: 'ignore' };
   const clean = (text: string) => text.replace(mention, ' ').trim();

@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
 import { traceOperation } from '../assistant/execution-trace.js';
 import { translate, type AppConfig } from '../config/schema.js';
-import { callbackData, mediaCallbackData, normalizeCallback, normalizeMessage, pickData, type MessageEvent } from './adapter.js';
+import { callbackData, mediaCallbackData, pickData } from './callbacks.js';
+import { inboundOf } from './inbound.js';
+import type { MessageEvent, Keyboard } from './contract.js';
 import { asksFirst, routeMessage, type Action } from './routing.js';
 import { kindOf, TelegramStore, type Conversation, type PlanEffects, type ReplyPlan } from './store.js';
 import { MediaError, type MediaReader, type ReadMedia } from './media.js';
-import type { Keyboard } from './api.js';
 import { draftSchema, type SavedOrder } from '../domain/types.js';
 import { MAX_CHOICES } from '../domain/matching.js';
 import { lineIndex, pickable } from './preview.js';
@@ -85,7 +86,7 @@ export class TelegramController {
     if (!Number.isSafeInteger(id) || id < 0) throw new Error('Invalid update identifier');
     let entry = await this.store.update(id);
     this.locale = entry?.plan.locale ?? await this.store.locale() ?? this.config.locale;
-    const callback = normalizeCallback(update, this.config);
+    const callback = inboundOf().parseCallback(update, this.config);
     if (callback) await this.buttons?.answer(callback.id).catch(() => undefined);
     if (!entry) {
       let event: MessageEvent | null;
@@ -131,10 +132,10 @@ export class TelegramController {
         event = callback.event; action = callback.action;
         loaded.active = await this.store.activeRequest();
       } else {
-        event = normalizeMessage(update, this.config);
+        event = inboundOf().parseMessage(update, this.config);
         if (!event) { await this.store.advance(id + 1); return; }
         const original = event;
-        const parts = album.map(u => normalizeMessage(u, this.config)).filter((p): p is MessageEvent => p !== null && p.album === original.album);
+        const parts = album.map(u => inboundOf().parseMessage(u, this.config)).filter((p): p is MessageEvent => p !== null && p.album === original.album);
         event = withAlbum(event, parts);
         effects.absorbed = parts.map(p => p.updateId);
         // A late album part joins its unanswered question instead of asking again.
@@ -172,7 +173,7 @@ export class TelegramController {
       await this.store.plan(id, { replyTo: event.messageId, ...reply, activeOrderId: loaded.active?.orderId, locale: this.locale, incomingText: event.text, senderId: event.senderId, receivedAt: new Date().toISOString() }, effects);
       entry = (await this.store.update(id))!;
     }
-    if (entry.sending) throw new Error(`Telegram delivery uncertain for update ${id}. Use telegram:recover after inspecting the group.`);
+    if (entry.sending) throw new Error(`Channel delivery uncertain for update ${id}. Use telegram:recover after inspecting the group.`);
     while (!entry.done) {
       await this.store.beginSend(id);
       const text = entry.plan.texts[entry.next];

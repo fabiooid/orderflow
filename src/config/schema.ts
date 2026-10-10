@@ -1,5 +1,21 @@
 import { z } from 'zod';
 
+const telegramChannelSchema = z.object({
+  provider: z.literal('telegram'),
+  groupId: z.string().regex(/^-\d+$/),
+  access: z.literal('all-group-members'),
+  respondToAllMessages: z.boolean().default(false),
+}).strict();
+
+/** Accepts the older top-level `telegram` object by folding it into `channel`. */
+function liftChannel(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const record = value as Record<string, unknown>;
+  if (record.channel || !record.telegram || typeof record.telegram !== 'object') return value;
+  const { telegram, ...rest } = record;
+  return { ...rest, channel: { provider: 'telegram', ...(telegram as object) } };
+}
+
 const country = z.string().regex(/^[A-Z]{2}$/);
 const positiveId = z.number().int().positive();
 const vatRuleSchema = z.object({
@@ -46,7 +62,7 @@ export const orderFormSchema = z.object({
 });
 export type OrderForm = z.infer<typeof orderFormSchema>;
 
-export const configSchema = z.object({
+const configObject = z.object({
   schemaVersion: z.literal(1),
   deploymentId: z.string().regex(/^[a-z0-9-]+$/),
   policyVersion: z.string().min(1),
@@ -54,11 +70,8 @@ export const configSchema = z.object({
   locale: z.enum(['it', 'en']),
   currency: z.literal('EUR'),
   priceBasis: z.literal('net'),
-  telegram: z.object({
-    groupId: z.string().regex(/^-\d+$/),
-    access: z.literal('all-group-members'),
-    respondToAllMessages: z.boolean().default(false),
-  }).strict(),
+  /** Which conversation to join. Add a provider by extending this object. */
+  channel: telegramChannelSchema,
   orderSavingEnabled: z.boolean().default(false),
   shipping: z.object({ productId: positiveId, discountByDefault: z.boolean() }).strict(),
   clients: z.object({
@@ -102,6 +115,8 @@ export const configSchema = z.object({
     }
   }
 });
+
+export const configSchema = z.preprocess(liftChannel, configObject);
 
 export type AppConfig = z.infer<typeof configSchema>;
 
