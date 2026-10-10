@@ -5,7 +5,7 @@ export const selectionRequestSchema = z.object({
   query: z.string().trim().min(1).max(4000),
   context: z.string().max(12000).optional(),
   candidates: z.array(z.object({
-    id: z.number().int().positive(),
+    id: z.string().min(1),
     name: z.string().min(1).max(500),
     aliases: z.array(z.string().max(160)).max(500).optional(),
     code: z.string().max(200).optional(),
@@ -23,12 +23,12 @@ export type Candidate = SelectionRequest['candidates'][number];
 export type SelectionResult = {
   status: 'matched' | 'ambiguous' | 'no-match' | 'unavailable';
   /** This is a read-only judgment, not permission to mutate a draft or learn an alias. */
-  selectedId?: number;
-  clarificationIds?: number[];
+  selectedId?: string;
+  clarificationIds?: string[];
   reason?: 'disabled' | 'incomplete-retrieval' | 'invalid-input' | 'invalid-response' | 'service-unavailable';
   evidence: {
     strategy?: string;
-    groups?: { candidateCount: number; candidateHash: string; reason?: string; status: SelectionResult['status']; selectedId?: number; evidence: Pick<SelectionResult['evidence'], 'requestHash' | 'promptVersion' | 'model' | 'elapsedMs'> }[];
+    groups?: { candidateCount: number; candidateHash: string; reason?: string; status: SelectionResult['status']; selectedId?: string; evidence: Pick<SelectionResult['evidence'], 'requestHash' | 'promptVersion' | 'model' | 'elapsedMs'> }[];
     requestHash: string;
     promptVersion: string;
     model?: string;

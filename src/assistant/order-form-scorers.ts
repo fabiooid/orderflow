@@ -8,7 +8,7 @@ type Output = { lines?: FormLine[] };
 function compare(output: Output | undefined, expected: Expected | undefined) {
   const sure = (output?.lines ?? []).filter(l => l.kind === 'sure');
   const wrong = sure.filter(l => expected?.[l.productId] !== l.quantity);
-  const right = Object.entries(expected ?? {}).filter(([id, quantity]) => sure.some(l => l.productId === Number(id) && l.quantity === quantity));
+  const right = Object.entries(expected ?? {}).filter(([id, quantity]) => sure.some(l => l.productId === id && l.quantity === quantity));
   const questions = (output?.lines ?? []).length - sure.length;
   return { sure, wrong, right, questions };
 }

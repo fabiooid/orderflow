@@ -6,11 +6,13 @@ OrderFlow is a reusable orders assistant. Business facts and vendor clients stay
 
 Product names, SKUs, prices, customer names, VAT numbers, addresses and shop wording belong in the operator's own config or in clearly fictional fixtures. Do not commit a real catalogue, a real order, or a prompt written for one shop.
 
-Italian e-invoicing fields (SDI, PEC, VAT nature codes) are generic capabilities an operator turns on in config. They are not one company's rules.
+Product, customer and order ids are opaque strings in the domain and on `OrderConnector`. An adapter converts its own id type at the boundary. Fatture in Cloud keeps numeric ids inside `src/connector/fatture-in-cloud.ts`.
+
+Italian e-invoicing is optional. SDI and PEC country lists live under `tax.italy` and are omitted when a deployment does not collect them. VAT type ids, nature codes and the shipping product id live in the invoicing provider block, not in the generic VAT rules.
 
 ## Adapters behind interfaces
 
-- Invoicing reads and writes go through `OrderConnector` in `src/connector/contract.ts`. `src/domain/` and `src/assistant/` do not import a vendor SDK.
+- Invoicing reads and writes go through `OrderConnector` in `src/connector/contract.ts`. Fatture in Cloud is `src/connector/fatture-in-cloud.ts`. Its company id and display name live under `invoicing` in config. `src/domain/` and `src/assistant/` do not import a vendor SDK.
 - Document reading goes through `DocumentProvider` in `src/documents/contract.ts`.
 - A messaging channel implements `ChannelAdapter` in `src/channel/contract.ts`. Telegram is `src/channels/telegram/`. Conversation state, previews and confirmation live in `src/channel/` and must not import an adapter.
 - Adding a channel or an invoicing backend is a new adapter folder plus config. It does not edit order preparation, totals or the confirmation flow.

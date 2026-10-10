@@ -11,7 +11,7 @@ import type { SelectMany } from '../src/matching/resolver.js';
 import { config, draft, message, press, prepared, stubEngine } from './helpers.js';
 
 const on = matchingConfigSchema.parse({ mode: 'on' });
-const judge: SelectMany = async requests => requests.map(r => ({ status: 'matched', selectedId: r.kind === 'client' ? 201 : 101,
+const judge: SelectMany = async requests => requests.map(r => ({ status: 'matched', selectedId: r.kind === 'client' ? '201' : '101',
   evidence: { requestHash: 'test', promptVersion: 'test', retrieval: r.retrieval, elapsedMs: 0 } } satisfies SelectionResult));
 const fresh = (kind: 'order' | 'customer'): Conversation => ({ orderId: 'new', revision: 0, status: 'new', ...(kind === 'customer' ? { kind } : {}), draft: draftSchema.parse({}), policy: config().policyVersion });
 
@@ -22,7 +22,7 @@ it('judges the operator words, never trusts model-written IDs, and settles a pic
   const selectMany = vi.fn(judge);
   // The scripted agent writes IDs of its own; the order API must replace them with judged ones.
   const converse = vi.fn<Converse>()
-    .mockImplementationOnce(async (_prompt, act) => { await act.order({ ...draft(), clientId: 202, lines: [{ query: 'small pebble wash', productId: 102 }] }); return { reply: '', locale: 'en' }; })
+    .mockImplementationOnce(async (_prompt, act) => { await act.order({ ...draft(), clientId: '202', lines: [{ query: 'small pebble wash', productId: '102' }] }); return { reply: '', locale: 'en' }; })
     .mockImplementationOnce(async (prompt, act) => { await act.order({ ...prompt.openRequest!.draft, lines: [{ ...prompt.openRequest!.draft.lines[0]!, quantity: 2 }] }); return { reply: '', locale: 'en' }; });
   const engine = createConversationEngine(c, new DemoConnector(), storage, { converse, matching: { config: on, selectMany } });
   let id = 100;
@@ -33,16 +33,16 @@ it('judges the operator words, never trusts model-written IDs, and settles a pic
     expect(selectMany.mock.calls[0]![0].every(r => r.context === original)).toBe(true);
     const first = await store.order('u1');
     expect(first?.status).toBe('suspended');
-    expect(first?.draft.lines[0]?.productId).toBe(101);
+    expect(first?.draft.lines[0]?.productId).toBe('101');
     await controller.handle(message(2, 'Make it two', 100));
     const next = await store.order('u1');
     expect(next?.status).toBe('ready');
-    expect(next?.prepared?.client.id).toBe(201);
+    expect(next?.prepared?.client.id).toBe('201');
     expect(next?.matchingDecisions).toHaveLength(2);
     expect(selectMany.mock.calls[1]![0][0]?.context).toContain('Make it two');
     await controller.handle(press(3, 'pick:u1:2:lines.0:101', 101));
     expect(converse).toHaveBeenCalledTimes(2);
-    expect((await store.order('u1'))?.draft.lines[0]?.productId).toBe(101);
+    expect((await store.order('u1'))?.draft.lines[0]?.productId).toBe('101');
     expect((await store.order('u1'))?.matchingDecisions?.find(d => d.field === 'lines.0')?.source).toBe('operator');
   } finally { await engine.shutdown(); store.close(); await storage.close(); }
 }, 20000);
@@ -90,9 +90,9 @@ it('finishes a customer request without offering creation when an existing custo
   const converse = vi.fn<Converse>();
   const engine = createConversationEngine(c, new DemoConnector(), storage, { converse, matching: { config: on, selectMany: judge } });
   try {
-    const result = await engine.revise({ orderId: 'existing', kind: 'customer', revision: 1, status: 'suspended', policy: c.policyVersion, draft: { ...draft(), newClient: { name: 'Example shop' } } }, { field: 'client', id: 201 });
+    const result = await engine.revise({ orderId: 'existing', kind: 'customer', revision: 1, status: 'suspended', policy: c.policyVersion, draft: { ...draft(), newClient: { name: 'Example shop' } } }, { field: 'client', id: '201' });
     expect(result.order.status).toBe('reviewed');
-    expect(result.order.draft.clientId).toBe(201);
+    expect(result.order.draft.clientId).toBe('201');
     expect(result.order.draft.newClient).toBeUndefined();
     expect(result.text).toContain('201');
     expect(converse).not.toHaveBeenCalled();

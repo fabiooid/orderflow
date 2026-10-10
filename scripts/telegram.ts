@@ -23,7 +23,7 @@ import { liveHealthPorts } from '../src/health/ports.js';
 async function main() {
   const config = await loadAppConfig();
   const mode = connectorMode();
-  const fic = (options?: { writesEnabled?: boolean; clientWritesEnabled?: boolean }) => FattureInCloudConnector.fromToken(config.companyId, process.env.FIC_ACCESS_TOKEN ?? '', options);
+  const fic = (options?: { writesEnabled?: boolean; clientWritesEnabled?: boolean }) => FattureInCloudConnector.fromToken(config.invoicing.companyId, process.env.FIC_ACCESS_TOKEN ?? '', options);
   const api = new TelegramApi(process.env.TELEGRAM_BOT_TOKEN ?? '');
   const me = await api.getMe();
   const ports = liveHealthPorts(config, process.env);

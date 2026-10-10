@@ -2,7 +2,12 @@
   "schemaVersion": 1,
   "deploymentId": "fictional-demo",
   "policyVersion": "demo-v1",
-  "companyId": 1,
+  "invoicing": {
+    "provider": "fatture-in-cloud",
+    "companyId": 1,
+    "shippingProductId": "900",
+    "vat": [{ "ruleId": "illustrative-domestic", "vatId": 1 }]
+  },
   "locale": "it",
   "currency": "EUR",
   "priceBasis": "net",
@@ -12,7 +17,6 @@
     "access": "all-group-members"
   },
   "shipping": {
-    "productId": 900,
     "discountByDefault": false
   },
   "clients": {
@@ -20,7 +24,6 @@
       "email",
       "vatNumber"
     ],
-    "sdiCountries": [],
     "shippingNotesLabel": "Delivery destination"
   },
   "payments": {
@@ -36,7 +39,6 @@
       "deliveryCountries": [
         "IT"
       ],
-      "vatId": 1,
       "rate": 22,
       "requireValidVat": false
     }

@@ -13,6 +13,16 @@ export type SdkPorts = {
 };
 
 const positiveId = z.number().int().positive();
+/** Fatture in Cloud stores these as numbers. The domain only ever sees the string form. */
+function ficId(id: string): number {
+  if (!/^[1-9]\d*$/.test(id)) throw new Error('Fatture in Cloud ids must be positive integers');
+  const value = Number(id);
+  if (!Number.isSafeInteger(value)) throw new Error('Fatture in Cloud ids must be positive integers');
+  return value;
+}
+function fromFicId(id: number | null | undefined): string | undefined {
+  return typeof id === 'number' ? String(positiveId.parse(id)) : undefined;
+}
 const italianRegions = new Intl.DisplayNames(['it'], { type: 'region' });
 const countryNames = new Map<string, string>();
 const countryKey = (name: string) => name.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim();
@@ -33,7 +43,7 @@ function countryIso(client: FicClient) {
 
 export function toFicClient(client: NewCustomer): FicClient {
   return {
-    id: client.id, type: 'company', name: client.name, country_iso: client.country, country: client.country ? italianRegions.of(client.country) : undefined,
+    id: client.id === undefined ? undefined : ficId(client.id), type: 'company', name: client.name, country_iso: client.country, country: client.country ? italianRegions.of(client.country) : undefined,
     address_street: client.street, address_city: client.city, address_postal_code: client.postalCode,
     address_province: client.province, email: client.email, certified_email: client.certifiedEmail, phone: client.phone,
     vat_number: client.vatNumber, tax_code: client.taxCode, ei_code: client.sdiCode, notes: client.notes,
@@ -43,7 +53,7 @@ export function toFicClient(client: NewCustomer): FicClient {
 function fromFicClient(client: FicClient): Client {
   // Keep incomplete existing records searchable; preparation validates the selected record.
   return {
-    id: client.id ?? undefined, name: client.name ?? '', country: countryIso(client),
+    id: fromFicId(client.id), name: client.name ?? '', country: countryIso(client),
     street: client.address_street ?? '', city: client.address_city ?? '', postalCode: client.address_postal_code ?? '',
     province: client.address_province || undefined, email: client.email || undefined, certifiedEmail: client.certified_email || undefined, phone: client.phone || undefined,
     vatNumber: client.vat_number || undefined, taxCode: client.tax_code || undefined,
@@ -59,7 +69,7 @@ export function toFicOrder(input: PreparedOrder): IssuedDocument {
     notes: order.notes,
     payment_method: order.paymentMethodId ? { id: order.paymentMethodId } : undefined,
     items_list: order.lines.map(line => ({
-      product_id: line.productId, code: line.code, name: line.name,
+      product_id: ficId(line.productId), code: line.code, name: line.name,
       qty: line.quantity, net_price: line.netPrice, discount: line.discountPercent,
       vat: { id: line.vatId },
     })),
@@ -69,7 +79,7 @@ export function toFicOrder(input: PreparedOrder): IssuedDocument {
 function saved(document: IssuedDocument | undefined): SavedOrder {
   if (!document || document.type !== 'order') throw new Error('Expected an order response; other document types are forbidden');
   return {
-    id: positiveId.parse(document.id),
+    id: String(positiveId.parse(document.id)),
     number: String(document.number ?? document.id),
     url: document.url ?? undefined,
   };
@@ -103,7 +113,7 @@ export class FattureInCloudConnector implements OrderConnector {
       if (product.net_price == null) return undefined;
       if (product.use_gross_price) throw new Error('Gross-price catalogue entries require a future pricing adapter');
       return productSchema.parse({
-        id: product.id, name: product.name, code: product.code ?? '', description: product.description ?? '', netPrice: product.net_price,
+        id: String(positiveId.parse(product.id)), name: product.name, code: product.code ?? '', description: product.description ?? '', netPrice: product.net_price,
       });
     });
   }
@@ -134,25 +144,26 @@ export class FattureInCloudConnector implements OrderConnector {
     return saved(response.data.data);
   }
 
-  async updateOrder(id: number, input: PreparedOrder) {
+  async updateOrder(id: string, input: PreparedOrder) {
     this.#assertWrites();
+    const numeric = ficId(id);
     const order = preparedOrderSchema.parse(input);
     await this.getOrder(id); // Refuse to turn an invoice or other document into an order.
     const data = await this.#orderPayload(order);
-    const response = await this.#sdk.documents.modifyIssuedDocument(this.#companyId, id, { data });
+    const response = await this.#sdk.documents.modifyIssuedDocument(this.#companyId, numeric, { data });
     return saved(response.data.data);
   }
 
-  async getOrder(id: number) {
-    positiveId.parse(id);
-    const response = await this.#sdk.documents.getIssuedDocument(this.#companyId, id, undefined, 'detailed');
+  async getOrder(id: string) {
+    const numeric = ficId(id);
+    const response = await this.#sdk.documents.getIssuedDocument(this.#companyId, numeric, undefined, 'detailed');
     return saved(response.data.data);
   }
 
   /** Read-only recovery check. Fail closed if the remote document differs from the confirmed payload. */
-  async verifySavedOrder(id: number, expected: PreparedOrder, totals: Totals): Promise<SavedOrder> {
-    positiveId.parse(id);
-    const remote = (await this.#sdk.documents.getIssuedDocument(this.#companyId, id, undefined, 'detailed')).data.data;
+  async verifySavedOrder(id: string, expected: PreparedOrder, totals: Totals): Promise<SavedOrder> {
+    const numeric = ficId(id);
+    const remote = (await this.#sdk.documents.getIssuedDocument(this.#companyId, numeric, undefined, 'detailed')).data.data;
     const result = saved(remote);
     const wanted = toFicOrder(expected);
     const same = (a: unknown, b: unknown) => (a ?? '') === (b ?? '');
@@ -160,24 +171,24 @@ export class FattureInCloudConnector implements OrderConnector {
     const lines = remote?.items_list ?? [];
     if (!remote || remote.e_invoice || remote.use_gross_prices || remote.date !== wanted.date || remote.currency?.id !== wanted.currency?.id
       || !same(remote.notes, wanted.notes) || !remote.entity || countryIso(remote.entity) !== expected.client.country
-      || (expected.client.id !== undefined && remote.entity.id !== expected.client.id)
+      || (expected.client.id !== undefined && String(remote.entity.id) !== expected.client.id)
       || entityFields.some(field => !same(remote.entity?.[field], wanted.entity?.[field]))
       || lines.length !== expected.lines.length
-      || lines.some((line, i) => { const target = expected.lines[i]!; return line.product_id !== target.productId || line.qty !== target.quantity || line.net_price !== target.netPrice || (line.discount ?? 0) !== target.discountPercent || line.vat?.id !== target.vatId; })
+      || lines.some((line, i) => { const target = expected.lines[i]!; return String(line.product_id) !== target.productId || line.qty !== target.quantity || line.net_price !== target.netPrice || (line.discount ?? 0) !== target.discountPercent || line.vat?.id !== target.vatId; })
       || remote.amount_net !== totals.net || remote.amount_vat !== totals.vat || remote.amount_gross !== totals.gross
       || !same(remote.payment_method?.id, expected.paymentMethodId)
       || remote.payments_list?.length !== 1 || remote.payments_list[0]?.due_date !== expected.dueDate || remote.payments_list[0]?.amount !== totals.gross) throw new Error('Remote order differs from the confirmed order; manual investigation required');
     return result;
   }
 
-  async listClientOrders(clientId: number, limit: number): Promise<ClientOrder[]> {
-    positiveId.parse(clientId);
+  async listClientOrders(clientId: string, limit: number): Promise<ClientOrder[]> {
+    const numeric = ficId(clientId);
     // The API accepts 5 to 100 results per page.
-    const { data } = await this.#sdk.documents.listIssuedDocuments(this.#companyId, 'order', undefined, 'detailed', '-date', 1, Math.min(100, Math.max(5, limit)), `entity.id = ${clientId}`);
-    return (data.data ?? []).filter(d => d.type === 'order' && d.entity?.id === clientId).slice(0, limit).map(d => ({
-      id: positiveId.parse(d.id), number: String(d.number ?? d.id), date: d.date ?? '',
+    const { data } = await this.#sdk.documents.listIssuedDocuments(this.#companyId, 'order', undefined, 'detailed', '-date', 1, Math.min(100, Math.max(5, limit)), `entity.id = ${numeric}`);
+    return (data.data ?? []).filter(d => d.type === 'order' && d.entity?.id === numeric).slice(0, limit).map(d => ({
+      id: String(positiveId.parse(d.id)), number: String(d.number ?? d.id), date: d.date ?? '',
       lines: (d.items_list ?? []).map(i => ({
-        productId: i.product_id ?? undefined, code: i.code ?? '', name: i.name ?? '',
+        productId: typeof i.product_id === 'number' && i.product_id > 0 ? String(i.product_id) : undefined, code: i.code ?? '', name: i.name ?? '',
         quantity: i.qty ?? 0, netPrice: i.net_price ?? 0, discountPercent: i.discount ?? 0,
       })),
     }));

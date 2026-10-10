@@ -15,7 +15,7 @@ export type OrderResult = { kind: 'order'; draft: OrderDraft; decisions: Decisio
 /** What the customer API reports: a customer ready to create, an existing one, or what is still needed. */
 export type CustomerResult = { kind: 'customer'; draft: OrderDraft; decisions: Decision[] } & (
   | { status: 'ready'; customer: NewCustomer }
-  | { status: 'existing'; client: { id: number; name: string } }
+  | { status: 'existing'; client: { id: string; name: string } }
   | { status: 'needs'; issues: Issue[] });
 export type DraftResult = OrderResult | CustomerResult;
 

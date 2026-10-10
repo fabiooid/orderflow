@@ -23,11 +23,11 @@ for (const size of process.argv.includes('--maximum-only') ? [2530] : [600, 2530
     return raw;
   }), true);
   const request: SelectionRequest = { kind: 'client', query: 'Luna Botanica di Milano', context: 'Prepare an order for Luna Botanica di Milano',
-    candidates: Array.from({ length: size }, (_, i) => ({ id: i + 1, name: i === size - 1 ? 'Luna Botanica SRL' : `Fictional Trading Company ${i + 1}`, city: i === size - 1 ? 'Milano' : ['Roma', 'Torino', 'Napoli'][i % 3]!, country: 'IT', vatNumber: `TEST${String(i + 1).padStart(8, '0')}` })),
+    candidates: Array.from({ length: size }, (_, i) => ({ id: String(i + 1), name: i === size - 1 ? 'Luna Botanica SRL' : `Fictional Trading Company ${i + 1}`, city: i === size - 1 ? 'Milano' : ['Roma', 'Torino', 'Napoli'][i % 3]!, country: 'IT', vatNumber: `TEST${String(i + 1).padStart(8, '0')}` })),
     retrieval: { complete: true, furtherSearchPossible: false } };
   const start = performance.now();
   const [result] = await select([request]);
-  const passed = result?.status === 'matched' && result.selectedId === size;
+  const passed = result?.status === 'matched' && result.selectedId === String(size);
   failed ||= !passed;
   console.log(JSON.stringify({ size, passed, status: result?.status, selectedId: result?.selectedId, elapsedMs: Math.round(performance.now() - start), calls }));
 }

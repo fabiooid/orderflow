@@ -12,9 +12,9 @@ export type { Vision } from '../documents/contract.js';
 import type { Vision } from '../documents/contract.js';
 
 const formLineSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('sure'), productId: z.number().int(), quantity: z.number() }),
+  z.object({ kind: z.literal('sure'), productId: z.string().min(1), quantity: z.number() }),
   /** The two readings disagree; `readings` holds what each saw (null for nothing). */
-  z.object({ kind: z.literal('unsure'), productId: z.number().int(), readings: z.array(z.number().nullable()) }),
+  z.object({ kind: z.literal('unsure'), productId: z.string().min(1), readings: z.array(z.number().nullable()) }),
 ]);
 export type FormLine = z.infer<typeof formLineSchema>;
 export type FormReading = { form: OrderForm; lines: FormLine[] };
@@ -24,12 +24,12 @@ export { identify, enlarged } from '../documents/templates.js';
 import { identify, enlarged, readCells } from '../documents/templates.js';
 import type { CellRow, DocumentTemplate, DocumentResult } from '../documents/contract.js';
 /** Products one reading orders, by product ID. One entry per row with one field per column keeps the model reading across rows. */
-export async function readOnce(page: Buffer, form: OrderForm, vision: Vision): Promise<Record<number, number>> {
+export async function readOnce(page: Buffer, form: OrderForm, vision: Vision): Promise<Record<string, number>> {
   return mapCells(await readCells(page, form, vision), form);
 }
 
-function mapCells(rows: CellRow[], form: OrderForm): Record<number, number> {
-  const ordered: Record<number, number> = {};
+function mapCells(rows: CellRow[], form: OrderForm): Record<string, number> {
+  const ordered: Record<string, number> = {};
   for (const row of rows as Record<string, unknown>[]) for (const column of form.columns) {
     const written = row[column.id];
     const value = typeof written === 'number' && written > 0 ? written : written === true ? 1 : 0;
@@ -41,8 +41,9 @@ function mapCells(rows: CellRow[], form: OrderForm): Record<number, number> {
 }
 
 /** What both readings order is kept; every difference becomes a doubtful line. */
-export function mergeReadings(a: Record<number, number>, b: Record<number, number>): FormLine[] {
-  return [...new Set([...Object.keys(a), ...Object.keys(b)].map(Number))].sort((x, y) => x - y).map(productId => a[productId] === b[productId]
+const compareIds = (a: string, b: string) => /^\d+$/.test(a) && /^\d+$/.test(b) ? Number(a) - Number(b) : a < b ? -1 : a > b ? 1 : 0;
+export function mergeReadings(a: Record<string, number>, b: Record<string, number>): FormLine[] {
+  return [...new Set([...Object.keys(a), ...Object.keys(b)])].sort(compareIds).map(productId => a[productId] === b[productId]
     ? { kind: 'sure' as const, productId, quantity: a[productId]! }
     : { kind: 'unsure' as const, productId, readings: [a[productId] ?? null, b[productId] ?? null] });
 }
@@ -90,9 +91,9 @@ export function createOrderFormWorkflow(forms: OrderForm[], vision: Vision) {
 }
 
 /** Text handed to extraction. Product IDs come from the template, so the model copies rather than matches them. */
-export function formText(reading: FormReading, names: Map<number, string>, tierName: string | undefined, it: boolean) {
+export function formText(reading: FormReading, names: Map<string, string>, tierName: string | undefined, it: boolean) {
   const say = (key: Parameters<typeof copy>[1], vars?: Parameters<typeof copy>[2]) => copy(it ? 'it' : 'en', key, vars);
-  const name = (id: number) => `${names.get(id) ?? '?'} [productId ${id}]`;
+  const name = (id: string) => `${names.get(id) ?? '?'} [productId ${id}]`;
   const prices = tierName ? say('formPrices', { tier: tierName, tierId: reading.form.priceTier ?? '' }) : '';
   const header = say('formHeader', { name: reading.form.name, prices });
   const lines = reading.lines.map(line => {

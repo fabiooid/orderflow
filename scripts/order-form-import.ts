@@ -24,7 +24,7 @@ async function main() {
   }
   const out = values.out ?? `private/order-forms/${values.id}.json`;
   const config = await loadAppConfig();
-  const connector = connectorMode() === 'demo' ? new DemoConnector() : FattureInCloudConnector.fromToken(config.companyId, process.env.FIC_ACCESS_TOKEN ?? '');
+  const connector = connectorMode() === 'demo' ? new DemoConnector() : FattureInCloudConnector.fromToken(config.invoicing.companyId, process.env.FIC_ACCESS_TOKEN ?? '');
   const catalogue = await connector.listProducts();
   const agent = new Agent({ id: 'order-form-import', name: 'Order form import', model: config.model, instructions: 'You transcribe printed price lists exactly and map them to a product catalogue. Never invent rows or products.' });
   
@@ -53,7 +53,7 @@ async function main() {
   Columns:\n${sheet.columns.map(c => `- ${c.id}: "${c.heading}" (${c.value})`).join('\n')}
   Rows:\n${sheet.rows.map((r, i) => `${i + 1}. ${r.code || '(no code)'} — ${r.label}${r.notes.length ? ` — notes: ${r.notes.map(n => `[${n.column}] ${n.text}`).join('; ')}` : ''}${cells.has(`${i}:${main.id}`) ? ` — ${main.id} is ${cells.get(`${i}:${main.id}`)!.code}` : ''}`).join('\n')}
   Catalogue:\n${catalogue.map(p => `${p.id}: ${p.code} — ${p.name}`).join('\n')}`,
-    { structuredOutput: { schema: z.object({ cells: z.array(z.object({ row: z.number().int(), column: z.string(), productId: z.number().int().nullable() })) }) } })).object;
+    { structuredOutput: { schema: z.object({ cells: z.array(z.object({ row: z.number().int(), column: z.string(), productId: z.string().min(1).nullable() })) }) } })).object;
   for (const c of mapping.cells) {
     const p = catalogue.find(p => p.id === c.productId);
     if (p && !cells.has(`${c.row - 1}:${c.column}`) && sheet.columns.some(col => col.id === c.column)) cells.set(`${c.row - 1}:${c.column}`, p);

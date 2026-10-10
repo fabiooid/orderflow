@@ -8,7 +8,7 @@ export type Action =
   | { kind: 'converse'; text: string; operatorText: string; target?: OrderLink }
   | { kind: 'confirmOrder' | 'confirmCustomer' | 'review'; target: OrderLink }
   /** A candidate picked with a button under a draft. */
-  | { kind: 'pick'; target: OrderLink; choice: { field: string; id: number } }
+  | { kind: 'pick'; target: OrderLink; choice: { field: string; id: string } }
   | { kind: 'cancel'; target?: OrderLink }
   /** Void every open request; a button binds it to the newest one it listed. */
   | { kind: 'cancelAll'; target?: OrderLink }

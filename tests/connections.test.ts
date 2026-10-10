@@ -4,7 +4,7 @@ import { TelegramApi } from '../src/channels/telegram/api.js';
 import { config } from './helpers.js';
 function ports(): HealthPorts {
   return { telegram: async () => ({ member: true, canSend: true, polling: true }), company: async () => true,
-    products: async () => [{ id: 900, name: 'Delivery', code: 'X', description: '', netPrice: 8 }], clients: async () => [],
+    products: async () => [{ id: '900', name: 'Delivery', code: 'X', description: '', netPrice: 8 }], clients: async () => [],
     vat: async () => [{ id: 1, value: 22 }], payments: async () => [{ id: 2 }] };
 }
 it('reports manual checks honestly rather than claiming everything passed', async () => {
