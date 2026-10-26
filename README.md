@@ -234,7 +234,7 @@ Six Mastra scorers are included:
 - context retention
 - user-reported mistakes
 
-They run in the background on model runs and on delivered Telegram replies, and they never affect saves or replies. Set `EVALS_ENABLED=false` to score manually only. See **[docs/evals.md](docs/evals.md)** for what each score means and its limits.
+When enabled, they run in the background on model runs and on delivered Telegram replies, and they never affect saves or replies. Background scoring is off by default; set `EVALS_ENABLED=true` to opt in. Enabling it sends sampled conversations and tool results to the `EVAL_JUDGE_MODEL` provider. See **[docs/evals.md](docs/evals.md)** for what each score means and its limits.
 
 ## Project status
 
