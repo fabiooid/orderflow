@@ -201,7 +201,7 @@ The agent replies in the language of the operator's latest message; the applicat
 ## Architecture
 
 ```
-Telegram group ──► src/telegram ──► src/assistant (Mastra agent + order/customer APIs)
+Telegram group ──► src/channels/telegram ──► src/channel ──► src/assistant (Mastra agent + order/customer APIs)
                                          │
                                          ├─► src/domain     matching, VAT, totals
                                          ├─► src/config     validated business config
@@ -216,7 +216,8 @@ Telegram group ──► src/telegram ──► src/assistant (Mastra agent + or
 | [`src/domain`](src/domain) | Typed drafts, product matching, business preparation, totals |
 | [`src/config`](src/config) | Public configuration schema and loader |
 | [`src/assistant`](src/assistant) | Mastra agent, order and customer draft APIs and their schema, scorers, journaled saves |
-| [`src/telegram`](src/telegram) | Bot API transport, polling controller, agent turns, templates and buttons, delivery recovery |
+| [`src/channels/telegram`](src/channels/telegram) | Telegram `ChannelAdapter`: Bot API transport, polling, delivery recovery |
+| [`src/channel`](src/channel) | Channel-neutral conversation core: controller, agent turns, previews, buttons, confirmation |
 | [`src/storage`](src/storage) | Application write journal. Mastra owns conversation and trace storage. |
 | [`src/health`](src/health) | Read-only diagnostic checks |
 | [`src/mastra`](src/mastra) | Studio registration and local trace exporter |
