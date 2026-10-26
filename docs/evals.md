@@ -1,14 +1,17 @@
 # OrderFlow evaluations
 
 The six scorer definitions support manual and native Mastra live evaluation.
-Automatic evaluation is enabled by default with each scorer sampling 10% of eligible runs. Mastra handles
+Automatic evaluation is off by default. When enabled, each scorer samples 10% of eligible runs by default. Mastra handles
 sampling, asynchronous execution and score storage; evaluations never gate saves,
 retry orders, alter replies or send customer messages.
 
 ## Automatic scoring
 
-- `EVALS_ENABLED=true` enables attachments. Set `false` for manual-only operation.
-- `EVALS_SAMPLE_RATE=0.1` is the default: each scorer samples 10% of eligible runs. Set `1` to score every eligible run. Manual evaluation remains available.
+- `EVALS_ENABLED=false` is the default: no background judges run. Set `true` to opt in.
+  Enabling it sends samples of real conversations (messages, the agent's replies and
+  available tool results) to the `EVAL_JUDGE_MODEL` provider. Check that your data
+  handling allows this before turning it on.
+- `EVALS_SAMPLE_RATE=0.1` is the default when enabled: each scorer samples 10% of eligible runs. Set `1` to score every eligible run. Manual evaluation remains available.
 - Restart the Telegram runner and reload Studio after changing these settings.
 - Tool accuracy and workflow adherence attach to every agent run, including each
   Telegram turn.

@@ -35,7 +35,8 @@ it('scores Telegram agent turns for tool use, and their wording only on the deli
   expect(eligible('conciseness', {})).toBe(true); // Studio's normal chat
   expect(bindings.conciseness!.sampling).toEqual({ type: 'ratio', rate: 0.5 });
   expect(liveAgentScorers(createManualScorers([]), { enabled: false, rate: 1 })).toEqual({});
-  expect(liveEvalSettings({})).toEqual({ enabled: true, rate: 0.1 });
+  expect(liveEvalSettings({})).toEqual({ enabled: false, rate: 0.1 }); // Opt-in: judges send conversations to a provider.
+  expect(liveEvalSettings({ EVALS_ENABLED: 'true' })).toEqual({ enabled: true, rate: 0.1 });
   expect(() => liveEvalSettings({ EVALS_SAMPLE_RATE: '2' })).toThrow();
   expect(() => liveEvalSettings({ EVALS_ENABLED: 'perhaps' })).toThrow();
 });
