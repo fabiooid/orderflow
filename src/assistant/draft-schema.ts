@@ -28,8 +28,8 @@ const nullableClient = z.object(Object.fromEntries(Object.entries(clientSchema.o
 }))).strict();
 
 export const orderDraftInput = z.object({
-  clientQuery: z.string().describe('The customer name or VAT number the operator gave, as written, or the matched business name from search-clients. When the operator names the customer, that name wins over any company named in attached content. Empty when no customer is known yet.'),
-  clientId: z.string().min(1).nullable().describe('Keep the clientId already in the open draft, or the id returned by search-clients for the customer named this turn. Otherwise null: the application resolves clientQuery against current records.'),
+  clientQuery: z.string().describe('The customer name or VAT number the operator gave, as written, or the matched business name from search-clients. Include hint words they gave (hotel, shop, a city). When they clarify, replace this with the refined name. When the operator names the customer, that name wins over any company named in attached content. Empty when no customer is known yet.'),
+  clientId: z.string().min(1).nullable().describe('Keep the clientId already in the open draft only when it is still the same customer. If search-clients found one clear match this turn, you may send that id. If the operator named a different customer or added a hint (hotel, shop), search-clients again and do not keep the old id. Otherwise null: the application resolves clientQuery against current records.'),
   newClient: nullableClient.nullable().describe('Only when the operator says the customer is new or types its billing details themselves. A customer named, signed or printed in an attached email or document only identifies it: put its name in clientQuery and leave this null.'),
   manualVatCheck: z.object({ country: z.string().regex(/^[A-Z]{2}$/), vatNumber: z.string().min(1), status: z.enum(['valid', 'invalid']) }).strict().nullable()
     .describe('Only after the operator explicitly confirms a completed VIES check and its result, bound to that exact country and VAT number. Never inferred from a name, number format or location.'),
