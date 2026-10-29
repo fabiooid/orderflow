@@ -50,6 +50,33 @@ it('drafts a new customer and lists the deployment\'s missing fields', async () 
   expect(ready.status).toBe('ready');
 });
 
+it('does not open an empty order card when prepare is called with no customer and no products', async () => {
+  const storage = new LibSQLStore({ id: 'empty-order', url: ':memory:' });
+  try {
+    const { calls } = createOrderAgent(config(), new DemoConnector(), storage);
+    const context = new RequestContext();
+    const outcome = startTurn(context, { evidence: 'crea un nuovo ordine per Northwind Bistro', operatorWords: 'crea un nuovo ordine per Northwind Bistro', senderId: '5', knownPhrases: [] });
+    expect(await calls.order(draftSchema.parse({}), context)).toMatchObject({
+      status: 'needs',
+      issues: [{ field: 'client', problem: expect.stringContaining('search-clients') }],
+      note: expect.stringContaining('Nothing was shown'),
+    });
+    expect(outcome.result).toBeUndefined();
+    // A named customer still prepares: the application can lock it and ask for products.
+    const named = new RequestContext();
+    const locked = startTurn(named, { evidence: 'crea un nuovo ordine per Example Studio', operatorWords: 'crea un nuovo ordine per Example Studio', senderId: '5', knownPhrases: [] });
+    const result = await calls.order(draftSchema.parse({ clientQuery: 'Example Studio' }), named);
+    expect(result).toMatchObject({ status: 'needs' });
+    expect(result.status === 'needs' && result.issues?.some(i => i.field === 'lines' || i.field.startsWith('lines.'))).toBe(true);
+    expect(locked.result).toMatchObject({ kind: 'order', client: expect.objectContaining({ id: '201', name: 'Example Studio' }) });
+    // Product lines without a customer still prepare, so a short follow-up like "add 20" can open a draft.
+    const products = new RequestContext();
+    const followUp = startTurn(products, { evidence: 'add 20 to a new order', operatorWords: 'add 20 to a new order', senderId: '5', knownPhrases: [] });
+    expect(await calls.order(draftSchema.parse({ lines: [{ query: 'Linen candle 200 g', quantity: 20 }] }), products)).toMatchObject({ status: 'needs' });
+    expect(followUp.result).toMatchObject({ kind: 'order', draft: expect.objectContaining({ lines: [expect.objectContaining({ query: 'Linen candle 200 g', quantity: 20 })] }) });
+  } finally { await storage.close(); }
+});
+
 it('replaces an open request of the other kind, and is blocked only by a request the turn cannot change', async () => {
   const storage = new LibSQLStore({ id: 'tools', url: ':memory:' });
   try {

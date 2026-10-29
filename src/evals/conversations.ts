@@ -158,6 +158,17 @@ export const conversationCases: ConversationCase[] = [
     ]),
   },
   {
+    id: 'customer-only-does-not-invent-lines',
+    turns: [{ text: 'che saponi abbiamo?' }, { text: 'crea un nuovo ordine per Northwind Bistro' }],
+    // Naming only a customer after a product-rich thread: lock that customer, leave lines empty, ask what to add.
+    check: all(neverGaveUp, o => [
+      ...expect(o.open?.draft.clientId === northwind.id || /northwind bistro/i.test(o.open?.draft.clientQuery ?? ''), `client is ${o.open?.draft.clientId ?? `"${o.open?.draft.clientQuery ?? 'none'}"`}, expected ${northwind.id}`),
+      ...expect(!o.open?.draft.newClient, `proposes creating new customer "${o.open?.draft.newClient?.name}"`),
+      ...expect(!o.open?.draft.lines.length, `invented lines from the earlier catalogue answer: ${JSON.stringify(o.open?.draft.lines)}`),
+      ...lastAsks(o),
+    ]),
+  },
+  {
     id: 'english-request',
     turns: [{ text: 'Prepare an order for Northwind Bistro: 3 Linen candle 200 g, delivery 8 euros' }],
     check: all(neverGaveUp, orderFor(northwind.id), o => expect(last(o).includes('📦 Order preview'), 'no English order preview')),

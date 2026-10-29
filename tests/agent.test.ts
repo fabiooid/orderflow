@@ -14,6 +14,8 @@ it('gives the agent the order and customer APIs and lookups, and no way to save'
     const { agent } = createOrderAgent(config(), new DemoConnector(), storage);
     const tools = await agent.listTools();
     expect(Object.keys(tools).sort()).toEqual(['cancelRequest', 'getCustomerOrderHistory', 'prepareCustomer', 'prepareOrder', 'rememberAlias', 'searchClients', 'searchProducts']);
+    expect(tools.searchClients?.description).toContain('before prepare-order');
+    expect(tools.prepareOrder?.description).toContain('search-clients first');
     expect(Object.values(tools).every(tool => !/creates?|saves?|writes?/i.test(tool.id))).toBe(true);
     expect(await agent.listSkills()).toEqual([]);
   } finally { await storage.close(); }
@@ -24,11 +26,17 @@ it('keeps business rules in the prompt and field rules in the API schema, with n
   expect(prompt).toContain('Never create invoices or proformas');
   expect(prompt).toContain('Only the operator saves');
   expect(prompt).toContain('out of scope');
+  expect(prompt).toContain('# Start an order');
+  expect(prompt).toContain('search-clients');
+  expect(prompt).toContain('Naming a customer is not a request to copy products');
   expect(prompt).not.toMatch(/\/(?:ordine|cliente|annulla|confermaordine|confermacliente)\b/);
   const fields = orderDraftInput.shape;
   expect(fields.newClient.description).toContain('attached email');
   expect(fields.notes.description).toContain('operator sees it in the draft');
   expect(fields.delivery.description).toContain('never a delivery address');
+  expect(fields.clientQuery.description).toContain('search-clients');
+  expect(fields.clientId.description).toContain('search-clients');
+  expect(fields.lines.description).toContain('A new request starts with no lines');
 });
 
 /**

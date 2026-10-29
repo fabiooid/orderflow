@@ -65,7 +65,7 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
     },
   });
   const searchClients = createTool({
-    id: 'search-clients', description: 'Find existing businesses by name or VAT number. Do not create a duplicate when a record exists.',
+    id: 'search-clients', description: 'Find existing businesses by name or VAT number. When the operator starts an order and names a customer, call this before prepare-order and lock the match. Do not open an empty order that still asks who the customer is. Do not create a duplicate when a record exists.',
     inputSchema: z.object({ query: z.string().min(1) }),
     outputSchema: z.array(z.object({ id: z.string().min(1), name: z.string(), country: z.string(), vatNumber: z.string().optional() })),
     execute: async ({ query }) => {
@@ -90,6 +90,10 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
         outcome.refused = true;
         return { status: 'blocked' as const, note: `Another request is open: ${turn.locked}. The operator can finish it first.` };
       }
+      // An empty order with no customer is not a useful draft: search-clients first when a name was given, then ask for products.
+      if (kind === 'order' && !draft.clientId && !draft.clientQuery.trim() && !draft.newClient && !draft.lines.length) {
+        return { status: 'needs' as const, issues: [{ field: 'client', problem: 'Resolve the client first. When the operator named a customer, use search-clients, then send that customer on the draft. Do not open an empty order.' }], note: 'Nothing was shown. Resolve the client, then call again. Leave product lines empty unless this request names them, an attachment lists them, a short follow-up clearly refers to what was just discussed, or the operator asks to repeat that customer\'s last order.' };
+      }
       const own = turn?.request?.kind === kind ? turn.request : undefined;
       outcome.result = await run(draft, { orderId: own?.orderId ?? 'new', revision: (own?.revision ?? 0) + 1, operatorText: turn?.evidence ?? '', confirmedChoices: own?.confirmedChoices });
       return forAgent(outcome.result);
@@ -108,7 +112,7 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
   });
   const orderApi = prepare('order', drafts.order), customerApi = prepare('customer', drafts.customer);
   const books = config.invoicing.label;
-  const prepareOrder = draftTool('prepare-order', `The order API: create or edit the order. Send the complete order as it should be after this turn, starting from the open order's draft. The application checks customer, products, prices, VAT and delivery against ${books}, shows the draft to the operator and reports what is still needed. It never saves.`,
+  const prepareOrder = draftTool('prepare-order', `The order API: create or edit the order. Send the complete order as it should be after this turn, starting from the open order's draft. When the operator named a customer, search-clients first and send that customer; do not open an empty draft that still needs the customer. When they named a customer and did not name products or clearly refer to them, lock the customer and leave lines empty. Never copy lines from earlier chats or another customer. The application checks customer, products, prices, VAT and delivery against ${books}, shows the draft to the operator and reports what is still needed. It never saves.`,
     orderDraftInput, parseDraft, orderApi);
   const prepareCustomer = draftTool('prepare-customer', `The customer API: create a new customer in ${books}, or correct the one being drafted. Send every detail known so far. The application checks for an existing customer, shows the draft and reports what is still needed. It never saves. For an order's customer use prepare-order instead.`,
     customerDraftInput, parseCustomer, customerApi);
