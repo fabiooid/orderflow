@@ -65,15 +65,17 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
     },
   });
   const searchClients = createTool({
-    id: 'search-clients', description: 'Find existing businesses by name or VAT number. Do not create a duplicate when a record exists.',
-    inputSchema: z.object({ query: z.string().min(1) }),
-    outputSchema: z.array(z.object({ id: z.string().min(1), name: z.string(), country: z.string(), vatNumber: z.string().optional() })),
+    id: 'search-clients',
+    description: 'Find existing businesses by name, VAT number, city, or words in their notes. When the operator starts an order and names a customer, always call this before prepare-order, with that name and any hint words (hotel, shop, city). prepare-order\'s own match is not a substitute. If several match, return them all so you can ask or offer a pick; do not guess and do not silently prepare. If the operator later clarifies, call this again with the refined query; do not reuse an earlier lock. Do not open an empty order that still asks who the customer is. Do not create a duplicate when a record exists.',
+    inputSchema: z.object({ query: z.string().min(1).describe('The name or VAT number the operator gave, including hint words such as hotel, shop, or a city. Call again with a refined query when they clarify.') }),
+    outputSchema: z.array(z.object({ id: z.string().min(1), name: z.string(), country: z.string(), city: z.string().optional(), vatNumber: z.string().optional(), notes: z.string().optional() })),
     execute: async ({ query }) => {
       const words = normalize(query).split(/\s+/).filter(Boolean);
       const data = await knowledge.read();
       const ids = new Set(data.clientAliases.filter(a => normalize(a.phrase) === normalize(query)).map(a => a.clientId));
-      return (await connector.listClients()).filter(c => c.id && (ids.has(c.id) || words.length && words.every(w => normalize(`${c.name} ${c.vatNumber ?? ''}`).includes(w))))
-        .map(c => ({ id: c.id!, name: c.name, country: c.country, vatNumber: c.vatNumber }));
+      const blob = (c: { name: string; vatNumber?: string; city?: string; notes?: string }) => normalize([c.name, c.vatNumber, c.city, c.notes].filter(Boolean).join(' '));
+      return (await connector.listClients()).filter(c => c.id && (ids.has(c.id) || words.length && words.every(w => blob(c).includes(w))))
+        .map(c => ({ id: c.id!, name: c.name, country: c.country, ...(c.city ? { city: c.city } : {}), vatNumber: c.vatNumber, ...(c.notes?.trim() ? { notes: c.notes } : {}) }));
     },
   });
   const getCustomerOrderHistory = customerOrderHistoryTool(connector);
@@ -89,6 +91,10 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
       if (!turn?.request && turn?.locked) {
         outcome.refused = true;
         return { status: 'blocked' as const, note: `Another request is open: ${turn.locked}. The operator can finish it first.` };
+      }
+      // An empty order with no customer is not a useful draft: search-clients first when a name was given, then ask for products.
+      if (kind === 'order' && !draft.clientId && !draft.clientQuery.trim() && !draft.newClient && !draft.lines.length) {
+        return { status: 'needs' as const, issues: [{ field: 'client', problem: 'Resolve the client first. When the operator named a customer, always call search-clients with that name and any hint words, then send a clear match on the draft. Do not skip search-clients or open an empty order.' }], note: 'Nothing was shown. Call search-clients first, then call again. Leave product lines empty unless this request names them, an attachment lists them, a short follow-up clearly refers to what was just discussed, or the operator asks to repeat that customer\'s last order.' };
       }
       const own = turn?.request?.kind === kind ? turn.request : undefined;
       outcome.result = await run(draft, { orderId: own?.orderId ?? 'new', revision: (own?.revision ?? 0) + 1, operatorText: turn?.evidence ?? '', confirmedChoices: own?.confirmedChoices });
@@ -108,7 +114,7 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
   });
   const orderApi = prepare('order', drafts.order), customerApi = prepare('customer', drafts.customer);
   const books = config.invoicing.label;
-  const prepareOrder = draftTool('prepare-order', `The order API: create or edit the order. Send the complete order as it should be after this turn, starting from the open order's draft. The application checks customer, products, prices, VAT and delivery against ${books}, shows the draft to the operator and reports what is still needed. It never saves.`,
+  const prepareOrder = draftTool('prepare-order', `The order API: create or edit the order. Send the complete order as it should be after this turn, starting from the open order's draft. When the operator named a customer, always call search-clients first in this turn with that name and any hint words; this tool's own match is not a substitute. Lock only a customer search-clients made clear. If search returned several or an unclear fit, do not prepare yet: ask which one, or send the name without an id so the application can show pick buttons. If they clarify the customer, search-clients again before changing the lock. Do not open an empty draft that still needs the customer. When they named a customer and did not name products or clearly refer to them, lock the customer and leave lines empty. Never copy lines from earlier chats or another customer. The application checks customer, products, prices, VAT and delivery against ${books}, shows the draft to the operator and reports what is still needed. It never saves.`,
     orderDraftInput, parseDraft, orderApi);
   const prepareCustomer = draftTool('prepare-customer', `The customer API: create a new customer in ${books}, or correct the one being drafted. Send every detail known so far. The application checks for an existing customer, shows the draft and reports what is still needed. It never saves. For an order's customer use prepare-order instead.`,
     customerDraftInput, parseCustomer, customerApi);
