@@ -171,7 +171,7 @@ The group has one open request at a time. Starting another lists the open ones w
 
 The agent replies in the language of the operator's latest message; the application's templates and buttons follow it. Attachment approval buttons are bound to the request and revision shown when the question was asked; resend an attachment if that context has changed.
 
-**Token permissions:** give the Fatture in Cloud token read access to products, clients and settings, plus order-only document access. **Do not grant invoice permissions.** The application's own restrictions are a second layer, not a substitute for a scoped token.
+**Token permissions:** give the Fatture in Cloud token read access to products, clients and settings, plus order-only document access. **Do not grant invoice permissions.** The application's own restrictions are a second layer, not a substitute for a scoped token. If a Fatture or Telegram token may be exposed, stop the poller and follow the [revoke and rotate runbook](docs/rotate-tokens.md).
 
 **If a delivery is uncertain** (for example, Telegram timed out), the poller stops instead of resending. Check the group, then run `npm run telegram:recover`. CONNECTIONS.md describes the steps.
 
@@ -278,7 +278,9 @@ Contributions are welcome. Please read **[CONTRIBUTING.md](CONTRIBUTING.md)** fi
 
 Please **do not open public issues for security problems.** Report them privately through GitHub's [private vulnerability reporting](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability) on this repository.
 
-Never paste tokens into Telegram, issues or pull requests.
+Never paste tokens into Telegram, issues, pull requests, or the public repository.
+
+If a Fatture in Cloud or Telegram token may be exposed, stop the poller and follow the [revoke and rotate runbook](docs/rotate-tokens.md). Use the same orders-only Fatture scope as [Token permissions](#running-with-telegram): products, clients, settings, and order-only documents, with no invoice permissions.
 
 ## License
 
