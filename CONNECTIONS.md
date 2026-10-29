@@ -8,6 +8,8 @@ If you do not already have local settings, copy `.env.example` to `.env` and `co
 
 Enter secrets directly in the local `.env` file, not in chat:
 
+If a Fatture or Telegram token may be exposed, stop the poller and follow [docs/token-rotation.md](docs/token-rotation.md) before putting a replacement in `.env`.
+
 - `TELEGRAM_BOT_TOKEN`: obtain from Telegram's BotFather.
 - `FIC_ACCESS_TOKEN`: an API token for the intended Fatture in Cloud company.
 - The provider key for your configured model; the example uses `OPENAI_API_KEY`.

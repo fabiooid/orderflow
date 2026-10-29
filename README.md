@@ -278,7 +278,7 @@ Contributions are welcome. Please read **[CONTRIBUTING.md](CONTRIBUTING.md)** fi
 
 Please **do not open public issues for security problems.** Report them privately through GitHub's [private vulnerability reporting](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability) on this repository.
 
-Never paste tokens into Telegram, issues or pull requests.
+Never paste tokens into Telegram, issues or pull requests. If a token may be exposed, see [docs/token-rotation.md](docs/token-rotation.md).
 
 ## License
 
