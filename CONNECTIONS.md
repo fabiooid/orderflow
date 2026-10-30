@@ -16,6 +16,8 @@ Set your company ID and Telegram group ID in the local JSON configuration. Produ
 
 For the account token, plan for products read access, client access, order-only document access and read-only configuration as required. **Do not grant invoice permissions.** The checker does not prove absence of invoice rights and never attempts an invoice request. Order writes remain disabled by this runtime even if the token permits them.
 
+If a Fatture in Cloud or Telegram token may be exposed, stop the poller and follow [docs/rotate-tokens.md](docs/rotate-tokens.md). Never paste replacement tokens into chat, issues, or the public repository.
+
 ## 2. Find the Telegram group
 
 Create a dedicated internal group and add the bot and the operators. The bot must be allowed to send text and documents. Administrator status is not required when ordinary group permissions allow this.
@@ -99,7 +101,7 @@ npm run telegram:recover -- UPDATE_ID not-delivered
 
 Recovery changes only local delivery state. Restart the runner to continue. Group supergroup message links end with their message ID. For groups where this is unavailable, inspect the Bot API result/logging locally before choosing recovery; never guess an ID.
 
-The local poller lock prevents a second process. A lock from an exited process can be reclaimed; do not delete `.data/` to fix uncertain remote outcomes. A crash during an agent turn may rerun read/model work, but no remote order writes occur in these modes.
+The local poller lock prevents a second process. A lock from an exited process can be reclaimed; do not delete `.data/` to fix uncertain remote outcomes or to rotate tokens. Token rotation, including when to keep or wipe `.data/`, is in [docs/rotate-tokens.md](docs/rotate-tokens.md). A crash during an agent turn may rerun read/model work, but no remote order writes occur in these modes.
 
 ## Verification performed without credentials
 
