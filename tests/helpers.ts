@@ -5,11 +5,21 @@ import example from '../config/example.json';
 installTelegramChannel();
 import { configSchema } from '../src/config/schema.js';
 import { DemoConnector } from '../src/connector/demo.js';
-import { draftSchema } from '../src/domain/types.js';
+import { draftSchema, type Client } from '../src/domain/types.js';
 import { prepareOrder } from '../src/domain/prepare.js';
 import type { TurnInput, TurnOutput } from '../src/channel/controller.js';
 import type { Conversation } from '../src/channel/store.js';
 export const config = () => configSchema.parse(structuredClone(example));
+
+/** Fictional shop/hotel siblings: everyday place name in notes or street, different legal names. */
+export const harborSiblings = (): { shop: Client; hotel: Client; cafe: Client } => {
+  const place = { country: 'IT' as const, city: 'Genova', postalCode: '16100', email: 'orders@fable-harbor.invalid' };
+  return {
+    shop: { id: '210', name: 'Fable Harbor Shop Srl', ...place, street: 'Harbour Dock 2', vatNumber: 'DEMO-FABLE-SHOP', notes: 'Fable Harbor shop' },
+    hotel: { id: '211', name: 'Fable Rooms Srl', ...place, street: 'Fable Harbor Walk 4', vatNumber: 'DEMO-FABLE-ROOMS', notes: 'hotel' },
+    cafe: { id: '212', name: 'Fable Harbor Cafe', ...place, street: 'Other Street 9', vatNumber: 'DEMO-FABLE-CAFE', notes: 'call after 10' },
+  };
+};
 export const draft = () => draftSchema.parse({
   clientQuery: 'Example Studio', lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 8, discountPercent: 10,
 });

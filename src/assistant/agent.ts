@@ -15,7 +15,7 @@ import { z } from 'zod';
 import type { AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
 import { productSchema, type OrderDraft, type Product } from '../domain/types.js';
-import { normalize, searchCatalogue } from '../domain/matching.js';
+import { normalize, searchCatalogue, searchClients as findClients } from '../domain/matching.js';
 import { outcomeOf, turnOf, type TurnRequest } from './turn-context.js';
 import { createManualScorers } from './manual-scorers.js';
 import { liveAgentScorers, type LiveEvalSettings } from './live-evals.js';
@@ -66,15 +66,15 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
   });
   const searchClients = createTool({
     id: 'search-clients',
-    description: 'Find existing businesses by name, VAT number, city, or words in their notes. When the operator starts an order and names a customer, always call this before prepare-order, with that name and any hint words (hotel, shop, city). prepare-order\'s own match is not a substitute. If several match, return them all so you can ask or offer a pick; do not guess and do not silently prepare. If the operator later clarifies, call this again with the refined query; do not reuse an earlier lock. Do not open an empty order that still asks who the customer is. Do not create a duplicate when a record exists.',
+    description: 'Find existing businesses by legal name, VAT number, city, street, or the everyday name written in their notes. When the operator starts an order and names a customer, always call this before prepare-order, with that name and any hint words (hotel, shop, city). prepare-order\'s own match is not a substitute. If several match, return them all so you can ask or offer a pick; do not guess and do not silently prepare. If the operator later clarifies, call this again with the refined query; do not reuse an earlier lock. If the tighter query finds nobody, this still returns the closest related accounts so you can offer a pick; do not treat the customer as missing. Do not open an empty order that still asks who the customer is. Do not create a duplicate when a record exists.',
     inputSchema: z.object({ query: z.string().min(1).describe('The name or VAT number the operator gave, including hint words such as hotel, shop, or a city. Call again with a refined query when they clarify.') }),
     outputSchema: z.array(z.object({ id: z.string().min(1), name: z.string(), country: z.string(), city: z.string().optional(), vatNumber: z.string().optional(), notes: z.string().optional() })),
     execute: async ({ query }) => {
-      const words = normalize(query).split(/\s+/).filter(Boolean);
       const data = await knowledge.read();
       const ids = new Set(data.clientAliases.filter(a => normalize(a.phrase) === normalize(query)).map(a => a.clientId));
-      const blob = (c: { name: string; vatNumber?: string; city?: string; notes?: string }) => normalize([c.name, c.vatNumber, c.city, c.notes].filter(Boolean).join(' '));
-      return (await connector.listClients()).filter(c => c.id && (ids.has(c.id) || words.length && words.every(w => blob(c).includes(w))))
+      const listed = await connector.listClients();
+      const found = [...listed.filter(c => c.id && ids.has(c.id)), ...findClients(query, listed)];
+      return [...new Map(found.filter(c => c.id).map(c => [c.id!, c])).values()]
         .map(c => ({ id: c.id!, name: c.name, country: c.country, ...(c.city ? { city: c.city } : {}), vatNumber: c.vatNumber, ...(c.notes?.trim() ? { notes: c.notes } : {}) }));
     },
   });

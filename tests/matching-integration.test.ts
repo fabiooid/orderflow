@@ -5,7 +5,7 @@ import { createJevBatchSelector } from '../src/matching/jev-client.js';
 import type { SelectionResult } from '../src/matching/types.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { createDraftApi } from '../src/assistant/drafts.js';
-import { config, draft } from './helpers.js';
+import { config, draft, harborSiblings } from './helpers.js';
 
 const on = matchingConfigSchema.parse({ mode: 'on' });
 const context = { orderId: 'test', revision: 1, operatorText: 'Order for the example shop: two small pebble washes. Delivery eight.' };
@@ -222,6 +222,29 @@ it('lets the named customer replace a different company read from a document, li
   // The same company under a shorter name keeps its document details.
   const same = await resolver(connector, selectMany).resolve({ ...input, clientQuery: 'Harbor Goods' }, { ...context, operatorText: 'Order for Harbor Goods' });
   expect(same.draft.newClient?.vatNumber).toBe('IT00000000999');
+});
+
+it('asks which sibling when only the everyday place name is given, and can lock the hinted hotel', async () => {
+  const connector = new DemoConnector();
+  const { shop, hotel, cafe } = harborSiblings();
+  connector.clients.push(shop, hotel, cafe);
+  const select = vi.fn<SelectMany>(async requests => requests.map(r => r.candidates.length ? result('matched', r.candidates[0]!.id) : result('no-match')));
+  const r = resolver(connector, select);
+  const brand = await r.resolve({ ...draft(), clientQuery: 'Fable Harbor', lines: [] }, { ...context, operatorText: 'crea ordine per fable harbor' });
+  expect(brand.decisions[0]?.status).toBe('ambiguous');
+  expect(brand.draft.clientId).toBeUndefined();
+  expect(brand.issues[0]?.candidates?.map(c => c.id).sort()).toEqual(['210', '211', '212']);
+  expect(brand.issues[0]?.candidates?.some(c => c.label.includes('hotel'))).toBe(true);
+  expect(select.mock.calls.some(call => call[0].some(req => req.kind === 'client'))).toBe(false);
+  const hinted = await r.resolve({ ...draft(), clientQuery: 'Fable Harbor hotel', lines: [] }, { ...context, operatorText: 'no è per l hotel' });
+  expect(hinted.decisions[0]?.status).toBe('matched');
+  expect(hinted.draft.clientId).toBe('211');
+  const clientQuestion = select.mock.calls.at(-1)![0].find(req => req.kind === 'client');
+  expect(clientQuestion?.candidates.map(c => c.id)).toEqual(['211']);
+  expect(clientQuestion?.candidates[0]?.aliases).toContain('hotel');
+  const missed = await r.resolve({ ...draft(), clientQuery: 'Fable Harbor spa', lines: [] }, { ...context, operatorText: 'fable harbor spa' });
+  expect(missed.decisions[0]?.status).toBe('ambiguous');
+  expect(missed.issues[0]?.candidates?.map(c => c.id).sort()).toEqual(['210', '211', '212']);
 });
 
 it('reads catalogue litres written as "5lt" so a "5 L" request keeps them as candidates', async () => {

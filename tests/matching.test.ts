@@ -88,8 +88,10 @@ describe('read-only JEV selection boundary', () => {
       { id: '2', code: 'B', name: 'Delivery', description: '', netPrice: 15 },
       { id: '3', code: 'C', name: 'Heading', description: '', netPrice: 0 }];
     expect(productCandidates(products, '2')).toEqual([{ id: '1', code: 'A', name: 'Soap', description: '' }]);
-    expect(clientCandidates([{ id: '1', name: 'Shop', country: 'IT', city: 'Roma', street: 'private', postalCode: '00100', notes: 'private' }]))
-      .toEqual([{ id: '1', name: 'Shop', country: 'IT', city: 'Roma' }]);
+    expect(clientCandidates([{ id: '1', name: 'Shop', country: 'IT', city: 'Roma', street: 'private-street', postalCode: '00100', notes: 'Harbor shop' }]))
+      .toEqual([{ id: '1', name: 'Shop', country: 'IT', city: 'Roma', aliases: ['Harbor shop'] }]);
+    expect(clientCandidates([{ id: '2', name: 'Shop', country: 'IT', city: 'Roma', street: 'private-street', postalCode: '00100', notes: '' }]))
+      .toEqual([{ id: '2', name: 'Shop', country: 'IT', city: 'Roma' }]);
   });
   it('bounds SDK retries and does not retry authentication failures', async () => {
     for (const status of [401, 503]) {
