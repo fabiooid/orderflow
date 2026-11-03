@@ -3,7 +3,7 @@ import { withCompleteClientSearch } from './client-search.js';
 import { z } from 'zod';
 import type { AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
-import { asksForTester, isTester, normalize } from '../domain/matching.js';
+import { asksForTester, clientPickLabel, isTester, matchClients, normalize, searchClients } from '../domain/matching.js';
 import { draftSchema, type Client, type Product, type Issue, type OrderDraft } from '../domain/types.js';
 import { productCandidates, clientCandidates } from './candidates.js';
 import { loadMatchingConfig, type MatchingConfig } from './config.js';
@@ -73,22 +73,31 @@ export function createIdentityResolver(app: AppConfig, connector: OrderConnector
     type Pending = { field: string; kind: SelectionRequest['kind']; query: string; candidates: Candidate[]; exact?: Candidate; operator?: boolean; forced?: 'ambiguous' | 'no-match' };
     const pending: Pending[] = [];
     const clientQuery = draft.clientQuery || draft.newClient?.name || '';
-    const clientOptions = clientCandidates(clients);
+    const listed = clients.filter((c): c is Client & { id: string } => !!c.id);
     const vat = draft.newClient?.vatNumber ?? /(?:VAT|partita IVA|P\.? IVA)\s*[:#]?\s*([A-Z0-9]{6,})/i.exec(clientQuery)?.[1];
     const country = draft.newClient?.country;
-    const namedCities = [...new Set(clientOptions.map(c => c.city).filter((city): city is string => !!city && has(clientQuery, city)))];
-    const eligibleClients = clientOptions.filter(c => (!namedCities.length || namedCities.includes(c.city ?? '')) && (!vat || normalize(c.vatNumber ?? '') === normalize(vat)) && (!country || c.country === country));
+    const namedCities = [...new Set(listed.map(c => c.city).filter((city): city is string => !!city && has(clientQuery, city)))];
+    const eligibleRecords = listed.filter(c => (!namedCities.length || namedCities.includes(c.city)) && (!vat || normalize(c.vatNumber ?? '') === normalize(vat)) && (!country || c.country === country));
+    const allWord = clientQuery ? matchClients(clientQuery, eligibleRecords) : [];
+    const related = clientQuery ? searchClients(clientQuery, eligibleRecords) : [];
+    const lexical = allWord.length ? allWord : related;
     const ca = aliases.clientAliases.filter(a => normalize(a.phrase) === normalize(clientQuery));
-    const addAliases = (c: Candidate, values: string[]) => ({ ...c, ...(values.length ? { aliases: values } : {}) });
-    const clientSet = (choice?.field === 'client' ? clientOptions.filter(c => c.id === choice.id) : eligibleClients).map(c => addAliases(c, ca.filter(a => a.clientId === c.id).map(a => a.phrase)));
+    const addAliases = (c: Candidate, values: string[]) => {
+      const merged = [...new Set([...(c.aliases ?? []), ...values].filter(Boolean))];
+      return { ...c, ...(merged.length ? { aliases: merged } : {}) };
+    };
+    const narrowed = choice?.field === 'client' ? listed.filter(c => c.id === choice.id) : lexical.length ? lexical : eligibleRecords;
+    const clientSet = clientCandidates(narrowed).map(c => addAliases(c, ca.filter(a => a.clientId === c.id).map(a => a.phrase)));
     const confirmedClient = context.confirmedChoices?.find(c => c.field === 'client' && c.queryHash === hash(normalize(clientQuery)) && clientSet.some(record => record.id === c.id && identityHash(record) === c.identityHash));
     const exactClients = clientSet.filter(c => choice?.field === 'client' ? c.id === choice.id : confirmedClient ? c.id === confirmedClient.id : [c.name, c.vatNumber ?? ''].some(v => normalize(v) === normalize(clientQuery) && has(context.operatorText, v)));
+    const siblingAsk = choice?.field !== 'client' && !confirmedClient && exactClients.length !== 1
+      && (allWord.length > 1 || (allWord.length === 0 && related.length > 0));
     pending.push({ field: 'client', kind: 'client', query: clientQuery, candidates: clientSet,
       operator: choice?.field === 'client' || !!confirmedClient,
       exact: exactClients.length === 1 && (choice?.field === 'client' || confirmedClient || new Set(ca.map(a => a.clientId)).size <= 1) ? exactClients[0] : undefined,
       ...(choice?.field === 'client' && !clientSet.length ? { forced: 'no-match' as const } : {}),
       ...(!clientQuery && choice?.field !== 'client' ? { forced: 'no-match' as const } : {}),
-      ...(choice?.field !== 'client' && !confirmedClient && new Set(ca.map(a => a.clientId)).size > 1 ? { forced: 'ambiguous' as const } : {}) });
+      ...(choice?.field !== 'client' && !confirmedClient && (siblingAsk || new Set(ca.map(a => a.clientId)).size > 1) ? { forced: 'ambiguous' as const } : {}) });
     for (const [index, line] of draft.lines.entries()) {
       const all = products.filter(p => p.id !== app.invoicing.shippingProductId && p.netPrice > 0);
       const confirmed = context.confirmedChoices?.find(c => c.field === `lines.${index}` && c.queryHash === hash(normalize(line.query)) && productCandidates(all).some(record => record.id === c.id && identityHash(record) === c.identityHash));
@@ -151,7 +160,7 @@ export function createIdentityResolver(app: AppConfig, connector: OrderConnector
           message: status === 'unavailable' ? 'Identity matching unavailable or candidate set too large. Retry or specify an exact code.'
             : status === 'no-match' ? (item.kind === 'product' ? 'No catalogue product matches these words. No record has been selected.' : 'No existing record matches. Check the spelling, or provide details to create a new record. No record has been selected.')
             : 'Clarify the exact identity; provide the customer city, VAT number, or a more specific name. No record has been selected.',
-          candidates: offered.slice(0, 10).map(c => ({ id: c.id, label: [c.code, c.name, c.city, c.country, c.vatNumber].filter(Boolean).join(' — ') })) });
+          candidates: offered.slice(0, 10).map(c => ({ id: c.id, label: clientPickLabel(c) })) });
       }
     }
     return { draft: config.mode === 'shadow' ? original : draft, issues, decisions };

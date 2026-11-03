@@ -2,19 +2,21 @@ import type { AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
 import { clientSchema, draftSchema, preparedOrderSchema, type Client, type Issue, type OrderDraft, type OrderLine, type PreparedOrder, type Product, type VatValidation } from './types.js';
 import { missingCustomerFields } from './customer.js';
-import { asksForTester, isTester, matchProducts, namedAlternatives, normalize, sameClient, searchCatalogue } from './matching.js';
+import { asksForTester, clientPickLabel, isTester, matchClients, matchProducts, namedAlternatives, normalize, sameClient, searchCatalogue, searchClients } from './matching.js';
 
 /** `draft` is the draft as preparation read it, for example without a delivery address equal to the billing one. */
 export type Preparation = { ready: false; issues: Issue[]; draft: OrderDraft; clientId?: string } | { ready: true; order: PreparedOrder; draft: OrderDraft };
 export type ValidationLookup = (country: string, vatNumber: string) => Promise<VatValidation>;
-const toCandidates = (clients: Client[]) => clients.filter(c => c.id).map(c => ({ id: c.id!, label: c.name }));
+const toCandidates = (clients: Client[]) => clients.filter(c => c.id).map(c => ({ id: c.id!, label: clientPickLabel(c) }));
 
 export async function prepareOrder(input: OrderDraft, config: AppConfig, connector: Pick<OrderConnector, 'listProducts' | 'listClients'>, date: string, validateVat?: ValidationLookup): Promise<Preparation> {
   const draft = draftSchema.parse(input);
   const [products, clients] = await Promise.all([connector.listProducts(), connector.listClients()]);
   const issues: Issue[] = [];
-  const query = normalize(draft.clientQuery);
-  const matches = clients.filter(c => draft.clientId ? c.id === draft.clientId : query !== '' && (normalize(c.name) === query || normalize(c.vatNumber ?? '') === query));
+  const query = draft.clientQuery.trim();
+  const matches = draft.clientId
+    ? clients.filter(c => c.id === draft.clientId)
+    : query ? matchClients(query, clients) : [];
   let client: Partial<Client> | undefined = draft.newClient ?? (matches.length === 1 ? matches[0] : undefined);
   if (draft.newClient) {
     const duplicates = clients.filter(c => sameClient(c, draft.newClient!));
@@ -23,7 +25,8 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
       client = undefined;
     }
   } else if (!client) {
-    issues.push({ field: 'client', message: 'Choose an existing client or supply complete new-client details', candidates: toCandidates(matches) });
+    const offered = matches.length ? matches : query ? searchClients(query, clients) : [];
+    issues.push({ field: 'client', message: 'Choose an existing client or supply complete new-client details', candidates: toCandidates(offered) });
   }
   if (client) {
     const valid = clientSchema.safeParse(client);

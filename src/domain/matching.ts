@@ -1,7 +1,10 @@
-import type { Product } from './types.js';
+import type { Client, Product } from './types.js';
 
 /** Most choices shown to the operator for one question. */
 export const MAX_CHOICES = 10;
+
+/** Fields used to find a customer: legal name, everyday name in notes, and street when the place-name lives there. */
+export type ClientSearchRecord = Pick<Client, 'name'> & Partial<Pick<Client, 'id' | 'vatNumber' | 'city' | 'street' | 'notes'>>;
 
 export function normalize(value: string): string {
   return value.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
@@ -67,6 +70,50 @@ export function searchCatalogue(query: string, products: Product[]): Product[] {
     .sort((a, b) => b.score - a.score)
     .slice(0, 15)
     .map(entry => entry.product);
+}
+
+function clientText(client: ClientSearchRecord) {
+  return normalize([client.name, client.vatNumber, client.city, client.notes, client.street].filter(Boolean).join(' '));
+}
+
+function exactClients<T extends ClientSearchRecord>(query: string, clients: T[]): T[] {
+  const q = normalize(query);
+  return q ? clients.filter(c => normalize(c.name) === q || normalize(c.vatNumber ?? '') === q) : [];
+}
+
+function clientScore(queryWords: string[], client: ClientSearchRecord) {
+  const text = clientText(client);
+  return queryWords.filter(word => contains(text, word)).length;
+}
+
+/** Clients whose legal name, VAT, city, notes or street contain every word of the query, or an exact name or VAT. */
+export function matchClients<T extends ClientSearchRecord>(query: string, clients: T[]): T[] {
+  const exact = exactClients(query, clients);
+  if (exact.length) return exact;
+  const words = normalize(query).split(' ').filter(Boolean);
+  if (!words.length) return [];
+  return clients.filter(client => clientScore(words, client) === words.length);
+}
+
+/**
+ * Find customers by the name people use, not only the legal name. Prefer every-word hits; if a tighter
+ * refine (a hint such as hotel or shop) finds nobody, fall back to the closest sibling accounts.
+ */
+export function searchClients<T extends ClientSearchRecord>(query: string, clients: T[]): T[] {
+  const matched = matchClients(query, clients);
+  if (matched.length) return matched;
+  const words = normalize(query).split(' ').filter(Boolean);
+  if (!words.length) return [];
+  const scored = clients.map(client => ({ client, score: clientScore(words, client) })).filter(entry => entry.score > 0);
+  const best = Math.max(0, ...scored.map(entry => entry.score));
+  if (best < Math.max(1, words.length - 1)) return [];
+  return scored.filter(entry => entry.score === best).map(entry => entry.client);
+}
+
+/** Button label: legal name, then the everyday name from notes when it adds something. */
+export function clientPickLabel(client: { name: string; code?: string; city?: string; country?: string; vatNumber?: string; notes?: string; aliases?: string[] }) {
+  const extra = [...new Set([...(client.aliases ?? []), client.notes?.trim() ?? ''].filter(value => value && !normalize(client.name).includes(normalize(value))))];
+  return [client.code, client.name, ...extra, client.city, client.country, client.vatNumber].filter(Boolean).join(' — ');
 }
 
 /** "A oppure B" (or "A or B") naming catalogue products exactly, such as a doubtful value read from an order form; anything before a colon is a label. */

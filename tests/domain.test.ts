@@ -3,9 +3,9 @@ import { configSchema } from '../src/config/schema.js';
 import { draftSchema, preparedOrderSchema } from '../src/domain/types.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { prepareOrder } from '../src/domain/prepare.js';
-import { matchProducts, searchCatalogue } from '../src/domain/matching.js';
+import { matchClients, matchProducts, searchCatalogue, searchClients } from '../src/domain/matching.js';
 import { calculateLineTotals } from '../src/domain/totals.js';
-import { config, draft, prepared } from './helpers.js';
+import { config, draft, harborSiblings, prepared } from './helpers.js';
 
 describe('business configuration', () => {
   it('rejects unsupported modes and undeclared capabilities', () => {
@@ -64,6 +64,31 @@ describe('product matching', () => {
   });
 });
 
+describe('client search', () => {
+  const { shop, hotel, cafe } = harborSiblings();
+  const clients = [shop, hotel, cafe];
+
+  it('finds the hotel from the everyday place name plus a hotel hint', () => {
+    expect(searchClients('Fable Harbor hotel', clients).map(c => c.id)).toEqual(['211']);
+    expect(matchClients('Fable Harbor hotel', clients).map(c => c.id)).toEqual(['211']);
+  });
+  it('finds the shop from the everyday place name plus a shop hint', () => {
+    expect(searchClients('Fable Harbor shop', clients).map(c => c.id)).toEqual(['210']);
+  });
+  it('returns shop and hotel siblings for the shared place name instead of locking one', () => {
+    expect(searchClients('Fable Harbor', clients).map(c => c.id).sort()).toEqual(['210', '211', '212']);
+    expect(matchClients('Fable Harbor', clients)).toHaveLength(3);
+  });
+  it('falls back to sibling picks when a tighter hint matches nobody', () => {
+    expect(matchClients('Fable Harbor spa', clients)).toEqual([]);
+    expect(searchClients('Fable Harbor spa', clients).map(c => c.id).sort()).toEqual(['210', '211', '212']);
+  });
+  it('still matches a legal name when notes are empty or used for other text', () => {
+    expect(searchClients('Fable Harbor Cafe', clients).map(c => c.id)).toEqual(['212']);
+    expect(searchClients('Example Studio', [{ id: '201', name: 'Example Studio', notes: '', street: 'Example Street 1', city: 'Example City' }]).map(c => c.id)).toEqual(['201']);
+  });
+});
+
 describe('order preparation', () => {
   it('offers no client candidates when no client was named', async () => {
     const connector = new DemoConnector();
@@ -71,6 +96,22 @@ describe('order preparation', () => {
     const result = await prepareOrder({ ...draft(), clientQuery: '' }, config(), connector, '2026-01-15');
     if (result.ready) throw new Error('Expected a client question');
     expect(result.issues.find(i => i.field === 'client')?.candidates).toEqual([]);
+  });
+  it('locks the hotel from an everyday name plus hint, and asks when only the shared place name is given', async () => {
+    const connector = new DemoConnector();
+    const { shop, hotel, cafe } = harborSiblings();
+    connector.clients.push(shop, hotel, cafe);
+    const locked = await prepareOrder({ ...draft(), clientQuery: 'Fable Harbor hotel' }, config(), connector, '2026-01-15');
+    expect(locked.ready && locked.order.client.id).toBe('211');
+    const asked = await prepareOrder({ ...draft(), clientQuery: 'Fable Harbor' }, config(), connector, '2026-01-15');
+    if (asked.ready) throw new Error('Expected a client question');
+    expect(asked.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id).sort()).toEqual(['210', '211', '212']);
+    expect(asked.issues.find(i => i.field === 'client')?.candidates?.some(c => c.label.includes('hotel'))).toBe(true);
+    const shopHint = await prepareOrder({ ...draft(), clientQuery: 'Fable Harbor shop' }, config(), connector, '2026-01-15');
+    expect(shopHint.ready && shopHint.order.client.id).toBe('210');
+    const refine = await prepareOrder({ ...draft(), clientQuery: 'Fable Harbor spa' }, config(), connector, '2026-01-15');
+    if (refine.ready) throw new Error('Expected sibling picks, not a missing customer');
+    expect(refine.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id).sort()).toEqual(['210', '211', '212']);
   });
   it('uses a stated product price and otherwise keeps the catalogue price', async () => {
     const stated = await prepareOrder({ ...draft(), lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2, netPrice: 90 }] }, config(), new DemoConnector(), '2026-01-15');
