@@ -1,6 +1,9 @@
-import type { Client, Issue, NewCustomer, OrderDraft, PreparedOrder, Totals } from '../domain/types.js';
+import type { Client, Issue, NewCustomer, OrderDraft, PreparedOrder, Product, Totals } from '../domain/types.js';
 import type { Discrepancy } from '../domain/history.js';
 import { copy, type CopyKey, type CopyVars } from './locales/index.js';
+
+/** Name and net price from the live catalogue, looked up by the product id already on the draft. */
+type DraftCatalogue = readonly Pick<Product, 'id' | 'name' | 'netPrice'>[];
 
 const rule = '━━━━━━━━━━━━━━━━';
 
@@ -22,10 +25,21 @@ function place(client: Partial<Pick<NewCustomer, 'street' | 'postalCode' | 'city
 /** The line an issue or choice field such as `lines.2` or `lines.2.quantity` refers to. */
 export const lineIndex = (field: string) => { const match = /^lines\.(\d+)/.exec(field); return match ? Number(match[1]) : undefined; };
 
+function sameLabel(a: string, b: string) {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+/** Catalogue name when the line already has a product id; otherwise the original wording. */
+function lineLabel(line: OrderDraft['lines'][number] | undefined, catalogue: DraftCatalogue) {
+  if (!line) return undefined;
+  const product = line.productId ? catalogue.find(item => item.id === line.productId) : undefined;
+  return product?.name ?? line.query;
+}
+
 /** One short label per open point: the agent asks the actual questions, the template only marks what is missing. */
-function openPoint(issue: Issue, draft: OrderDraft, it: boolean) {
+function openPoint(issue: Issue, draft: OrderDraft, it: boolean, catalogue: DraftCatalogue) {
   const index = lineIndex(issue.field);
-  const query = index === undefined ? undefined : draft.lines[index]?.query;
+  const query = lineLabel(index === undefined ? undefined : draft.lines[index], catalogue);
   if (query !== undefined) {
     if (issue.field.endsWith('.quantity')) return say(it, 'draftQuantityFor', { query });
     if (issue.priceComparison) return say(it, 'draftPriceOf', { query });
@@ -48,7 +62,7 @@ function openPoint(issue: Issue, draft: OrderDraft, it: boolean) {
 export const pickable = (issue: Issue) => (issue.field === 'client' || /^lines\.\d+$/.test(issue.field)) && !!issue.candidates?.length;
 
 /** An order still being completed: what is known so far, with ❓ where something is missing. */
-export function orderDraft(draft: OrderDraft, issues: Issue[], it: boolean, client?: Client, currency = 'EUR') {
+export function orderDraft(draft: OrderDraft, issues: Issue[], it: boolean, client?: Client, currency = 'EUR', catalogue: DraftCatalogue = []) {
   const open = new Set(issues.map(issue => issue.field));
   const lines = [say(it, 'draftOrder'), rule, ''];
   if (client) lines.push(`🏪 ${client.name}`, ...(client.vatNumber ? [`🧾 ${say(it, 'vatShort')} ${client.vatNumber}`] : []), `📍 ${place(client)}`);
@@ -61,14 +75,19 @@ export function orderDraft(draft: OrderDraft, issues: Issue[], it: boolean, clie
   for (const [index, line] of draft.lines.entries()) {
     const unsure = [...open].some(field => field === `lines.${index}` || field === `lines.${index}.documentPrice`);
     const quantity = line.quantity === undefined ? '❓' : String(line.quantity);
-    const price = line.netPrice === undefined ? '' : ` — ${money(line.netPrice, it, currency)}`;
-    lines.push(`${quantity} × ${line.query}${price}${unsure ? ' ❓' : ''}`);
+    const product = line.productId ? catalogue.find(item => item.id === line.productId) : undefined;
+    const name = product?.name ?? line.query;
+    const amount = line.netPrice ?? product?.netPrice;
+    const price = amount === undefined ? '' : ` — ${money(amount, it, currency)}`;
+    // Original form text stays only when it still adds something the catalogue name does not already say.
+    const asWritten = product && !sameLabel(line.query, product.name) ? ` (${line.query})` : '';
+    lines.push(`${quantity} × ${name}${asWritten}${price}${unsure ? ' ❓' : ''}`);
   }
   lines.push('', `🚚 ${say(it, 'draftDelivery')}: ${draft.shippingPrice === undefined ? '❓' : draft.shippingPrice === 0 ? say(it, 'draftNone') : money(draft.shippingPrice, it, currency)}`);
   if (draft.delivery) lines.push(`📦 ${say(it, 'draftShipTo')}: ${draft.delivery.address}${draft.delivery.country ? `, ${draft.delivery.country}` : ' ❓'}`);
   if (draft.discountPercent > 0) lines.push(`💸 ${say(it, 'draftDiscount')} ${draft.discountPercent}%`);
   if (draft.notes.trim()) lines.push('', say(it, 'draftNotes'), draft.notes.trim());
-  const points = [...new Set(issues.map(issue => openPoint(issue, draft, it)))];
+  const points = [...new Set(issues.map(issue => openPoint(issue, draft, it, catalogue)))];
   if (points.length) lines.push('', `❓ ${say(it, 'draftToComplete')}: ${points.join(' · ')}`);
   return lines.join('\n');
 }

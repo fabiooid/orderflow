@@ -62,6 +62,41 @@ it('shows a draft order with what is known and marks each missing piece', () => 
   expect(issues.filter(pickable).map(i => i.field)).toEqual(['client', 'lines.1']);
 });
 
+it('shows catalogue name and price once a line is matched, and keeps original wording only as context', () => {
+  const draft = draftSchema.parse({
+    clientQuery: 'Example Studio',
+    lines: [
+      { query: 'A1 SAP-MNT scanned label', productId: '101', quantity: 2 },
+      { query: 'unknown scanned row', quantity: 1 },
+      { query: 'Pebble hand wash 250 ml', productId: '101', quantity: 3 },
+    ],
+  });
+  const catalogue = [
+    { id: '101', name: 'Pebble hand wash 250 ml', netPrice: 12 },
+    { id: '103', name: 'Linen candle 200 g', netPrice: 20 },
+  ];
+  const issues = [
+    { field: 'lines.1', message: 'Choose the exact product' },
+    { field: 'shippingPrice', message: 'Confirm the delivery charge' },
+  ];
+  const text = orderDraft(draft, issues, true, undefined, 'EUR', catalogue);
+  expect(text).toContain('2 × Pebble hand wash 250 ml (A1 SAP-MNT scanned label) — €12,00');
+  expect(text).toContain('1 × unknown scanned row ❓');
+  expect(text).toContain('3 × Pebble hand wash 250 ml — €12,00');
+  expect(text).not.toMatch(/^2 × A1 SAP-MNT scanned label/m);
+  expect(text).toContain('❓ Da completare: prodotto per unknown scanned row · costo di consegna');
+});
+
+it('uses an explicit line price instead of the catalogue price when one is already on the draft', () => {
+  const draft = draftSchema.parse({
+    clientQuery: 'Example Studio',
+    lines: [{ query: 'form code A1', productId: '101', quantity: 2, netPrice: 9 }],
+  });
+  const text = orderDraft(draft, [], false, undefined, 'EUR', [{ id: '101', name: 'Pebble hand wash 250 ml', netPrice: 12 }]);
+  expect(text).toContain('2 × Pebble hand wash 250 ml (form code A1) — €9.00');
+  expect(text).not.toContain('12.00');
+});
+
 it('shows the chosen customer on a draft order', () => {
   const draft = draftSchema.parse({ clientQuery: 'Example Studio', clientId: '201', lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 0 });
   const text = orderDraft(draft, [{ field: 'vat', message: 'Check VAT' }], true, { id: '201', name: 'Example Studio', country: 'IT', street: 'Example Street 1', city: 'Example City', postalCode: '00000', notes: '' });
