@@ -161,6 +161,32 @@ describe('controller media flow', () => {
       expect(await store.activeRequest()).toBeUndefined();
     } finally { store.close(); }
   });
+
+  it('does not send the unreadable-pages reply when a later read of the same photo succeeds', async () => {
+    const pages = vi.fn()
+      .mockRejectedValueOnce(new Error('temporary vision failure'))
+      .mockResolvedValueOnce({ provider: 'test-reader', status: 'needs_review', pages: [{ source: { fileIndex: 0, pageNumber: 1 }, text: 'DEMO-A | 1' }] });
+    const { store, engine, send, controller } = await setup(createMediaReader(config(), new DemoConnector(), async () => new Uint8Array([1]), { documents: { id: 'test-reader', read: pages } }));
+    try {
+      await controller.handle(photo(1, { caption: '@demo_bot ordine' }));
+      expect(send.mock.calls.map(call => String(call[0])).join('\n')).not.toMatch(/non riesco a leggere tutte le pagine/i);
+      expect(engine.turn).toHaveBeenCalledTimes(1);
+      expect(engine.turn.mock.calls[0]![0].text).toContain('DEMO-A | 1');
+      expect(pages).toHaveBeenCalledTimes(2);
+    } finally { store.close(); }
+  });
+
+  it('sends the unreadable-pages reply only after a retried photo read still fails', async () => {
+    const pages = vi.fn().mockRejectedValue(new Error('vision failed'));
+    const { store, engine, send, controller } = await setup(createMediaReader(config(), new DemoConnector(), async () => new Uint8Array([1]), { documents: { id: 'test-reader', read: pages } }));
+    try {
+      await controller.handle(photo(1, { caption: '@demo_bot ordine' }));
+      expect(send).toHaveBeenLastCalledWith('Non riesco a leggere tutte le pagine. Invia un PDF non protetto di massimo 10 pagine o immagini statiche JPEG, PNG, WebP, GIF o TIFF leggibili; nessuna bozza aggiornata.', 1, undefined);
+      expect(engine.turn).not.toHaveBeenCalled();
+      expect(pages).toHaveBeenCalledTimes(2);
+      expect(await store.activeRequest()).toBeUndefined();
+    } finally { store.close(); }
+  });
 });
 
 describe('media reader', () => {
@@ -178,6 +204,36 @@ describe('media reader', () => {
     expect(result.echo).toBe('🎙️ «due saponi»');
     expect(transcribe.mock.calls[0]![2]).toContain('Pebble');
     expect(read.mock.calls[0]![0]).toEqual([{ data: expect.any(Buffer), mimeType: 'image/png' }]);
+  });
+  it('retries a transient document read before saying the pages could not be read', async () => {
+    const download = vi.fn(async () => new Uint8Array([1, 2, 3]));
+    const read = vi.fn()
+      .mockRejectedValueOnce(new Error('temporary vision failure'))
+      .mockResolvedValueOnce({ provider: 'test-reader', status: 'needs_review', pages: [{ source: { fileIndex: 0, pageNumber: 1 }, text: 'DEMO-A | 2' }] });
+    const media = createMediaReader(config(), new DemoConnector(), download, { documents: { id: 'test-reader', read } });
+    const result = await media(event({ attachments: [{ kind: 'image', fileId: 'photo', mimeType: 'image/jpeg' }] }), 'en');
+    expect(result.text).toContain('DEMO-A | 2');
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(download).toHaveBeenCalledTimes(2);
+  });
+  it('retries a transient download before saying the pages could not be read', async () => {
+    const download = vi.fn()
+      .mockRejectedValueOnce(new Error('Telegram file download failed'))
+      .mockResolvedValueOnce(new Uint8Array([1, 2, 3]));
+    const read = vi.fn(async () => ({ provider: 'test-reader', status: 'needs_review' as const, pages: [{ source: { fileIndex: 0, pageNumber: 1 }, text: 'DEMO-B | 1' }] }));
+    const media = createMediaReader(config(), new DemoConnector(), download, { documents: { id: 'test-reader', read } });
+    const result = await media(event({ attachments: [{ kind: 'image', fileId: 'photo', mimeType: 'image/jpeg' }] }), 'en');
+    expect(result.text).toContain('DEMO-B | 1');
+    expect(download).toHaveBeenCalledTimes(2);
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+  it('tells the operator the pages could not be read only after the retry also fails', async () => {
+    const read = vi.fn().mockRejectedValue(new Error('still unreadable'));
+    const media = createMediaReader(config(), new DemoConnector(), async () => new Uint8Array([1]), { documents: { id: 'test-reader', read } });
+    const failure = media(event({ attachments: [{ kind: 'image', fileId: 'photo', mimeType: 'image/jpeg' }] }), 'en');
+    await expect(failure).rejects.toBeInstanceOf(MediaError);
+    await expect(failure).rejects.toThrow(/could not read all pages/i);
+    expect(read).toHaveBeenCalledTimes(2);
   });
   it('refuses oversized files and unconfigured voice notes before downloading', async () => {
     const download = vi.fn();

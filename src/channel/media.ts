@@ -79,9 +79,14 @@ export function createMediaReader(config: AppConfig, connector: OrderConnector, 
     }
     const documents = files.filter(f => f.kind !== 'voice');
     if (documents.length) {
+      const readPages = () => traceOperation('Read document pages', async () => ports.documents.read(await Promise.all(documents.map(fetchFile))));
+      // A temporary download, decode or vision failure is retried once before the operator is told.
       let result;
-      try { result = await traceOperation('Read document pages', async () => ports.documents.read(await Promise.all(documents.map(fetchFile)))); }
-      catch { throw new MediaError(t('pagesUnreadable')); }
+      try { result = await readPages(); }
+      catch {
+        try { result = await readPages(); }
+        catch { throw new MediaError(t('pagesUnreadable')); }
+      }
       const forms = documentForms(result, config.orderForms);
       if (forms.length) {
         const names = new Map((await connector.listProducts()).map(p => [p.id, p.name]));
