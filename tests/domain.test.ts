@@ -113,6 +113,26 @@ describe('order preparation', () => {
     if (refine.ready) throw new Error('Expected sibling picks, not a missing customer');
     expect(refine.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id).sort()).toEqual(['210', '211', '212']);
   });
+  it('copies the catalogue description onto a linked line, and leaves it empty when the product has none', async () => {
+    const connector = new DemoConnector();
+    connector.products[0]!.description = 'Fictional pebble-scented wash in a 250 ml bottle.';
+    const withText = await prepareOrder(draft(), config(), connector, '2026-01-15');
+    expect(withText.ready && withText.order.lines[0]).toMatchObject({
+      productId: '101', name: 'Pebble hand wash 250 ml',
+      description: 'Fictional pebble-scented wash in a 250 ml bottle.',
+    });
+    expect(withText.ready && withText.order.lines[0]!.netPrice).toBe(12);
+    const empty = await prepared();
+    expect(empty.lines[0]).toMatchObject({ productId: '101', description: '' });
+  });
+  it('loads an older prepared order that has no line description', async () => {
+    const order = await prepared();
+    const legacy = { ...order, lines: order.lines.map(({ description: _, ...line }) => line) };
+    expect(legacy.lines[0]).not.toHaveProperty('description');
+    const loaded = preparedOrderSchema.parse(legacy);
+    expect(loaded.lines.every(line => line.description === '')).toBe(true);
+    expect(loaded.lines[0]).toMatchObject({ productId: '101', name: 'Pebble hand wash 250 ml', netPrice: 12 });
+  });
   it('uses a stated product price and otherwise keeps the catalogue price', async () => {
     const stated = await prepareOrder({ ...draft(), lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2, netPrice: 90 }] }, config(), new DemoConnector(), '2026-01-15');
     expect(stated.ready && stated.order.lines.map(l => l.netPrice)).toEqual([90, 8]);

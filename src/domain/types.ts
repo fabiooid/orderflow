@@ -69,6 +69,8 @@ export const orderLineSchema = z.object({
   productId: z.string().min(1),
   code: z.string(),
   name: z.string().min(1),
+  /** Catalogue text copied onto the line. Older saved shapes omit it and load as empty. */
+  description: z.string().default(''),
   quantity: z.number().finite().positive(),
   netPrice: z.number().finite().min(0),
   discountPercent: z.number().min(0).max(100),

@@ -102,7 +102,7 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
   if (issues.length || !client || !delivery || !rule || !binding || shippingPrice === undefined) return { ready: false, issues, draft, ...(existing ? { clientId: existing } : {}) };
 
   const makeLine = (product: Product, quantity: number, isShipping: boolean, netPrice?: number): OrderLine => ({
-    productId: product.id, code: product.code, name: product.name, quantity,
+    productId: product.id, code: product.code, name: product.name, description: product.description, quantity,
     netPrice: isShipping ? shippingPrice : netPrice ?? product.netPrice,
     discountPercent: !isShipping || (draft.discountShipping ?? config.shipping.discountByDefault) ? draft.discountPercent : 0,
     vatId: binding.vatId, vatRate: rule.rate, nature: binding.nature, shipping: isShipping,
