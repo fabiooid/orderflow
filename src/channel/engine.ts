@@ -94,7 +94,7 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
   });
 
   /** The new revision of a request and its template, from what the order or customer API reported. */
-  const render = (result: DraftResult, previous: Conversation, locale: AppConfig['locale']): { order: Conversation; text: string } => {
+  const render = async (result: DraftResult, previous: Conversation, locale: AppConfig['locale']): Promise<{ order: Conversation; text: string }> => {
     const it = locale === 'it';
     const next: Conversation = { ...previous, locale, revision: previous.revision + 1, draft: result.draft, matchingDecisions: result.decisions,
       confirmedChoices: confirmedChoices(result.decisions), prepared: undefined, totals: undefined, issues: undefined };
@@ -105,7 +105,9 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
     }
     if (result.status === 'ready') return { order: { ...next, status: 'ready', prepared: result.order, totals: result.totals },
       text: orderPreview(result.order, result.totals, it, result.discrepancies, config.currency) };
-    return { order: { ...next, status: 'suspended', issues: result.issues }, text: orderDraft(result.draft, result.issues, it, result.client, config.currency) };
+    // Catalogue names and prices are already known; the draft template must not keep printing only the original wording.
+    const catalogue = result.draft.lines.some(line => line.productId) ? await connector.listProducts().catch(() => []) : [];
+    return { order: { ...next, status: 'suspended', issues: result.issues }, text: orderDraft(result.draft, result.issues, it, result.client, config.currency, catalogue) };
   };
 
   const turn = async (input: TurnInput) => {
@@ -132,7 +134,7 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
     if (!result) return { text: reply, reply, locale, ...(outcome.refused ? { blocked: true } : {}) };
     // A request of the other kind replaces the open one, keeping its conversation so far.
     const replaced = request && result.kind !== kindOf(request) ? request : undefined;
-    const rendered = render(result, { ...(replaced || !request ? input.fresh(result.kind) : request), sourceText: evidence }, locale);
+    const rendered = await render(result, { ...(replaced || !request ? input.fresh(result.kind) : request), sourceText: evidence }, locale);
     return { text: [reply.trim(), rendered.text].filter(Boolean).join('\n\n'), reply, locale, order: rendered.order, ...(replaced ? { replaced } : {}) };
   };
 

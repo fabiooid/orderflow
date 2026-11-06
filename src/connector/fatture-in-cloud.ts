@@ -69,7 +69,7 @@ export function toFicOrder(input: PreparedOrder): IssuedDocument {
     notes: order.notes,
     payment_method: order.paymentMethodId ? { id: order.paymentMethodId } : undefined,
     items_list: order.lines.map(line => ({
-      product_id: ficId(line.productId), code: line.code, name: line.name,
+      product_id: ficId(line.productId), code: line.code, name: line.name, description: line.description,
       qty: line.quantity, net_price: line.netPrice, discount: line.discountPercent,
       vat: { id: line.vatId },
     })),

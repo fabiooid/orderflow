@@ -54,7 +54,7 @@ describe('restricted SDK adapter', () => {
     expect(payload.type).toBe('order');
     expect(payload.e_invoice).toBe(false);
     expect(payload.entity.name).toBe('Example Studio');
-    expect(payload.items_list[0]).toMatchObject({ product_id: 101, net_price: 12, discount: 10, vat: { id: 1 } });
+    expect(payload.items_list[0]).toMatchObject({ product_id: 101, name: 'Pebble hand wash 250 ml', description: '', net_price: 12, discount: 10, vat: { id: 1 } });
     expect(payload.payments_list[0].amount).toBe(36.11);
     expect(Object.keys(connector)).not.toContain('sdk');
   });
@@ -85,6 +85,14 @@ describe('restricted SDK adapter', () => {
     const connector = new FattureInCloudConnector(1, ports as unknown as SdkPorts);
     expect((await connector.listProducts()).map(p => p.id)).toEqual(['1', '2', '3', '4', '5', '6']);
     expect(ports.products.listProducts).toHaveBeenCalledTimes(6);
+  });
+  it('sends the catalogue description on each invoicing line', async () => {
+    const order = await prepared();
+    order.lines[0]!.description = 'Fictional pebble-scented wash in a 250 ml bottle.';
+    expect(toFicOrder(order).items_list?.[0]).toMatchObject({
+      product_id: 101, name: 'Pebble hand wash 250 ml',
+      description: 'Fictional pebble-scented wash in a 250 ml bottle.',
+    });
   });
   it('rejects arbitrary email or unsupported document fields', async () => {
     const order = await prepared();

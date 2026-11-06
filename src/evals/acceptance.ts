@@ -33,4 +33,27 @@ const scenarios: [id: string, messages: string[], scripted: OrderDraft[], expect
   ['discount-excludes-delivery', ['Ordine per Example Studio: 2 Pebble hand wash 250 ml, sconto 10%, spedizione 8 euro.'], [{ ...base, discountPercent: 10 }], ready([merchandise(2, 12, 10), shipping], 29.6, 6.51, 36.11)],
   ['missing-delivery', ['Prepare an order for Example Studio: 2 Pebble hand wash 250 ml.'], [{ ...base, shippingPrice: undefined }], { ready: false, issues: ['shippingPrice'] }],
 ];
-export const acceptanceCases: ConversationCase[] = scenarios.map(([id, messages, scripted, expected]) => ({ id, turns: messages.map(text => ({ text })), scripted, check: exactOutcome(expected) }));
+const lastReply = (o: { replies: string[] }) => o.replies.at(-1) ?? '';
+
+export const acceptanceCases: ConversationCase[] = [
+  ...scenarios.map(([id, messages, scripted, expected]) => ({ id, turns: messages.map(text => ({ text })), scripted, check: exactOutcome(expected) })),
+  {
+    // Form-style wording already attached to a catalogue product: the draft must show that catalogue name, not only the scan.
+    id: 'form-line-shows-catalogue',
+    turns: [{ text: 'ordine dal modulo' }],
+    scripted: [draftSchema.parse({
+      clientQuery: 'Example Studio',
+      lines: [
+        { query: 'A1 SAP-MNT scanned label', productId: '101', quantity: 2 },
+        { query: 'unknown scanned row', quantity: 1 },
+      ],
+    })],
+    check: o => [
+      ...expect(o.open?.status === 'suspended', `expected a draft still waiting, got ${o.open?.status ?? 'none'}`),
+      ...expect(/2 × Pebble hand wash 250 ml/.test(lastReply(o)), 'matched line did not show the catalogue name'),
+      ...expect(/€12,00/.test(lastReply(o)), 'matched line did not show the catalogue price'),
+      ...expect(/unknown scanned row/.test(lastReply(o)), 'unmatched line lost the original wording'),
+      ...expect(!/2 × A1 SAP-MNT scanned label/.test(lastReply(o)), 'matched line still led with the original form text'),
+    ],
+  },
+];

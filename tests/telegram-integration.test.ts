@@ -91,6 +91,8 @@ it('runs the real order API from scripted agent turns, with a candidate picked b
     await controller.handle(press(2, 'pick:u1:1:lines.0:104', 100));
     expect(converse).toHaveBeenCalledTimes(1);
     expect((await store.order('u1'))?.draft.lines[0]?.productId).toBe('104');
+    expect(send.mock.calls[1]![0]).toContain('2 × Pebble hand wash 500 ml');
+    expect(send.mock.calls[1]![0]).toContain('€20,00');
     expect(send.mock.calls[1]![0]).toContain('🚚 Consegna: ❓');
     await controller.handle(message(3, 'spedizione 8', 101, 7));
     const ready = await store.order('u1');
