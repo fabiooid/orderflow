@@ -5,7 +5,7 @@ import { DemoConnector } from '../src/connector/demo.js';
 import { prepareOrder } from '../src/domain/prepare.js';
 import { matchClients, matchProducts, searchCatalogue, searchClients } from '../src/domain/matching.js';
 import { calculateLineTotals } from '../src/domain/totals.js';
-import { config, draft, harborSiblings, prepared } from './helpers.js';
+import { config, draft, harborSiblings, pharmacyTypeAccounts, prepared } from './helpers.js';
 
 describe('business configuration', () => {
   it('rejects unsupported modes and undeclared capabilities', () => {
@@ -87,6 +87,21 @@ describe('client search', () => {
     expect(searchClients('Fable Harbor Cafe', clients).map(c => c.id)).toEqual(['212']);
     expect(searchClients('Example Studio', [{ id: '201', name: 'Example Studio', notes: '', street: 'Example Street 1', city: 'Example City' }]).map(c => c.id)).toEqual(['201']);
   });
+  it('finds a customer when a distinctive name word is one letter off, and ignores unrelated accounts that only share the trade word', () => {
+    const { willowmere, cinderford, pebblebrook } = pharmacyTypeAccounts();
+    const pharmacies = [willowmere, cinderford, pebblebrook];
+    expect(searchClients('Willomere Pharmacy', pharmacies).map(c => c.id)).toEqual(['310']);
+    expect(matchClients('Willomere Pharmacy', pharmacies).map(c => c.id)).toEqual(['310']);
+    expect(searchClients('Willowmare Pharmacy', pharmacies).map(c => c.id)).toEqual(['310']);
+    expect(searchClients('Pharmacy Zorblax', pharmacies)).toEqual([]);
+    expect(matchClients('Pharmacy Zorblax', pharmacies)).toEqual([]);
+  });
+  it('still asks when two accounts both match the typed words', () => {
+    const { willowmere } = pharmacyTypeAccounts();
+    const east = { ...willowmere, id: '313', name: 'Willowmere East Pharmacy Srl', street: 'East Lane 4', vatNumber: 'DEMO-WILLOWMERE-EAST' };
+    expect(searchClients('Willowmere Pharmacy', [willowmere, east]).map(c => c.id).sort()).toEqual(['310', '313']);
+    expect(matchClients('Willowmere Pharmacy', [willowmere, east])).toHaveLength(2);
+  });
 });
 
 describe('order preparation', () => {
@@ -112,6 +127,16 @@ describe('order preparation', () => {
     const refine = await prepareOrder({ ...draft(), clientQuery: 'Fable Harbor spa' }, config(), connector, '2026-01-15');
     if (refine.ready) throw new Error('Expected sibling picks, not a missing customer');
     expect(refine.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id).sort()).toEqual(['210', '211', '212']);
+  });
+  it('locks the intended pharmacy from a one-letter slip, and does not offer every pharmacy when only the trade word matches', async () => {
+    const connector = new DemoConnector();
+    const { willowmere, cinderford, pebblebrook } = pharmacyTypeAccounts();
+    connector.clients.push(willowmere, cinderford, pebblebrook);
+    const locked = await prepareOrder({ ...draft(), clientQuery: 'Willomere Pharmacy' }, config(), connector, '2026-01-15');
+    expect(locked.ready && locked.order.client.id).toBe('310');
+    const leftover = await prepareOrder({ ...draft(), clientQuery: 'Pharmacy Zorblax' }, config(), connector, '2026-01-15');
+    if (leftover.ready) throw new Error('Expected no pharmacy list for a leftover trade word');
+    expect(leftover.issues.find(i => i.field === 'client')?.candidates).toEqual([]);
   });
   it('uses a stated product price and otherwise keeps the catalogue price', async () => {
     const stated = await prepareOrder({ ...draft(), lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2, netPrice: 90 }] }, config(), new DemoConnector(), '2026-01-15');
