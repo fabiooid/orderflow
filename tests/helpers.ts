@@ -20,6 +20,16 @@ export const harborSiblings = (): { shop: Client; hotel: Client; cafe: Client } 
     cafe: { id: '212', name: 'Fable Harbor Cafe', ...place, street: 'Other Street 9', vatNumber: 'DEMO-FABLE-CAFE', notes: 'call after 10' },
   };
 };
+
+/** Unrelated accounts that only share a generic trade word, with different distinctive names. */
+export const pharmacyTypeAccounts = (): { willowmere: Client; cinderford: Client; pebblebrook: Client } => {
+  const place = { country: 'IT' as const, city: 'Genova', postalCode: '16100', email: 'orders@pharmacy-type.invalid' };
+  return {
+    willowmere: { id: '310', name: 'Willowmere Pharmacy Srl', ...place, street: 'Willowmere Lane 1', vatNumber: 'DEMO-WILLOWMERE', notes: '' },
+    cinderford: { id: '311', name: 'Cinderford Pharmacy Srl', ...place, street: 'Cinderford Road 8', vatNumber: 'DEMO-CINDERFORD', notes: '' },
+    pebblebrook: { id: '312', name: 'Pebblebrook Pharmacy Srl', ...place, street: 'Pebblebrook Way 3', vatNumber: 'DEMO-PEBBLEBROOK', notes: '' },
+  };
+};
 export const draft = () => draftSchema.parse({
   clientQuery: 'Example Studio', lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 8, discountPercent: 10,
 });

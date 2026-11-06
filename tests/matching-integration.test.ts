@@ -5,7 +5,7 @@ import { createJevBatchSelector } from '../src/matching/jev-client.js';
 import type { SelectionResult } from '../src/matching/types.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { createDraftApi } from '../src/assistant/drafts.js';
-import { config, draft, harborSiblings } from './helpers.js';
+import { config, draft, harborSiblings, pharmacyTypeAccounts } from './helpers.js';
 
 const on = matchingConfigSchema.parse({ mode: 'on' });
 const context = { orderId: 'test', revision: 1, operatorText: 'Order for the example shop: two small pebble washes. Delivery eight.' };
@@ -245,6 +245,24 @@ it('asks which sibling when only the everyday place name is given, and can lock 
   const missed = await r.resolve({ ...draft(), clientQuery: 'Fable Harbor spa', lines: [] }, { ...context, operatorText: 'fable harbor spa' });
   expect(missed.decisions[0]?.status).toBe('ambiguous');
   expect(missed.issues[0]?.candidates?.map(c => c.id).sort()).toEqual(['210', '211', '212']);
+});
+
+it('locks a one-letter slip on a distinctive name, and does not ask which pharmacy when only the trade word matches', async () => {
+  const connector = new DemoConnector();
+  const { willowmere, cinderford, pebblebrook } = pharmacyTypeAccounts();
+  connector.clients.push(willowmere, cinderford, pebblebrook);
+  const select = vi.fn<SelectMany>(async requests => requests.map(r => r.candidates.length ? result('matched', r.candidates[0]!.id) : result('no-match')));
+  const r = resolver(connector, select);
+  const slipped = await r.resolve({ ...draft(), clientQuery: 'Willomere Pharmacy', lines: [] }, { ...context, operatorText: 'crea ordine per willomere pharmacy' });
+  expect(slipped.decisions[0]?.status).toBe('matched');
+  expect(slipped.draft.clientId).toBe('310');
+  const clientQuestion = select.mock.calls.at(-1)![0].find(req => req.kind === 'client');
+  expect(clientQuestion?.candidates.map(c => c.id)).toEqual(['310']);
+  select.mockClear();
+  const leftover = await r.resolve({ ...draft(), clientQuery: 'Pharmacy Zorblax', lines: [] }, { ...context, operatorText: 'crea ordine per pharmacy zorblax' });
+  expect(leftover.decisions[0]?.status).not.toBe('ambiguous');
+  expect(leftover.issues[0]?.candidates?.map(c => c.id).sort()).not.toEqual(['310', '311', '312']);
+  expect(select.mock.calls.some(call => call[0].some(req => req.kind === 'client' && req.candidates.length === 3 && req.candidates.every(c => ['310', '311', '312'].includes(c.id))))).toBe(false);
 });
 
 it('reads catalogue litres written as "5lt" so a "5 L" request keeps them as candidates', async () => {

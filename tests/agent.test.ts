@@ -6,7 +6,7 @@ import { replySchema } from '../src/channel/engine.js';
 import { orderDraftInput } from '../src/assistant/draft-schema.js';
 import { systemPrompt } from '../src/assistant/system-prompt.js';
 import { DemoConnector } from '../src/connector/demo.js';
-import { config, harborSiblings } from './helpers.js';
+import { config, harborSiblings, pharmacyTypeAccounts } from './helpers.js';
 
 it('gives the agent the order and customer APIs and lookups, and no way to save', async () => {
   const storage = new LibSQLStore({ id: 'agent-tools', url: ':memory:' });
@@ -105,5 +105,18 @@ it('finds a hotel from street plus a hint when notes only say hotel, and falls b
     expect((await search('Fable Harbor')).map(c => c.id).sort()).toEqual(['210', '211', '212']);
     expect((await search('Fable Harbor spa')).map(c => c.id).sort()).toEqual(['210', '211', '212']);
     expect(await search('Fable Harbor Cafe')).toEqual([expect.objectContaining({ id: '212', notes: 'call after 10' })]);
+  } finally { await storage.close(); }
+});
+
+it('finds a pharmacy from a one-letter slip on the distinctive name, and does not list every pharmacy for a leftover trade word', async () => {
+  const storage = new LibSQLStore({ id: 'client-near-miss-search', url: ':memory:' });
+  try {
+    const connector = new DemoConnector();
+    const { willowmere, cinderford, pebblebrook } = pharmacyTypeAccounts();
+    connector.clients.push(willowmere, cinderford, pebblebrook);
+    const tools = await createOrderAgent(config(), connector, storage).agent.listTools();
+    const search = (query: string) => tools.searchClients!.execute!({ query }, {} as never) as Promise<{ id: string }[]>;
+    expect(await search('Willomere Pharmacy')).toEqual([expect.objectContaining({ id: '310' })]);
+    expect(await search('Pharmacy Zorblax')).toEqual([]);
   } finally { await storage.close(); }
 });

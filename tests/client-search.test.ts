@@ -8,7 +8,7 @@ import type { SelectionRequest, SelectionResult } from '../src/matching/types.js
 import { config, draft } from './helpers.js';
 
 const request = (count = 600): SelectionRequest => ({ kind: 'client', query: 'Rossy', context: 'Order for Rossy',
-  candidates: Array.from({ length: count }, (_, i) => ({ id: String(i + 1), name: i === 599 ? 'Rossi Commercio' : `Customer ${i + 1}` })),
+  candidates: Array.from({ length: count }, (_, i) => ({ id: String(i + 1), name: i === 599 ? 'Northwind Trading' : `Customer ${i + 1}` })),
   retrieval: { complete: true, furtherSearchPossible: false } });
 const answer = (status: SelectionResult['status'], selectedId?: string): SelectionResult => ({ status, selectedId,
   evidence: { requestHash: 'fixture', promptVersion: 'fixture', retrieval: { complete: true, furtherSearchPossible: false }, elapsedMs: 1 } });

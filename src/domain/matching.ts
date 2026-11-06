@@ -81,32 +81,67 @@ function exactClients<T extends ClientSearchRecord>(query: string, clients: T[])
   return q ? clients.filter(c => normalize(c.name) === q || normalize(c.vatNumber ?? '') === q) : [];
 }
 
-function clientScore(queryWords: string[], client: ClientSearchRecord) {
-  const text = clientText(client);
-  return queryWords.filter(word => contains(text, word)).length;
+/** True when the words differ by one substitution, insertion or deletion. Short tokens stay exact. */
+function oneLetterOff(left: string, right: string): boolean {
+  if (left === right || left.length < 4 || right.length < 4) return false;
+  const gap = Math.abs(left.length - right.length);
+  if (gap > 1) return false;
+  const [shorter, longer] = left.length < right.length ? [left, right] : [right, left];
+  if (gap === 0) {
+    let diffs = 0;
+    for (let i = 0; i < shorter.length; i++) {
+      if (shorter[i] !== longer[i] && ++diffs > 1) return false;
+    }
+    return diffs === 1;
+  }
+  let skipped = 0;
+  for (let i = 0; i < shorter.length; i++) {
+    if (shorter[i] === longer[i + skipped]) continue;
+    if (skipped || shorter[i] !== longer[i + 1]) return false;
+    skipped = 1;
+  }
+  return true;
 }
 
-/** Clients whose legal name, VAT, city, notes or street contain every word of the query, or an exact name or VAT. */
+function clientScore(queryWords: string[], client: ClientSearchRecord, allowNearMiss = false) {
+  const text = clientText(client);
+  const haystack = allowNearMiss ? text.split(' ').filter(Boolean) : [];
+  return queryWords.filter(word => contains(text, word) || (allowNearMiss && haystack.some(token => oneLetterOff(word, token)))).length;
+}
+
+function everyWordHits<T extends ClientSearchRecord>(words: string[], clients: T[], allowNearMiss: boolean) {
+  return clients.filter(client => clientScore(words, client, allowNearMiss) === words.length);
+}
+
+/**
+ * Clients whose legal name, VAT, city, notes or street contain every word of the query, or an exact
+ * name or VAT. A distinctive word may be one letter off when no exact-word hit exists.
+ */
 export function matchClients<T extends ClientSearchRecord>(query: string, clients: T[]): T[] {
   const exact = exactClients(query, clients);
   if (exact.length) return exact;
   const words = normalize(query).split(' ').filter(Boolean);
   if (!words.length) return [];
-  return clients.filter(client => clientScore(words, client) === words.length);
+  const exactWords = everyWordHits(words, clients, false);
+  return exactWords.length ? exactWords : everyWordHits(words, clients, true);
 }
 
 /**
- * Find customers by the name people use, not only the legal name. Prefer every-word hits; if a tighter
- * refine (a hint such as hotel or shop) finds nobody, fall back to the closest sibling accounts.
+ * Find customers by the name people use, not only the legal name. A distinctive word that is one letter
+ * off still counts. Prefer every-word hits; if a tighter refine (a hint such as hotel or shop) finds
+ * nobody, fall back to siblings that share the remaining distinctive words, not every account of the
+ * same generic type.
  */
 export function searchClients<T extends ClientSearchRecord>(query: string, clients: T[]): T[] {
   const matched = matchClients(query, clients);
   if (matched.length) return matched;
   const words = normalize(query).split(' ').filter(Boolean);
   if (!words.length) return [];
-  const scored = clients.map(client => ({ client, score: clientScore(words, client) })).filter(entry => entry.score > 0);
+  const scored = clients.map(client => ({ client, score: clientScore(words, client, true) })).filter(entry => entry.score > 0);
   const best = Math.max(0, ...scored.map(entry => entry.score));
-  if (best < Math.max(1, words.length - 1)) return [];
+  // A single leftover word is often just the kind of business (hotel, pharmacy, spa). That is not enough
+  // to offer every account of that type. Two or more shared words still surface sibling picks.
+  if (best < Math.max(2, words.length - 1)) return [];
   return scored.filter(entry => entry.score === best).map(entry => entry.client);
 }
 
