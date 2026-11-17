@@ -18,6 +18,7 @@ it('gives the agent the order and customer APIs and lookups, and no way to save'
     expect(tools.searchClients?.description).toContain('call this again');
     expect(tools.searchClients?.description).toContain('everyday name');
     expect(tools.searchClients?.description).toContain('closest related accounts');
+    expect(tools.searchProducts?.description).toContain('not in the catalogue');
     expect(tools.prepareOrder?.description).toContain('always call search-clients first');
     expect(tools.prepareOrder?.description).toContain('not a substitute');
     expect(Object.values(tools).every(tool => !/creates?|saves?|writes?/i.test(tool.id))).toBe(true);
@@ -34,8 +35,9 @@ it('keeps business rules in the prompt and field rules in the API schema, with n
   expect(prompt).toContain('always call search-clients');
   expect(prompt).toContain("Do not let prepare-order's internal match choose the customer");
   expect(prompt).toContain('call search-clients again with the refined words');
-  expect(prompt).toContain('Naming a customer is not a request to copy products');
-  expect(prompt).not.toMatch(/\/(?:ordine|cliente|annulla|confermaordine|confermacliente)\b/);
+    expect(prompt).toContain('Naming a customer is not a request to copy products');
+    expect(prompt).toContain('not in the catalogue');
+    expect(prompt).not.toMatch(/\/(?:ordine|cliente|annulla|confermaordine|confermacliente)\b/);
   const fields = orderDraftInput.shape;
   expect(fields.newClient.description).toContain('attached email');
   expect(fields.notes.description).toContain('operator sees it in the draft');
@@ -73,6 +75,21 @@ it('hands the agent the catalogue when no product contains the words, so it can 
     expect(soaps.found).toBe('catalogue');
     expect(soaps.products.map(p => p.name)).toContain('Pebble hand wash 250 ml');
     expect((await search('')).found).toBe('catalogue');
+  } finally { await storage.close(); }
+});
+
+it('marks a missing combination as related and returns products for each requested word', async () => {
+  const storage = new LibSQLStore({ id: 'agent-related-search', url: ':memory:' });
+  try {
+    const connector = new DemoConnector();
+    connector.products.push(
+      { id: '105', code: 'DEMO-FIG-GEL', name: 'Fig shower gel 250 ml', description: '', netPrice: 14 },
+      { id: '106', code: 'DEMO-CEDAR-SOAP', name: 'Cedar hand soap 250 ml', description: '', netPrice: 12 },
+    );
+    const tools = await createOrderAgent(config(), connector, storage).agent.listTools();
+    const result = await tools.searchProducts!.execute!({ query: 'fig hand soap' }, {} as never) as { found: string; products: { name: string }[] };
+    expect(result.found).toBe('related');
+    expect(result.products.map(p => p.name)).toEqual(expect.arrayContaining(['Fig shower gel 250 ml', 'Cedar hand soap 250 ml']));
   } finally { await storage.close(); }
 });
 

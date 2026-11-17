@@ -55,21 +55,53 @@ export function matchProducts(query: string, products: Product[]): Product[] {
   });
 }
 
+function scoredHits(query: string, products: Product[]) {
+  const words = tokens(query);
+  return eligible(query, products)
+    .map(product => {
+      const text = productText(product);
+      return { product, score: words.filter(token => contains(text, token)).length, text };
+    })
+    .filter(entry => entry.score > 0)
+    .sort((a, b) => b.score - a.score);
+}
+
 /** Products sharing any word with the query, best first. Loose on purpose: the agent decides which one was meant. */
 export function searchCatalogue(query: string, products: Product[]): Product[] {
   if (!normalize(query)) return [];
   const exact = products.filter(p => normalize(p.code) === normalize(query) || normalize(p.name) === normalize(query));
   if (exact.length) return exact;
+  return scoredHits(query, products).slice(0, 15).map(entry => entry.product);
+}
+
+/**
+ * When no product has every requested word, keep real products for each word that does appear.
+ * A word that matches many products must not crowd out a word that matches few.
+ */
+export function relatedProducts(query: string, products: Product[]): Product[] {
+  if (!normalize(query)) return [];
+  const exact = products.filter(p => normalize(p.code) === normalize(query) || normalize(p.name) === normalize(query));
+  if (exact.length) return exact;
   const words = tokens(query);
-  return eligible(query, products)
-    .map(product => {
-      const text = productText(product);
-      return { product, score: words.filter(token => contains(text, token)).length };
-    })
-    .filter(entry => entry.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 15)
-    .map(entry => entry.product);
+  if (!words.length) return [];
+  const hits = scoredHits(query, products);
+  if (!hits.length) return [];
+  const byWord = words.map(word => hits.filter(entry => contains(entry.text, word)).map(entry => entry.product));
+  const result: Product[] = [];
+  const seen = new Set<string>();
+  for (let round = 0; result.length < 15; round++) {
+    let added = false;
+    for (const group of byWord) {
+      const product = group[round];
+      if (!product || seen.has(product.id)) continue;
+      seen.add(product.id);
+      result.push(product);
+      added = true;
+      if (result.length >= 15) break;
+    }
+    if (!added) break;
+  }
+  return result;
 }
 
 function clientText(client: ClientSearchRecord) {

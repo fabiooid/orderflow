@@ -15,7 +15,7 @@ import { z } from 'zod';
 import type { AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
 import { productSchema, type OrderDraft, type Product } from '../domain/types.js';
-import { normalize, searchCatalogue, searchClients as findClients } from '../domain/matching.js';
+import { matchProducts, normalize, relatedProducts, searchClients as findClients } from '../domain/matching.js';
 import { outcomeOf, turnOf, type TurnRequest } from './turn-context.js';
 import { createManualScorers } from './manual-scorers.js';
 import { liveAgentScorers, type LiveEvalSettings } from './live-evals.js';
@@ -48,19 +48,22 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
     return catalogue.products;
   };
   /**
-   * Word search finds products by their literal words; meaning is the agent's job. When no product contains the words,
-   * or nothing is asked for, the agent gets the catalogue itself (up to a size that fits a model call) to judge.
+   * Word search finds products by their literal words; meaning is the agent's job. When some words hit and others
+   * miss, the agent gets those related products so it can say the combination is missing. When nothing shares the
+   * words, or nothing is asked for, it gets the catalogue itself (up to a size that fits a model call) to judge.
    */
   const searchProducts = createTool({
     id: 'search-products',
-    description: 'Find products in the catalogue. With words (scent, type, size, code) it returns the products containing them, best first. With no words, or when no product contains them, it returns the catalogue so you can judge by meaning which products fit, in any language ("saponi" can be a hand wash). Answer from what it returns; never invent products.',
+    description: 'Find products in the catalogue. With words (scent, type, size, code) it returns products that contain every word (found=words). If no product has every word, it returns products that match each word separately (found=related): say that combination is not in the catalogue, list the real products for each requested detail, and do not present a related product as the requested item. With no words, or when no product shares them, it returns the catalogue so you can judge by meaning which products fit, in any language ("saponi" can be a hand wash). Answer from what it returns; never invent products.',
     inputSchema: z.object({ query: z.string().describe('Words to look for; empty to see the catalogue.') }),
-    outputSchema: z.object({ found: z.enum(['words', 'catalogue', 'catalogue-too-large']), products: z.array(productSchema) }),
+    outputSchema: z.object({ found: z.enum(['words', 'related', 'catalogue', 'catalogue-too-large']), products: z.array(productSchema) }),
     execute: async ({ query }) => {
       const [products, data] = await Promise.all([searchable(), knowledge.read()]);
       const ids = new Set(data.aliases.filter(a => normalize(a.phrase) === normalize(query)).map(a => a.productId));
-      const matches = [...new Map([...products.filter(p => ids.has(p.id)), ...searchCatalogue(query, products)].map(p => [p.id, p])).values()];
-      if (matches.length) return { found: 'words' as const, products: matches };
+      const exact = [...new Map([...products.filter(p => ids.has(p.id)), ...matchProducts(query, products)].map(p => [p.id, p])).values()];
+      if (exact.length) return { found: 'words' as const, products: exact };
+      const related = relatedProducts(query, products);
+      if (related.length) return { found: 'related' as const, products: related };
       return products.length <= CATALOGUE_LIST_LIMIT ? { found: 'catalogue' as const, products } : { found: 'catalogue-too-large' as const, products: [] };
     },
   });

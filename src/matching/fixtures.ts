@@ -18,6 +18,7 @@ export const matchingFixtures: { name: string; request: SelectionRequest; expect
     ['tester', 'tester sapone orrio 250 ml', '103'],
     ['missing-size', 'sapone al orrio', 'ambiguous'],
     ['missing-product', 'shampoo alla rosa', 'no-match'],
+    ['missing-combination', 'sapone mani fico', 'no-match'],
   ].map(([name, query, expected]) => ({ name: String(name),
     request: { kind: 'product' as const, query: String(query), candidates: products,
       retrieval: { complete: true, furtherSearchPossible: false } }, expected: expected as string | 'ambiguous' | 'no-match' })),

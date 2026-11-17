@@ -73,7 +73,7 @@ export function forAgent(result: DraftResult) {
     status: result.status,
     ...(result.status === 'needs' ? { issues: issuesForAgent(result.issues) } : {}),
     note: result.status === 'needs'
-      ? 'Shown to the operator with these points. Settle what you can from the conversation or a lookup and call again; ask about the rest. For a product with no match, look the catalogue up and send the product in its terms.'
+      ? 'Shown to the operator with these points. Settle what you can from the conversation or a lookup and call again; ask about the rest. For a product with no match, look the catalogue up. If no product has every requested detail, say that combination is not in the catalogue and list the real products that match each detail. Do not send a different product as if it were the requested item.'
       : result.status === 'existing' ? 'This customer already exists; nothing will be created.'
       : 'Complete, and shown to the operator for review.',
   };
