@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 import { conversationCases, evalConnector, northwind } from '../src/evals/conversations.js';
 import { runConversation, scriptedTurns, type ScriptedAct } from '../src/evals/harness.js';
 import type { OrderDraft } from '../src/domain/types.js';
+import { orderDraftInput } from '../src/assistant/draft-schema.js';
 import { systemPrompt } from '../src/assistant/system-prompt.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { WriteJournal } from '../src/storage/write-journal.js';
@@ -76,6 +77,37 @@ it.each(['short-name-on-ready-draft-is-new-search', 'change-customer-on-ready-dr
     const outcome = await runConversation(config(), evalConnector(), scenario!.turns, { converse: correctionConverse(scenario!) });
     expect(scenario!.check(outcome)).toEqual([]);
     expect(outcome.open?.status).not.toBe('saved');
+  },
+);
+
+/**
+ * Scripted stand-in for the model. If the notes rules are present, it writes only the requested
+ * instruction (or nothing). If they are missing, it recaps the attached products, matching the live bug.
+ */
+function notesConverse(scenario: (typeof conversationCases)[number]): Converse {
+  const draft = asOrderDraft(scenario.scripted![0]);
+  const prompt = systemPrompt(config().invoicing.label);
+  const notes = orderDraftInput.shape.notes.description ?? '';
+  const followsRule = /only the instruction the operator asked to write/.test(prompt)
+    && /Do not summarise an attached message/.test(notes)
+    && /Leave notes empty when they did not ask for a note/.test(prompt);
+  return async (turn, act) => {
+    const next = structuredClone(draft);
+    if (!followsRule) {
+      next.notes = `Prepared from attached conversation: requested 2 Pebble hand wash and 2 Linen candle. ${draft.notes}`.trim();
+    }
+    await act.order(next);
+    return { reply: '', locale: /ship in January/i.test(turn.operatorWords) ? 'en' : 'it' };
+  };
+}
+
+it.each(['requested-note-only-from-attachment', 'requested-english-note-only', 'no-note-when-not-asked'] as const)(
+  'puts only the requested instruction in order notes: %s',
+  async id => {
+    const scenario = conversationCases.find(c => c.id === id);
+    expect(scenario?.scripted).toHaveLength(1);
+    const outcome = await runConversation(config(), evalConnector(), scenario!.turns, { converse: notesConverse(scenario!) });
+    expect(scenario!.check(outcome)).toEqual([]);
   },
 );
 
