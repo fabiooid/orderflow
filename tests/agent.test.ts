@@ -18,8 +18,12 @@ it('gives the agent the order and customer APIs and lookups, and no way to save'
     expect(tools.searchClients?.description).toContain('call this again');
     expect(tools.searchClients?.description).toContain('everyday name');
     expect(tools.searchClients?.description).toContain('closest related accounts');
+    expect(tools.searchClients?.description).toContain('short customer name');
+    expect(tools.searchClients?.description).toContain('not a request to save');
     expect(tools.prepareOrder?.description).toContain('always call search-clients first');
     expect(tools.prepareOrder?.description).toContain('not a substitute');
+    expect(tools.prepareOrder?.description).toContain('short customer name');
+    expect(tools.prepareOrder?.description).toContain('Do not ask to save the current draft as-is');
     expect(Object.values(tools).every(tool => !/creates?|saves?|writes?/i.test(tool.id))).toBe(true);
     expect(await agent.listSkills()).toEqual([]);
   } finally { await storage.close(); }
@@ -35,13 +39,19 @@ it('keeps business rules in the prompt and field rules in the API schema, with n
   expect(prompt).toContain("Do not let prepare-order's internal match choose the customer");
   expect(prompt).toContain('call search-clients again with the refined words');
   expect(prompt).toContain('Naming a customer is not a request to copy products');
+  expect(prompt).toContain('# Correct a customer');
+  expect(prompt).toContain('short customer name');
+  expect(prompt).toContain('not a request to save');
+  expect(prompt).toContain('nothing is saved yet');
   expect(prompt).not.toMatch(/\/(?:ordine|cliente|annulla|confermaordine|confermacliente)\b/);
   const fields = orderDraftInput.shape;
   expect(fields.newClient.description).toContain('attached email');
   expect(fields.notes.description).toContain('operator sees it in the draft');
   expect(fields.delivery.description).toContain('never a delivery address');
   expect(fields.clientQuery.description).toContain('search-clients');
+  expect(fields.clientQuery.description).toContain('short customer name');
   expect(fields.clientId.description).toContain('do not keep the old id');
+  expect(fields.clientId.description).toContain('short customer name');
   expect(fields.lines.description).toContain('A new request starts with no lines');
 });
 
