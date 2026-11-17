@@ -12,6 +12,11 @@ export type MessageEvent = {
   attachments?: Attachment[];
   forwardedFrom?: string;
   album?: string;
+  /**
+   * The operator sent a file this channel cannot map to a voice note, photo, or PDF.
+   * Still a message: do not return null, or the bot stays silent.
+   */
+  unusableAttachment?: boolean;
 };
 
 export type OrderLink = { orderId: string; revision: number };

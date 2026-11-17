@@ -58,7 +58,13 @@ const editable = (c: Conversation) => ['new', 'suspended', 'ready'].includes(c.s
 /** Merges the other parts of a Telegram album into its first message. */
 function withAlbum(event: MessageEvent, parts: MessageEvent[]): MessageEvent {
   if (!parts.length) return event;
-  return { ...event, text: [event, ...parts].map(p => p.text).find(Boolean) ?? '', attachments: [event, ...parts].flatMap(p => p.attachments ?? []) };
+  const all = [event, ...parts];
+  return {
+    ...event,
+    text: all.map(p => p.text).find(Boolean) ?? '',
+    attachments: all.flatMap(p => p.attachments ?? []),
+    ...(all.some(p => p.unusableAttachment) ? { unusableAttachment: true } : {}),
+  };
 }
 
 export class TelegramController {
@@ -153,7 +159,8 @@ export class TelegramController {
         loaded.linked = link && await this.store.order(link.orderId);
         loaded.active = await this.store.activeRequest();
         const unread = event;
-        if (asksFirst(event, { config: this.config, link, active: loaded.active })) action = { kind: 'prompt' };
+        if (event.unusableAttachment) action = { kind: 'answer', text: this.t('attachmentUnused') };
+        else if (asksFirst(event, { config: this.config, link, active: loaded.active })) action = { kind: 'prompt' };
         else {
           const result = event.attachments?.length || event.forwardedFrom ? await this.read(event) : undefined;
           if (result && 'failed' in result) action = result.failed;

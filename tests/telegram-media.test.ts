@@ -26,12 +26,19 @@ describe('normalizing Telegram media', () => {
       text: 'per Example Studio', attachments: [{ kind: 'image', fileId: 'large1', mimeType: 'image/jpeg', size: 900 }],
     });
     expect(normalizeMessage(voice(2), config())?.attachments).toEqual([{ kind: 'voice', fileId: 'voice2', mimeType: 'audio/ogg', size: 2000 }]);
-    expect(normalizeMessage(message(3, { document: { file_id: 'pdf3', mime_type: 'application/pdf' } }), config())?.attachments?.[0]?.kind).toBe('pdf');
+    const pdf = normalizeMessage(message(3, { document: { file_id: 'pdf3', mime_type: 'application/pdf' } }), config());
+    expect(pdf).toMatchObject({ attachments: [{ kind: 'pdf', fileId: 'pdf3', mimeType: 'application/pdf' }] });
+    expect(pdf).not.toHaveProperty('unusableAttachment');
     expect(normalizeMessage(message(4, { document: { file_id: 'img4', mime_type: 'image/png' } }), config())?.attachments?.[0]).toMatchObject({ kind: 'image', mimeType: 'image/png' });
   });
-  it('ignores unsupported files without text, and other chats', () => {
-    expect(normalizeMessage(message(1, { document: { file_id: 'x', mime_type: 'application/vnd.ms-excel' } }), config())).toBeNull();
-    const other = photo(2); other.message.chat = { id: -999, type: 'supergroup' };
+  it('keeps an unrecognized document as a message to refuse, and still ignores other chats', () => {
+    // A generic binary document, not a photo, voice note, or PDF. Do not pin this test to a
+    // format that a later change may start reading.
+    const unknown = normalizeMessage(message(1, { document: { file_id: 'x', mime_type: 'application/octet-stream' } }), config());
+    expect(unknown).toMatchObject({ text: '', unusableAttachment: true });
+    expect(unknown?.attachments).toBeUndefined();
+    expect(normalizeMessage(message(2, { document: { file_id: 'y' } }), config())).toMatchObject({ unusableAttachment: true });
+    const other = photo(3); other.message.chat = { id: -999, type: 'supergroup' };
     expect(normalizeMessage(other, config())).toBeNull();
   });
   it('names the original sender of a forward and the album of a photo', () => {
@@ -149,6 +156,40 @@ describe('controller media flow', () => {
       await controller.handle(click(4, 'media:1:y'));
       expect(read.mock.calls[0]![0].attachments).toHaveLength(3);
       expect(await store.offset()).toBe(5);
+    } finally { store.close(); }
+  });
+
+  it('replies when a caption-less unrecognized file cannot be used, and leaves an open draft unchanged', async () => {
+    const { store, engine, send, read, controller } = await setup();
+    try {
+      await controller.handle(message(1, { document: { file_id: 'bin1', mime_type: 'application/octet-stream' } }));
+      expect(send).toHaveBeenLastCalledWith('Non posso usare questo file. Invia una foto, una nota vocale o un PDF.', 1, undefined);
+      expect(read).not.toHaveBeenCalled();
+      expect(engine.turn).not.toHaveBeenCalled();
+      expect(await store.activeRequest()).toBeUndefined();
+
+      await controller.handle(message(2, { text: '@demo_bot ordine per Example Studio' }));
+      const open = await store.activeRequest();
+      expect(open?.revision).toBe(1);
+      await controller.handle(message(3, { caption: 'aggiungi due saponi', document: { file_id: 'bin3', mime_type: 'application/octet-stream' } }));
+      expect(send).toHaveBeenLastCalledWith('Non posso usare questo file. Invia una foto, una nota vocale o un PDF.', 3, undefined);
+      expect(engine.turn).toHaveBeenCalledTimes(1);
+      const still = await store.activeRequest();
+      expect(still).toMatchObject({ orderId: open!.orderId, revision: open!.revision, status: open!.status });
+    } finally { store.close(); }
+  });
+
+  it('replies in English when an unrecognized file cannot be used', async () => {
+    const english = config();
+    english.locale = 'en';
+    const store = new TelegramStore(':memory:', 'media-en'); await store.init();
+    const engine = stubEngine('ready', 'Preview');
+    const send = vi.fn(async () => ({ message_id: 100 }));
+    const controller = new TelegramController(english, 'demo_bot', store, engine, send);
+    try {
+      await controller.handle(message(1, { document: { file_id: 'bin1', mime_type: 'application/octet-stream' } }));
+      expect(send).toHaveBeenLastCalledWith('I cannot use this file. Send a photo, a voice note, or a PDF.', 1, undefined);
+      expect(engine.turn).not.toHaveBeenCalled();
     } finally { store.close(); }
   });
 
