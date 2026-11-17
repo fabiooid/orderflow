@@ -105,3 +105,9 @@ it('normalizes Italian country names when FIC omits country_iso', async () => {
  const clients = await new FattureInCloudConnector(1,ports as unknown as SdkPorts).listClients();
  expect(clients[0]?.country).toBe('IT');
 });
+it('maps Fatture in Cloud contact_person onto a generic contactPerson field', async () => {
+  const ports = sdk();
+  ports.clients.listClients.mockResolvedValue({ data: { data: [{ id: 1, name: 'Willowmere Agriturismo', contact_person: 'Giulia Neri', country: 'Italia', address_street: 'Hill Road 12', address_city: 'Genova', address_postal_code: '16100' }] } });
+  const clients = await new FattureInCloudConnector(1, ports as unknown as SdkPorts).listClients();
+  expect(clients[0]).toMatchObject({ name: 'Willowmere Agriturismo', contactPerson: 'Giulia Neri' });
+});

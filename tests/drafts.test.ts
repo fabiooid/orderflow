@@ -77,6 +77,39 @@ it('does not open an empty order card when prepare is called with no customer an
   } finally { await storage.close(); }
 });
 
+it('keeps this request\'s product lines when a later draft only locks the customer', async () => {
+  const storage = new LibSQLStore({ id: 'keep-lines', url: ':memory:' });
+  try {
+    const { calls } = createOrderAgent(config(), new DemoConnector(), storage);
+    const lines = [{ query: 'Pebble hand wash 250 ml', quantity: 2 }, { query: 'Linen candle 200 g', quantity: 1 }];
+    const context = new RequestContext();
+    const outcome = startTurn(context, {
+      evidence: 'cliente Northwind Bistro', operatorWords: 'cliente Northwind Bistro', senderId: '5', knownPhrases: ['Pebble hand wash 250 ml'],
+      request: { kind: 'order', orderId: 'u1', revision: 1, lines },
+    });
+    const result = await calls.order(draftSchema.parse({ clientQuery: 'Northwind Bistro' }), context);
+    expect(result).toMatchObject({ status: 'needs' });
+    expect(result.status === 'needs' && result.issues?.some(i => i.field === 'lines')).toBe(false);
+    expect(outcome.result).toMatchObject({
+      kind: 'order',
+      draft: { lines: [expect.objectContaining({ query: 'Pebble hand wash 250 ml', quantity: 2 }), expect.objectContaining({ query: 'Linen candle 200 g', quantity: 1 })] },
+    });
+  } finally { await storage.close(); }
+});
+
+it('does not copy leftover lines onto a new request that only names a customer', async () => {
+  const storage = new LibSQLStore({ id: 'no-invent-lines', url: ':memory:' });
+  try {
+    const { calls } = createOrderAgent(config(), new DemoConnector(), storage);
+    const context = new RequestContext();
+    const outcome = startTurn(context, { evidence: 'crea un nuovo ordine per Northwind Bistro', operatorWords: 'crea un nuovo ordine per Northwind Bistro', senderId: '5', knownPhrases: [] });
+    const result = await calls.order(draftSchema.parse({ clientQuery: 'Northwind Bistro' }), context);
+    expect(result).toMatchObject({ status: 'needs' });
+    expect(result.status === 'needs' && result.issues?.some(i => i.field === 'lines')).toBe(true);
+    expect(outcome.result).toMatchObject({ kind: 'order', draft: { lines: [] } });
+  } finally { await storage.close(); }
+});
+
 it('replaces an open request of the other kind, and is blocked only by a request the turn cannot change', async () => {
   const storage = new LibSQLStore({ id: 'tools', url: ':memory:' });
   try {
