@@ -87,8 +87,25 @@ const switchedCustomer = (id: string, name: RegExp): Check => o => {
   ];
 };
 const readyCustomerCorrection = all(neverGaveUp, keptReadyLines, switchedCustomer(northwind.id, /northwind/i), notSavedAsIs);
-// Notes and delivery are the agent's judgement, shown in the draft for the operator to keep or change, so they are not checked.
+// Customer identity from an attachment is checked; leftover recap notes are not, except in the dedicated FAB-56 cases below.
 const attachmentOrderFor = (id: string) => all(neverGaveUp, keptAttachmentLines, orderFor(id));
+const recapNote = /Prepared from attached conversation/i;
+/** The printed note is only the instruction the operator asked for, in their language, with no recap of the draft. */
+const onlyRequestedNote = (expected: string): Check => o => {
+  const notes = o.open?.draft.notes ?? '';
+  return [
+    ...expect(notes === expected, `notes were ${JSON.stringify(notes)}, expected ${JSON.stringify(expected)}`),
+    ...expect(!recapNote.test(notes), `notes recapped an attached message: ${JSON.stringify(notes)}`),
+    ...expect(!/pebble|hand wash|linen candle/i.test(notes), `notes repeated product lines: ${JSON.stringify(notes)}`),
+  ];
+};
+const notesStayEmpty: Check = o => {
+  const notes = o.open?.draft.notes ?? '';
+  return [
+    ...expect(!notes.trim(), `wrote a note nobody asked for: ${JSON.stringify(notes)}`),
+    ...expect(!recapNote.test(notes), `notes recapped an attached message: ${JSON.stringify(notes)}`),
+  ];
+};
 
 /** The operator names a different customer than the attached email, in various wordings: the email still gives the lines. */
 const otherCustomerCases: ConversationCase[] = [
@@ -385,5 +402,53 @@ export const conversationCases: ConversationCase[] = [
     ],
     scripted: [readyExampleDraft(), northwindCorrectionDraft()],
     check: readyCustomerCorrection,
+  },
+  {
+    id: 'requested-note-only-from-attachment',
+    // The operator asked only for a short Italian instruction; products already belong on the lines (FAB-56).
+    turns: [{
+      text: 'ordine per Example Studio, spedizione 8 euro, nota: Spedire a gennaio',
+      attachment: '2 x Pebble hand wash 250 ml\n2 x Linen candle 200 g',
+    }],
+    scripted: [draftSchema.parse({
+      clientQuery: 'Example Studio',
+      lines: [
+        { query: 'Pebble hand wash 250 ml', quantity: 2 },
+        { query: 'Linen candle 200 g', quantity: 2 },
+      ],
+      shippingPrice: 8,
+      notes: 'Spedire a gennaio',
+    })],
+    check: all(neverGaveUp, namedFor('201', /example studio/i), onlyRequestedNote('Spedire a gennaio'), o => [
+      ...expect(!!o.open?.draft.lines.some(l => l.productId === '101' || /pebble/i.test(l.query)), 'the attached hand wash was lost'),
+      ...expect(!!o.open?.draft.lines.some(l => l.productId === '103' || /linen candle/i.test(l.query)), 'the attached candle was lost'),
+    ]),
+  },
+  {
+    id: 'requested-english-note-only',
+    turns: [{ text: 'Prepare an order for Example Studio: 2 Pebble hand wash 250 ml, delivery 8 euros, note: ship in January' }],
+    scripted: [draftSchema.parse({
+      clientQuery: 'Example Studio',
+      lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }],
+      shippingPrice: 8,
+      notes: 'ship in January',
+    })],
+    check: all(neverGaveUp, namedFor('201', /example studio/i), onlyRequestedNote('ship in January')),
+  },
+  {
+    id: 'no-note-when-not-asked',
+    turns: [{
+      text: 'ordine per Example Studio: 2 Pebble hand wash 250 ml, spedizione 8 euro',
+      attachment: '2 x Pebble hand wash 250 ml\n2 x Linen candle 200 g',
+    }],
+    scripted: [draftSchema.parse({
+      clientQuery: 'Example Studio',
+      lines: [
+        { query: 'Pebble hand wash 250 ml', quantity: 2 },
+        { query: 'Linen candle 200 g', quantity: 2 },
+      ],
+      shippingPrice: 8,
+    })],
+    check: all(neverGaveUp, namedFor('201', /example studio/i), notesStayEmpty),
   },
 ];
