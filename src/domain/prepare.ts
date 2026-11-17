@@ -16,8 +16,13 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
   const query = draft.clientQuery.trim();
   const exact = query ? exactClients(query, clients) : [];
   const typedExact = !operatorText.trim() ? exact : exact.filter(c => [c.name, c.vatNumber ?? ''].some(value => nameInText(operatorText, value)));
-  const matches = draft.clientId
-    ? clients.filter(c => c.id === draft.clientId)
+  const locked = draft.clientId ? clients.find(c => c.id === draft.clientId) : undefined;
+  // A refine such as "hotel" after a shop lock must not keep that shop. Keep the id only when
+  // this query still fits that record (a button pick, or the same customer restated).
+  const lockedFitsQuery = !query || (locked ? matchClients(query, [locked]).length === 1 : false);
+  if (locked && !lockedFitsQuery) delete draft.clientId;
+  const matches = locked && lockedFitsQuery
+    ? [locked]
     : typedExact;
   const uniqueMatch = matches.length === 1 && (Boolean(draft.clientId) || typedExact.length === 1);
   let client: Partial<Client> | undefined = draft.newClient ?? (uniqueMatch ? matches[0] : undefined);

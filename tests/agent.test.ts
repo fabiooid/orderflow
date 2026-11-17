@@ -6,7 +6,7 @@ import { replySchema } from '../src/channel/engine.js';
 import { orderDraftInput } from '../src/assistant/draft-schema.js';
 import { systemPrompt } from '../src/assistant/system-prompt.js';
 import { DemoConnector } from '../src/connector/demo.js';
-import { config, harborSiblings, pharmacyTypeAccounts, sampleNameAccounts, willowmereStayAccounts } from './helpers.js';
+import { config, harborSiblings, monasterySiblings, pharmacyTypeAccounts, sampleNameAccounts, willowmereStayAccounts } from './helpers.js';
 
 it('gives the agent the order and customer APIs and lookups, and no way to save', async () => {
   const storage = new LibSQLStore({ id: 'agent-tools', url: ':memory:' });
@@ -17,6 +17,7 @@ it('gives the agent the order and customer APIs and lookups, and no way to save'
     expect(tools.searchClients?.description).toContain('always call this before prepare-order');
     expect(tools.searchClients?.description).toContain('call this again');
     expect(tools.searchClients?.description).toContain('everyday name');
+    expect(tools.searchClients?.description).toContain('shop/store/negozio');
     expect(tools.searchClients?.description).toContain('closest related accounts');
     expect(tools.searchProducts?.description).toContain('not in the catalogue');
     expect(tools.searchClients?.description).toContain('short customer name');
@@ -165,6 +166,24 @@ it('finds a hotel from street plus a hint when notes only say hotel, and falls b
     expect((await search('Fable Harbor')).map(c => c.id).sort()).toEqual(['210', '211', '212']);
     expect((await search('Fable Harbor spa')).map(c => c.id).sort()).toEqual(['210', '211', '212']);
     expect(await search('Fable Harbor Cafe')).toEqual([expect.objectContaining({ id: '212', notes: 'call after 10' })]);
+  } finally { await storage.close(); }
+});
+
+it('finds the hotel from notes that hold the everyday name, and a shop/store/negozio hint still finds the shop', async () => {
+  const storage = new LibSQLStore({ id: 'client-monastery-search', url: ':memory:' });
+  try {
+    const connector = new DemoConnector();
+    const { shop, hotel } = monasterySiblings();
+    connector.clients.push(shop, hotel);
+    const tools = await createOrderAgent(config(), connector, storage).agent.listTools();
+    const search = (query: string) => tools.searchClients!.execute!({ query }, {} as never) as Promise<{ id: string; notes?: string; street?: string }[]>;
+    expect(await search('Harbour hotel')).toEqual([expect.objectContaining({ id: '221', notes: 'Harbour Hotel' })]);
+    expect(await search('Harbour albergo')).toEqual([expect.objectContaining({ id: '221' })]);
+    expect(await search('Harbour shop')).toEqual([expect.objectContaining({ id: '220' })]);
+    expect(await search('Harbour store')).toEqual([expect.objectContaining({ id: '220' })]);
+    expect(await search('Harbour negozio')).toEqual([expect.objectContaining({ id: '220' })]);
+    expect((await search('Harbour')).map(c => c.id).sort()).toEqual(['220', '221']);
+    expect(await search('Harbour hotel')).toEqual([expect.objectContaining({ street: 'Monastery Walk 1' })]);
   } finally { await storage.close(); }
 });
 

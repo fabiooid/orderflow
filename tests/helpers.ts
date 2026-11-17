@@ -21,6 +21,18 @@ export const harborSiblings = (): { shop: Client; hotel: Client; cafe: Client } 
   };
 };
 
+/**
+ * Legal name differs from the everyday name, which lives in notes (not in the legal name or as the only
+ * street match). Shop sibling uses the everyday place as its legal name, with empty notes.
+ */
+export const monasterySiblings = (): { shop: Client; hotel: Client } => {
+  const place = { country: 'IT' as const, city: 'Genova', postalCode: '16100', email: 'orders@harbour-hotel.invalid' };
+  return {
+    shop: { id: '220', name: 'Harbour Shop Ltd', ...place, street: 'Quay Dock 2', vatNumber: 'DEMO-HARBOUR-SHOP', notes: '' },
+    hotel: { id: '221', name: 'Example Monastery Ltd', ...place, street: 'Monastery Walk 1', vatNumber: 'DEMO-HARBOUR-HOTEL', notes: 'Harbour Hotel' },
+  };
+};
+
 /** Unrelated accounts that only share a generic trade word, with different distinctive names. */
 export const pharmacyTypeAccounts = (): { willowmere: Client; cinderford: Client; pebblebrook: Client } => {
   const place = { country: 'IT' as const, city: 'Genova', postalCode: '16100', email: 'orders@pharmacy-type.invalid' };
