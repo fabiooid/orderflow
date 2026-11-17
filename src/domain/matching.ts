@@ -3,8 +3,8 @@ import type { Client, Product } from './types.js';
 /** Most choices shown to the operator for one question. */
 export const MAX_CHOICES = 10;
 
-/** Fields used to find a customer: legal name, everyday name in notes, and street when the place-name lives there. */
-export type ClientSearchRecord = Pick<Client, 'name'> & Partial<Pick<Client, 'id' | 'vatNumber' | 'city' | 'street' | 'notes'>>;
+/** Fields used to find a customer: legal name, everyday name in notes, contact person, and street when the place-name lives there. */
+export type ClientSearchRecord = Pick<Client, 'name'> & Partial<Pick<Client, 'id' | 'vatNumber' | 'city' | 'street' | 'notes' | 'contactPerson'>>;
 
 export function normalize(value: string): string {
   return value.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
@@ -73,7 +73,39 @@ export function searchCatalogue(query: string, products: Product[]): Product[] {
 }
 
 function clientText(client: ClientSearchRecord) {
-  return normalize([client.name, client.vatNumber, client.city, client.notes, client.street].filter(Boolean).join(' '));
+  return normalize([client.name, client.vatNumber, client.city, client.notes, client.contactPerson, client.street].filter(Boolean).join(' '));
+}
+
+/** Legal name, everyday name in notes, and contact person: stronger than the same words in a street. */
+function identityText(client: ClientSearchRecord) {
+  return normalize([client.name, client.notes, client.contactPerson].filter(Boolean).join(' '));
+}
+
+function businessIdentityText(client: ClientSearchRecord) {
+  return normalize([client.name, client.notes].filter(Boolean).join(' '));
+}
+
+/** Trade or legal-form words that name a kind of account, not one account. */
+const GENERIC_ACCOUNT_WORDS = new Set([
+  'srl', 'spa', 'sas', 'snc', 'ltd', 'llc', 'inc', 'gmbh', 'plc', 'corp', 'bv', 'nv',
+  'hotel', 'shop', 'store', 'pharmacy', 'farmacia', 'cafe', 'restaurant', 'ristorante',
+  'bar', 'farm', 'inn', 'studio', 'company', 'group', 'deli', 'bakery', 'bistro',
+  'trattoria', 'pizzeria', 'market', 'trading', 'agriturismo', 'lodge', 'resort',
+]);
+
+function hitsText(text: string, word: string, allowNearMiss: boolean) {
+  if (contains(text, word)) return true;
+  return allowNearMiss && text.split(' ').filter(Boolean).some(token => oneLetterOff(word, token));
+}
+
+function leftoverWords(text: string, queryWords: string[], allowNearMiss: boolean) {
+  return queryWords.filter(word => !hitsText(text, word, allowNearMiss));
+}
+
+/** First or first-and-last name: a few letter tokens, not a trade or legal-form word. */
+function looksLikePersonName(words: string[]) {
+  return words.length >= 1 && words.length <= 2
+    && words.every(word => word.length >= 3 && word.length <= 16 && /^[a-z]+$/u.test(word) && !GENERIC_ACCOUNT_WORDS.has(word));
 }
 
 function exactClients<T extends ClientSearchRecord>(query: string, clients: T[]): T[] {
@@ -121,14 +153,33 @@ function clientScore(queryWords: string[], client: ClientSearchRecord, allowNear
     || (allowEnding && haystack.some(token => smallEndingOff(word, token)))).length;
 }
 
+/**
+ * Distinctive name, notes, or contact-person hits whose leftover words look like a person's name,
+ * not another business. Street-only hits stay out of this list.
+ */
+function personNameSuggestions<T extends ClientSearchRecord>(words: string[], clients: T[]): T[] {
+  const scored = clients.flatMap(client => {
+    const leftover = leftoverWords(identityText(client), words, true);
+    if (!leftover.length || leftover.length === words.length) return [];
+    const distinctive = words.filter(word => !GENERIC_ACCOUNT_WORDS.has(word) && hitsText(identityText(client), word, true));
+    if (!distinctive.length || !looksLikePersonName(leftover)) return [];
+    const leftoverIsAnotherBusiness = leftover.some(word => GENERIC_ACCOUNT_WORDS.has(word) || clients.some(other => other !== client
+      && !GENERIC_ACCOUNT_WORDS.has(word) && hitsText(businessIdentityText(other), word, true)));
+    if (leftoverIsAnotherBusiness) return [];
+    return [{ client, score: distinctive.length }];
+  });
+  const best = Math.max(0, ...scored.map(entry => entry.score));
+  return best ? scored.filter(entry => entry.score === best).map(entry => entry.client) : [];
+}
+
 function everyWordHits<T extends ClientSearchRecord>(words: string[], clients: T[], allowNearMiss: boolean, allowEnding = false) {
   return clients.filter(client => clientScore(words, client, allowNearMiss, allowEnding) === words.length);
 }
 
 /**
- * Clients whose legal name, VAT, city, notes or street contain every word of the query, or an exact
- * name or VAT. A distinctive word may be one letter off when no exact-word hit exists. Extra or missing
- * endings are not locked here; search still offers them for confirmation.
+ * Clients whose legal name, VAT, city, notes, contact person or street contain every word of the query,
+ * or an exact name or VAT. A distinctive word may be one letter off when no exact-word hit exists.
+ * Extra or missing endings are not locked here; search still offers them for confirmation.
  */
 export function matchClients<T extends ClientSearchRecord>(query: string, clients: T[]): T[] {
   const exact = exactClients(query, clients);
@@ -139,17 +190,29 @@ export function matchClients<T extends ClientSearchRecord>(query: string, client
   return exactWords.length ? exactWords : everyWordHits(words, clients, true);
 }
 
+export function sameClientIds<T extends ClientSearchRecord>(left: T[], right: T[]) {
+  if (left.length !== right.length) return false;
+  const ids = new Set(left.map(client => client.id));
+  return right.every(client => ids.has(client.id));
+}
+
 /**
  * Find customers by the name people use, not only the legal name. A distinctive word that is one letter
  * off still counts. A small extra or missing ending on a distinctive word still suggests the account
- * when no exact-word hit exists. Prefer every-word hits; if a tighter refine (a hint such as hotel or
- * shop) finds nobody, fall back to siblings that share the remaining distinctive words, not every
- * account of the same generic type.
+ * when no exact-word hit exists. Prefer every-word hits; if a leftover personal name hides a complete
+ * match, still suggest the account whose legal name, notes, or contact person has the distinctive
+ * words — not a weaker street-only hit. If a tighter refine (a hint such as hotel or shop) finds nobody,
+ * fall back to siblings that share the remaining distinctive words, not every account of the same generic type.
  */
 export function searchClients<T extends ClientSearchRecord>(query: string, clients: T[]): T[] {
   const matched = matchClients(query, clients);
-  if (matched.length) return matched;
   const words = normalize(query).split(' ').filter(Boolean);
+  const named = words.length ? personNameSuggestions(words, clients) : [];
+  if (named.length) {
+    const identityComplete = matched.filter(client => leftoverWords(identityText(client), words, true).length === 0);
+    return identityComplete.length ? identityComplete : named;
+  }
+  if (matched.length) return matched;
   if (!words.length) return [];
   const extraEnding = everyWordHits(words, clients, true, true);
   if (extraEnding.length) return extraEnding;
@@ -161,9 +224,9 @@ export function searchClients<T extends ClientSearchRecord>(query: string, clien
   return scored.filter(entry => entry.score === best).map(entry => entry.client);
 }
 
-/** Button label: legal name, then the everyday name from notes when it adds something. */
-export function clientPickLabel(client: { name: string; code?: string; city?: string; country?: string; vatNumber?: string; notes?: string; aliases?: string[] }) {
-  const extra = [...new Set([...(client.aliases ?? []), client.notes?.trim() ?? ''].filter(value => value && !normalize(client.name).includes(normalize(value))))];
+/** Button label: legal name, then the everyday name from notes or the contact person when it adds something. */
+export function clientPickLabel(client: { name: string; code?: string; city?: string; country?: string; vatNumber?: string; notes?: string; contactPerson?: string; aliases?: string[] }) {
+  const extra = [...new Set([...(client.aliases ?? []), client.notes?.trim() ?? '', client.contactPerson?.trim() ?? ''].filter(value => value && !normalize(client.name).includes(normalize(value))))];
   return [client.code, client.name, ...extra, client.city, client.country, client.vatNumber].filter(Boolean).join(' — ');
 }
 

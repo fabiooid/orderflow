@@ -66,16 +66,16 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
   });
   const searchClients = createTool({
     id: 'search-clients',
-    description: 'Find existing businesses by legal name, VAT number, city, street, or the everyday name written in their notes. When the operator starts an order and names a customer, always call this before prepare-order, with that name and any hint words (hotel, shop, city). prepare-order\'s own match is not a substitute. If several match, return them all so you can ask or offer a pick; do not guess and do not silently prepare. If the operator later clarifies, call this again with the refined query; do not reuse an earlier lock. If a draft is already open, including ready, and they type a short customer name or ask to change the customer, call this again: that is a new search, not a request to save. If the tighter query finds nobody, this still returns the closest related accounts so you can offer a pick; do not treat the customer as missing. Do not open an empty order that still asks who the customer is. Do not create a duplicate when a record exists.',
+    description: 'Find existing businesses by legal name, VAT number, city, street, the everyday name written in their notes, or the contact person on the record. When the operator starts an order and names a customer, always call this before prepare-order, with that name and any hint words (hotel, shop, city). A leftover personal name plus a distinctive business word still returns that account; still ask before locking it. prepare-order\'s own match is not a substitute. If several match, return them all so you can ask or offer a pick; do not guess and do not silently prepare. If the operator later clarifies, call this again with the refined query; do not reuse an earlier lock. If a draft is already open, including ready, and they type a short customer name or ask to change the customer, call this again: that is a new search, not a request to save. If the tighter query finds nobody, this still returns the closest related accounts so you can offer a pick; do not treat the customer as missing. Do not open an empty order that still asks who the customer is. Do not create a duplicate when a record exists.',
     inputSchema: z.object({ query: z.string().min(1).describe('The name or VAT number the operator gave, including hint words such as hotel, shop, or a city. Call again with a refined query when they clarify.') }),
-    outputSchema: z.array(z.object({ id: z.string().min(1), name: z.string(), country: z.string(), city: z.string().optional(), vatNumber: z.string().optional(), notes: z.string().optional() })),
+    outputSchema: z.array(z.object({ id: z.string().min(1), name: z.string(), country: z.string(), city: z.string().optional(), vatNumber: z.string().optional(), notes: z.string().optional(), contactPerson: z.string().optional() })),
     execute: async ({ query }) => {
       const data = await knowledge.read();
       const ids = new Set(data.clientAliases.filter(a => normalize(a.phrase) === normalize(query)).map(a => a.clientId));
       const listed = await connector.listClients();
       const found = [...listed.filter(c => c.id && ids.has(c.id)), ...findClients(query, listed)];
       return [...new Map(found.filter(c => c.id).map(c => [c.id!, c])).values()]
-        .map(c => ({ id: c.id!, name: c.name, country: c.country, ...(c.city ? { city: c.city } : {}), vatNumber: c.vatNumber, ...(c.notes?.trim() ? { notes: c.notes } : {}) }));
+        .map(c => ({ id: c.id!, name: c.name, country: c.country, ...(c.city ? { city: c.city } : {}), vatNumber: c.vatNumber, ...(c.notes?.trim() ? { notes: c.notes } : {}), ...(c.contactPerson?.trim() ? { contactPerson: c.contactPerson } : {}) }));
     },
   });
   const getCustomerOrderHistory = customerOrderHistoryTool(connector);

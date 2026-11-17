@@ -5,7 +5,7 @@ import { DemoConnector } from '../src/connector/demo.js';
 import { prepareOrder } from '../src/domain/prepare.js';
 import { matchClients, matchProducts, searchCatalogue, searchClients } from '../src/domain/matching.js';
 import { calculateLineTotals } from '../src/domain/totals.js';
-import { config, draft, harborSiblings, pharmacyTypeAccounts, prepared, sampleNameAccounts } from './helpers.js';
+import { config, draft, harborSiblings, pharmacyTypeAccounts, prepared, sampleNameAccounts, willowmereStayAccounts } from './helpers.js';
 
 describe('business configuration', () => {
   it('rejects unsupported modes and undeclared capabilities', () => {
@@ -102,6 +102,29 @@ describe('client search', () => {
     expect(searchClients('Willowmere Pharmacy', [willowmere, east]).map(c => c.id).sort()).toEqual(['310', '313']);
     expect(matchClients('Willowmere Pharmacy', [willowmere, east])).toHaveLength(2);
   });
+  it('suggests the account when a leftover first name sits next to a distinctive business word', () => {
+    const { agriturismo, streetOnly } = willowmereStayAccounts();
+    expect(searchClients('Giulia Willowmere', [agriturismo, streetOnly]).map(c => c.id)).toEqual(['410']);
+    expect(matchClients('Giulia Willowmere', [agriturismo, streetOnly])).toEqual([]);
+  });
+  it('does not let a leftover first name pick a different account just because the word is in its street', () => {
+    const { agriturismo, streetOnly } = willowmereStayAccounts();
+    expect(searchClients('Giulia Willowmere', [agriturismo, streetOnly]).map(c => c.id)).not.toContain('411');
+    expect(searchClients('Giulia Willowmere', [streetOnly]).map(c => c.id)).toEqual([]);
+  });
+  it('still asks when two close accounts share the distinctive word next to a leftover first name', () => {
+    const { agriturismo, streetOnly, east } = willowmereStayAccounts();
+    expect(searchClients('Giulia Willowmere', [agriturismo, streetOnly, east]).map(c => c.id).sort()).toEqual(['410', '412']);
+  });
+  it('uses the contact person on the invoicing record, and still finds an everyday name in notes', () => {
+    const { agriturismo, streetOnly } = willowmereStayAccounts();
+    const withPerson = { ...agriturismo, contactPerson: 'Giulia Neri' };
+    expect(matchClients('Giulia Willowmere', [withPerson, streetOnly]).map(c => c.id)).toEqual(['410']);
+    expect(searchClients('Giulia Willowmere', [withPerson, streetOnly]).map(c => c.id)).toEqual(['410']);
+    const everyday = { ...agriturismo, name: 'Hilltop Stay Srl', notes: 'Willowmere' };
+    expect(searchClients('Giulia Willowmere', [everyday, streetOnly]).map(c => c.id)).toEqual(['410']);
+    expect(matchClients('Giulia Willowmere', [everyday, streetOnly])).toEqual([]);
+  });
   it('suggests a customer when a distinctive name has a small extra or missing ending, without locking it', () => {
     const { sample, east } = sampleNameAccounts();
     const accounts = [sample, east];
@@ -142,6 +165,15 @@ describe('order preparation', () => {
     const refine = await prepareOrder({ ...draft(), clientQuery: 'Fable Harbor spa' }, config(), connector, '2026-01-15');
     if (refine.ready) throw new Error('Expected sibling picks, not a missing customer');
     expect(refine.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id).sort()).toEqual(['210', '211', '212']);
+  });
+  it('asks to confirm a leftover first name plus a distinctive business word, and does not lock a street-only hit', async () => {
+    const connector = new DemoConnector();
+    const { agriturismo, streetOnly } = willowmereStayAccounts();
+    connector.clients.push(agriturismo, streetOnly);
+    const asked = await prepareOrder({ ...draft(), clientQuery: 'Giulia Willowmere' }, config(), connector, '2026-01-15');
+    if (asked.ready) throw new Error('Expected confirmation, not an auto-lock');
+    expect(asked.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id)).toEqual(['410']);
+    expect(asked.issues.find(i => i.field === 'client')?.candidates?.some(c => c.label.includes('Willowmere'))).toBe(true);
   });
   it('locks the intended pharmacy from a one-letter slip, and does not offer every pharmacy when only the trade word matches', async () => {
     const connector = new DemoConnector();
