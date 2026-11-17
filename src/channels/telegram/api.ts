@@ -1,19 +1,61 @@
 export type Keyboard = { inline_keyboard: { text: string; callback_data: string }[][] };
+
+class TelegramApiError extends Error {
+  constructor(method: string, readonly failure: string) {
+    super(`Telegram ${method} failed (${failure}); check connectivity, permissions, and rate limits`);
+  }
+}
+
+function httpStatus(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 400 && value <= 599 ? value : undefined;
+}
+
+function systemCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object' || !('code' in error) || typeof error.code !== 'string') return;
+  if (/^[A-Z][A-Z0-9_]{1,32}$/.test(error.code)) return error.code;
+}
+
+/** Host-safe class: timeout, rate_limit, auth, conflict, http_NNN, or a short system code. Never a message, URL or token. */
+export function telegramErrorClass(error: unknown, status?: number): string {
+  if (error instanceof TelegramApiError) return error.failure;
+  const code = httpStatus(status);
+  if (code === 401 || code === 403) return 'auth';
+  if (code === 409) return 'conflict';
+  if (code === 429) return 'rate_limit';
+  if (code) return `http_${code}`;
+  if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) return 'timeout';
+  const sys = systemCode(error);
+  if (sys && (sys.endsWith('TIMEOUT') || sys.endsWith('TIMEDOUT') || sys === 'ECONNABORTED')) return 'timeout';
+  if (sys) return sys;
+  if (error instanceof Error && error.cause !== undefined && error.cause !== error) return telegramErrorClass(error.cause, status);
+  return 'unavailable';
+}
+
+/** getUpdates retry line for a host log. Class only; tokens, URLs and message bodies stay out. */
+export function pollingRetryWarning(error: unknown): string {
+  return `Telegram polling unavailable (${telegramErrorClass(error)}); retrying the read in 5 seconds. No writes retried.`;
+}
+
 /** Minimal Bot API transport. Tokens and upstream error bodies never reach logs. */
 export class TelegramApi {
   constructor(private readonly token: string, private readonly request: typeof fetch = fetch) {
     if (!token) throw new Error('TELEGRAM_BOT_TOKEN is missing');
   }
   async call<T>(method: string, payload: Record<string, unknown> = {}): Promise<T> {
+    let status: number | undefined;
     try {
       const response = await this.request(`https://api.telegram.org/bot${this.token}/${method}`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload),
         signal: AbortSignal.timeout(40000),
       });
-      const body = await response.json() as { ok: boolean; result: T };
-      if (!response.ok || !body.ok) throw new Error();
-      return body.result;
-    } catch { throw new Error(`Telegram ${method} failed; check connectivity, permissions, and rate limits`); }
+      status = response.status;
+      const body = await response.json() as { ok?: boolean; result?: T; error_code?: unknown };
+      if (response.ok && body.ok) return body.result as T;
+      status = httpStatus(body.error_code) ?? response.status;
+    } catch (error) {
+      throw new TelegramApiError(method, telegramErrorClass(error, status));
+    }
+    throw new TelegramApiError(method, telegramErrorClass(undefined, status));
   }
   getMe() { return this.call<{ id: number; username: string; is_bot: boolean; can_read_all_group_messages?: boolean }>('getMe'); }
   /** File bytes for a received file. The file URL contains the token, so it never leaves this method. */
