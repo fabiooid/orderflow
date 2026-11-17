@@ -5,7 +5,7 @@ import { DemoConnector } from '../src/connector/demo.js';
 import { prepareOrder } from '../src/domain/prepare.js';
 import { matchClients, matchProducts, searchCatalogue, searchClients } from '../src/domain/matching.js';
 import { calculateLineTotals } from '../src/domain/totals.js';
-import { config, draft, harborSiblings, pharmacyTypeAccounts, prepared, willowmereStayAccounts } from './helpers.js';
+import { config, draft, harborSiblings, pharmacyTypeAccounts, prepared, sampleNameAccounts, willowmereStayAccounts } from './helpers.js';
 
 describe('business configuration', () => {
   it('rejects unsupported modes and undeclared capabilities', () => {
@@ -125,6 +125,21 @@ describe('client search', () => {
     expect(searchClients('Giulia Willowmere', [everyday, streetOnly]).map(c => c.id)).toEqual(['410']);
     expect(matchClients('Giulia Willowmere', [everyday, streetOnly])).toEqual([]);
   });
+  it('suggests a customer when a distinctive name has a small extra or missing ending, without locking it', () => {
+    const { sample, east } = sampleNameAccounts();
+    const accounts = [sample, east];
+    expect(searchClients('cliente sampler', [sample]).map(c => c.id)).toEqual(['510']);
+    expect(matchClients('cliente sampler', [sample])).toEqual([]);
+    expect(searchClients('cliente samp', [sample]).map(c => c.id)).toEqual(['510']);
+    expect(searchClients('cliente sampler', accounts).map(c => c.id).sort()).toEqual(['510', '512']);
+  });
+  it('still prefers an exact account over a neighbour that only has a small extra ending', () => {
+    const { sample, sampler } = sampleNameAccounts();
+    expect(matchClients('cliente sampler', [sample, sampler]).map(c => c.id)).toEqual(['511']);
+    expect(searchClients('cliente sampler', [sample, sampler]).map(c => c.id)).toEqual(['511']);
+    expect(matchClients('Cliente Sample', [sample, sampler]).map(c => c.id)).toEqual(['510']);
+    expect(searchClients('Cliente Sample', [sample, sampler]).map(c => c.id)).toEqual(['510']);
+  });
 });
 
 describe('order preparation', () => {
@@ -169,6 +184,24 @@ describe('order preparation', () => {
     const leftover = await prepareOrder({ ...draft(), clientQuery: 'Pharmacy Zorblax' }, config(), connector, '2026-01-15');
     if (leftover.ready) throw new Error('Expected no pharmacy list for a leftover trade word');
     expect(leftover.issues.find(i => i.field === 'client')?.candidates).toEqual([]);
+  });
+  it('asks to confirm a small extra ending on a distinctive name, and still asks when two close accounts fit', async () => {
+    const connector = new DemoConnector();
+    const { sample, sampler, east } = sampleNameAccounts();
+    connector.clients.push(sample);
+    const asked = await prepareOrder({ ...draft(), clientQuery: 'cliente sampler' }, config(), connector, '2026-01-15');
+    if (asked.ready) throw new Error('Expected confirmation, not an auto-lock');
+    expect(asked.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id)).toEqual(['510']);
+    const exact = await prepareOrder({ ...draft(), clientQuery: 'Cliente Sample' }, config(), connector, '2026-01-15');
+    expect(exact.ready && exact.order.client.id).toBe('510');
+    connector.clients.push(sampler, east);
+    const lockedExact = await prepareOrder({ ...draft(), clientQuery: 'cliente sampler' }, config(), connector, '2026-01-15');
+    expect(lockedExact.ready && lockedExact.order.client.id).toBe('511');
+    const two = new DemoConnector();
+    two.clients.push(sample, east);
+    const choice = await prepareOrder({ ...draft(), clientQuery: 'cliente sampler' }, config(), two, '2026-01-15');
+    if (choice.ready) throw new Error('Expected a choice between two close accounts');
+    expect(choice.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id).sort()).toEqual(['510', '512']);
   });
   it('copies the catalogue description onto a linked line, and leaves it empty when the product has none', async () => {
     const connector = new DemoConnector();

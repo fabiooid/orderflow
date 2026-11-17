@@ -6,7 +6,7 @@ import { replySchema } from '../src/channel/engine.js';
 import { orderDraftInput } from '../src/assistant/draft-schema.js';
 import { systemPrompt } from '../src/assistant/system-prompt.js';
 import { DemoConnector } from '../src/connector/demo.js';
-import { config, harborSiblings, pharmacyTypeAccounts, willowmereStayAccounts } from './helpers.js';
+import { config, harborSiblings, pharmacyTypeAccounts, sampleNameAccounts, willowmereStayAccounts } from './helpers.js';
 
 it('gives the agent the order and customer APIs and lookups, and no way to save', async () => {
   const storage = new LibSQLStore({ id: 'agent-tools', url: ':memory:' });
@@ -18,8 +18,12 @@ it('gives the agent the order and customer APIs and lookups, and no way to save'
     expect(tools.searchClients?.description).toContain('call this again');
     expect(tools.searchClients?.description).toContain('everyday name');
     expect(tools.searchClients?.description).toContain('closest related accounts');
+    expect(tools.searchClients?.description).toContain('short customer name');
+    expect(tools.searchClients?.description).toContain('not a request to save');
     expect(tools.prepareOrder?.description).toContain('always call search-clients first');
     expect(tools.prepareOrder?.description).toContain('not a substitute');
+    expect(tools.prepareOrder?.description).toContain('short customer name');
+    expect(tools.prepareOrder?.description).toContain('Do not ask to save the current draft as-is');
     expect(Object.values(tools).every(tool => !/creates?|saves?|writes?/i.test(tool.id))).toBe(true);
     expect(await agent.listSkills()).toEqual([]);
   } finally { await storage.close(); }
@@ -35,13 +39,19 @@ it('keeps business rules in the prompt and field rules in the API schema, with n
   expect(prompt).toContain("Do not let prepare-order's internal match choose the customer");
   expect(prompt).toContain('call search-clients again with the refined words');
   expect(prompt).toContain('Naming a customer is not a request to copy products');
+  expect(prompt).toContain('# Correct a customer');
+  expect(prompt).toContain('short customer name');
+  expect(prompt).toContain('not a request to save');
+  expect(prompt).toContain('nothing is saved yet');
   expect(prompt).not.toMatch(/\/(?:ordine|cliente|annulla|confermaordine|confermacliente)\b/);
   const fields = orderDraftInput.shape;
   expect(fields.newClient.description).toContain('attached email');
   expect(fields.notes.description).toContain('operator sees it in the draft');
   expect(fields.delivery.description).toContain('never a delivery address');
   expect(fields.clientQuery.description).toContain('search-clients');
+  expect(fields.clientQuery.description).toContain('short customer name');
   expect(fields.clientId.description).toContain('do not keep the old id');
+  expect(fields.clientId.description).toContain('short customer name');
   expect(fields.lines.description).toContain('A new request starts with no lines');
 });
 
@@ -137,5 +147,26 @@ it('suggests a distinctive account when extra query words are only a person name
     withPerson.clients.push({ ...agriturismo, contactPerson: 'Giulia Neri' }, streetOnly);
     const personTools = await createOrderAgent(config(), withPerson, storage).agent.listTools();
     expect(await personTools.searchClients!.execute!({ query: 'Giulia Willowmere' }, {} as never)).toEqual([expect.objectContaining({ id: '410', contactPerson: 'Giulia Neri' })]);
+  } finally { await storage.close(); }
+});
+
+it('suggests a customer from a small extra ending on a distinctive name, prefers an exact neighbour, and still lists two close accounts', async () => {
+  const storage = new LibSQLStore({ id: 'client-extra-ending-search', url: ':memory:' });
+  try {
+    const connector = new DemoConnector();
+    const { sample, sampler, east } = sampleNameAccounts();
+    connector.clients.push(sample);
+    const tools = await createOrderAgent(config(), connector, storage).agent.listTools();
+    const search = (query: string) => tools.searchClients!.execute!({ query }, {} as never) as Promise<{ id: string }[]>;
+    expect(await search('cliente sampler')).toEqual([expect.objectContaining({ id: '510' })]);
+    expect(await search('cliente samp')).toEqual([expect.objectContaining({ id: '510' })]);
+    connector.clients.push(sampler);
+    expect(await search('cliente sampler')).toEqual([expect.objectContaining({ id: '511' })]);
+    connector.clients.push(east);
+    expect((await search('cliente sampler')).map(c => c.id)).toEqual(['511']);
+    const two = new DemoConnector();
+    two.clients.push(sample, east);
+    const twoTools = await createOrderAgent(config(), two, storage).agent.listTools();
+    expect(((await twoTools.searchClients!.execute!({ query: 'cliente sampler' }, {} as never)) as { id: string }[]).map(c => c.id).sort()).toEqual(['510', '512']);
   } finally { await storage.close(); }
 });

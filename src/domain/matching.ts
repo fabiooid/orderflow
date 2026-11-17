@@ -98,10 +98,6 @@ function hitsText(text: string, word: string, allowNearMiss: boolean) {
   return allowNearMiss && text.split(' ').filter(Boolean).some(token => oneLetterOff(word, token));
 }
 
-function scoreText(text: string, queryWords: string[], allowNearMiss = false) {
-  return queryWords.filter(word => hitsText(text, word, allowNearMiss)).length;
-}
-
 function leftoverWords(text: string, queryWords: string[], allowNearMiss: boolean) {
   return queryWords.filter(word => !hitsText(text, word, allowNearMiss));
 }
@@ -117,7 +113,7 @@ function exactClients<T extends ClientSearchRecord>(query: string, clients: T[])
   return q ? clients.filter(c => normalize(c.name) === q || normalize(c.vatNumber ?? '') === q) : [];
 }
 
-/** True when the words differ by one substitution, insertion or deletion. Short tokens stay exact. */
+/** True when the words differ by one substitution, or by one insertion or deletion that is not only an extra or missing ending. Short tokens stay exact. */
 function oneLetterOff(left: string, right: string): boolean {
   if (left === right || left.length < 4 || right.length < 4) return false;
   const gap = Math.abs(left.length - right.length);
@@ -136,11 +132,25 @@ function oneLetterOff(left: string, right: string): boolean {
     if (skipped || shorter[i] !== longer[i + 1]) return false;
     skipped = 1;
   }
-  return true;
+  // An extra or missing letter only at the end is a small ending change, not a mid-word slip.
+  return skipped === 1;
 }
 
-function clientScore(queryWords: string[], client: ClientSearchRecord, allowNearMiss = false) {
-  return scoreText(clientText(client), queryWords, allowNearMiss);
+/** True when one distinctive word is the other plus a short extra or missing ending. Not general spelling correction. */
+function smallEndingOff(left: string, right: string): boolean {
+  if (left === right || left.length < 4 || right.length < 4) return false;
+  const [shorter, longer] = left.length < right.length ? [left, right] : [right, left];
+  if (!longer.startsWith(shorter)) return false;
+  const extra = longer.length - shorter.length;
+  return extra >= 1 && extra <= Math.min(3, Math.floor(shorter.length / 2));
+}
+
+function clientScore(queryWords: string[], client: ClientSearchRecord, allowNearMiss = false, allowEnding = false) {
+  const text = clientText(client);
+  const haystack = allowNearMiss || allowEnding ? text.split(' ').filter(Boolean) : [];
+  return queryWords.filter(word => contains(text, word)
+    || (allowNearMiss && haystack.some(token => oneLetterOff(word, token)))
+    || (allowEnding && haystack.some(token => smallEndingOff(word, token)))).length;
 }
 
 /**
@@ -162,13 +172,14 @@ function personNameSuggestions<T extends ClientSearchRecord>(words: string[], cl
   return best ? scored.filter(entry => entry.score === best).map(entry => entry.client) : [];
 }
 
-function everyWordHits<T extends ClientSearchRecord>(words: string[], clients: T[], allowNearMiss: boolean) {
-  return clients.filter(client => clientScore(words, client, allowNearMiss) === words.length);
+function everyWordHits<T extends ClientSearchRecord>(words: string[], clients: T[], allowNearMiss: boolean, allowEnding = false) {
+  return clients.filter(client => clientScore(words, client, allowNearMiss, allowEnding) === words.length);
 }
 
 /**
  * Clients whose legal name, VAT, city, notes, contact person or street contain every word of the query,
  * or an exact name or VAT. A distinctive word may be one letter off when no exact-word hit exists.
+ * Extra or missing endings are not locked here; search still offers them for confirmation.
  */
 export function matchClients<T extends ClientSearchRecord>(query: string, clients: T[]): T[] {
   const exact = exactClients(query, clients);
@@ -187,10 +198,11 @@ export function sameClientIds<T extends ClientSearchRecord>(left: T[], right: T[
 
 /**
  * Find customers by the name people use, not only the legal name. A distinctive word that is one letter
- * off still counts. Prefer every-word hits; if a leftover personal name hides a complete match, still
- * suggest the account whose legal name, notes, or contact person has the distinctive words — not a
- * weaker street-only hit. If a tighter refine (a hint such as hotel or shop) finds nobody, fall back
- * to siblings that share the remaining distinctive words, not every account of the same generic type.
+ * off still counts. A small extra or missing ending on a distinctive word still suggests the account
+ * when no exact-word hit exists. Prefer every-word hits; if a leftover personal name hides a complete
+ * match, still suggest the account whose legal name, notes, or contact person has the distinctive
+ * words — not a weaker street-only hit. If a tighter refine (a hint such as hotel or shop) finds nobody,
+ * fall back to siblings that share the remaining distinctive words, not every account of the same generic type.
  */
 export function searchClients<T extends ClientSearchRecord>(query: string, clients: T[]): T[] {
   const matched = matchClients(query, clients);
@@ -202,6 +214,8 @@ export function searchClients<T extends ClientSearchRecord>(query: string, clien
   }
   if (matched.length) return matched;
   if (!words.length) return [];
+  const extraEnding = everyWordHits(words, clients, true, true);
+  if (extraEnding.length) return extraEnding;
   const scored = clients.map(client => ({ client, score: clientScore(words, client, true) })).filter(entry => entry.score > 0);
   const best = Math.max(0, ...scored.map(entry => entry.score));
   // A single leftover word is often just the kind of business (hotel, pharmacy, spa). That is not enough
