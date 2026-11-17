@@ -5,7 +5,7 @@ import { createJevBatchSelector } from '../src/matching/jev-client.js';
 import type { SelectionResult } from '../src/matching/types.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { createDraftApi } from '../src/assistant/drafts.js';
-import { config, draft, harborSiblings, pharmacyTypeAccounts, sampleNameAccounts, willowmereStayAccounts } from './helpers.js';
+import { config, draft, harborSiblings, monasterySiblings, pharmacyTypeAccounts, sampleNameAccounts, willowmereStayAccounts } from './helpers.js';
 
 const on = matchingConfigSchema.parse({ mode: 'on' });
 const context = { orderId: 'test', revision: 1, operatorText: 'Order for the example shop: two small pebble washes. Delivery eight.' };
@@ -245,6 +245,25 @@ it('asks which sibling when only the everyday place name is given, and can lock 
   const missed = await r.resolve({ ...draft(), clientQuery: 'Fable Harbor spa', lines: [] }, { ...context, operatorText: 'fable harbor spa' });
   expect(missed.decisions[0]?.status).toBe('ambiguous');
   expect(missed.issues[0]?.candidates?.map(c => c.id).sort()).toEqual(['210', '211', '212']);
+});
+
+it('asks which sibling when the everyday name lives only in notes, and a store hint still finds the shop', async () => {
+  const connector = new DemoConnector();
+  const { shop, hotel } = monasterySiblings();
+  connector.clients.push(shop, hotel);
+  const select = vi.fn<SelectMany>(async requests => requests.map(r => r.candidates.length ? result('matched', r.candidates[0]!.id) : result('no-match')));
+  const r = resolver(connector, select);
+  const brand = await r.resolve({ ...draft(), clientQuery: 'Harbour', lines: [] }, { ...context, operatorText: 'crea ordine per harbour' });
+  expect(brand.decisions[0]?.status).toBe('ambiguous');
+  expect(brand.draft.clientId).toBeUndefined();
+  expect(brand.issues[0]?.candidates?.map(c => c.id).sort()).toEqual(['220', '221']);
+  expect(brand.issues[0]?.candidates?.some(c => c.label.includes('Harbour Hotel'))).toBe(true);
+  const hinted = await r.resolve({ ...draft(), clientQuery: 'Harbour hotel', lines: [] }, { ...context, operatorText: 'no è per l hotel' });
+  expect(hinted.decisions[0]?.status).toBe('matched');
+  expect(hinted.draft.clientId).toBe('221');
+  const shopHint = await r.resolve({ ...draft(), clientQuery: 'Harbour negozio', lines: [] }, { ...context, operatorText: 'harbour negozio' });
+  expect(shopHint.decisions[0]?.status).toBe('matched');
+  expect(shopHint.draft.clientId).toBe('220');
 });
 
 it('locks a one-letter slip on a distinctive name, and does not ask which pharmacy when only the trade word matches', async () => {

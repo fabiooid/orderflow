@@ -5,7 +5,7 @@ import { conversationCases, evalConnector, maplePine } from '../src/evals/conver
 import { runConversation, scriptedTurns } from '../src/evals/harness.js';
 import type { Converse } from '../src/channel/engine.js';
 import { prepareOrder } from '../src/domain/prepare.js';
-import { config, draft } from './helpers.js';
+import { config, draft, monasterySiblings } from './helpers.js';
 
 const productsAndNote = {
   lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }],
@@ -90,4 +90,34 @@ it('does not treat a unique close account as already chosen when preparing an or
   expect(exact.ready && exact.order.client.id).toBe(maplePine.id);
   const picked = await prepareOrder({ ...draft(), clientQuery: 'Maple', clientId: maplePine.id }, config(), demo, '2026-01-15');
   expect(picked.ready && picked.order.client.id).toBe(maplePine.id);
+});
+
+it('drops a locked shop when a later hotel refine no longer fits that account', async () => {
+  const demo = new DemoConnector();
+  const { shop, hotel } = monasterySiblings();
+  demo.clients.push(shop, hotel);
+  const converse: Converse = async (prompt, act) => {
+    if (!prompt.openRequest) {
+      await act.order(draftSchema.parse({
+        clientQuery: shop.name,
+        lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }],
+        shippingPrice: 8,
+      }));
+      return { reply: '', locale: 'it' };
+    }
+    await act.order(draftSchema.parse({
+      clientQuery: 'Harbour hotel',
+      clientId: shop.id,
+      lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }],
+      shippingPrice: 8,
+    }));
+    return { reply: '', locale: 'it' };
+  };
+  const outcome = await runConversation(config(), demo, [
+    { text: `ordine per ${shop.name}: 2 Pebble hand wash 250 ml, spedizione 8 euro` },
+    { text: "no è per l'hotel" },
+  ], { converse });
+  expect(outcome.open?.draft.clientId).not.toBe(shop.id);
+  expect(outcome.open?.prepared?.client.id).not.toBe(shop.id);
+  expect(outcome.open?.issues?.find(issue => issue.field === 'client')?.candidates?.map(c => c.id)).toEqual([hotel.id]);
 });

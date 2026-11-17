@@ -3,9 +3,9 @@ import { configSchema } from '../src/config/schema.js';
 import { draftSchema, preparedOrderSchema } from '../src/domain/types.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { prepareOrder } from '../src/domain/prepare.js';
-import { matchClients, matchProducts, relatedProducts, searchCatalogue, searchClients } from '../src/domain/matching.js';
+import { clientPickLabel, matchClients, matchProducts, relatedProducts, searchCatalogue, searchClients } from '../src/domain/matching.js';
 import { calculateLineTotals } from '../src/domain/totals.js';
-import { config, draft, harborSiblings, pharmacyTypeAccounts, prepared, sampleNameAccounts, willowmereStayAccounts } from './helpers.js';
+import { config, draft, harborSiblings, monasterySiblings, pharmacyTypeAccounts, prepared, sampleNameAccounts, willowmereStayAccounts } from './helpers.js';
 
 describe('business configuration', () => {
   it('rejects unsupported modes and undeclared capabilities', () => {
@@ -154,6 +154,27 @@ describe('client search', () => {
     expect(matchClients('Cliente Sample', [sample, sampler]).map(c => c.id)).toEqual(['510']);
     expect(searchClients('Cliente Sample', [sample, sampler]).map(c => c.id)).toEqual(['510']);
   });
+  it('finds a hotel from an everyday name stored only in notes, next to a shop with that place as its legal name', () => {
+    const { shop, hotel } = monasterySiblings();
+    const clients = [shop, hotel];
+    expect(searchClients('Harbour hotel', clients).map(c => c.id)).toEqual(['221']);
+    expect(matchClients('Harbour hotel', clients).map(c => c.id)).toEqual(['221']);
+    expect(searchClients('Harbour shop', clients).map(c => c.id)).toEqual(['220']);
+    expect(searchClients('Harbour store', clients).map(c => c.id)).toEqual(['220']);
+    expect(searchClients('Harbour negozio', clients).map(c => c.id)).toEqual(['220']);
+    expect(searchClients('Harbour albergo', clients).map(c => c.id)).toEqual(['221']);
+    expect(searchClients('Harbour', clients).map(c => c.id).sort()).toEqual(['220', '221']);
+    expect(matchClients('Harbour', clients)).toHaveLength(2);
+  });
+  it('puts the everyday notes on pick labels, and the street when notes do not already name the place', () => {
+    const { shop, hotel } = monasterySiblings();
+    expect(clientPickLabel(hotel)).toContain('Harbour Hotel');
+    expect(clientPickLabel(hotel)).toContain('Example Monastery Ltd');
+    expect(clientPickLabel(shop)).not.toContain('Harbour Hotel');
+    const { hotel: rooms } = harborSiblings();
+    expect(clientPickLabel(rooms)).toContain('hotel');
+    expect(clientPickLabel(rooms)).toContain('Fable Harbor Walk 4');
+  });
 });
 
 describe('order preparation', () => {
@@ -183,6 +204,27 @@ describe('order preparation', () => {
     expect(refine.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id).sort()).toEqual(['210', '211', '212']);
     const exactCafe = await prepareOrder({ ...draft(), clientQuery: 'Fable Harbor Cafe' }, config(), connector, '2026-01-15');
     expect(exactCafe.ready && exactCafe.order.client.id).toBe('212');
+  });
+  it('asks which sibling for an everyday name in notes, and does not keep a shop lock after a hotel refine', async () => {
+    const connector = new DemoConnector();
+    const { shop, hotel } = monasterySiblings();
+    connector.clients.push(shop, hotel);
+    const asked = await prepareOrder({ ...draft(), clientQuery: 'Harbour' }, config(), connector, '2026-01-15');
+    if (asked.ready) throw new Error('Expected a client question');
+    expect(asked.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id).sort()).toEqual(['220', '221']);
+    expect(asked.issues.find(i => i.field === 'client')?.candidates?.some(c => c.label.includes('Harbour Hotel'))).toBe(true);
+    const hotelHint = await prepareOrder({ ...draft(), clientQuery: 'Harbour hotel' }, config(), connector, '2026-01-15');
+    if (hotelHint.ready) throw new Error('Expected a customer question, not a lock');
+    expect(hotelHint.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id)).toEqual(['221']);
+    const shopHint = await prepareOrder({ ...draft(), clientQuery: 'Harbour negozio' }, config(), connector, '2026-01-15');
+    if (shopHint.ready) throw new Error('Expected a customer question, not a lock');
+    expect(shopHint.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id)).toEqual(['220']);
+    const stale = await prepareOrder({ ...draft(), clientQuery: 'Harbour hotel', clientId: shop.id }, config(), connector, '2026-01-15');
+    if (stale.ready) throw new Error('Expected sibling picks, not the already-locked shop');
+    expect(stale.draft.clientId).toBeUndefined();
+    expect(stale.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id)).toEqual(['221']);
+    const picked = await prepareOrder({ ...draft(), clientQuery: 'Harbour', clientId: shop.id }, config(), connector, '2026-01-15');
+    expect(picked.ready && picked.order.client.id).toBe('220');
   });
   it('asks to confirm a leftover first name plus a distinctive business word, and does not lock a street-only hit', async () => {
     const connector = new DemoConnector();

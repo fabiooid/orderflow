@@ -120,13 +120,49 @@ function businessIdentityText(client: ClientSearchRecord) {
 /** Trade or legal-form words that name a kind of account, not one account. */
 const GENERIC_ACCOUNT_WORDS = new Set([
   'srl', 'spa', 'sas', 'snc', 'ltd', 'llc', 'inc', 'gmbh', 'plc', 'corp', 'bv', 'nv',
-  'hotel', 'shop', 'store', 'pharmacy', 'farmacia', 'cafe', 'restaurant', 'ristorante',
-  'bar', 'farm', 'inn', 'studio', 'company', 'group', 'deli', 'bakery', 'bistro',
-  'trattoria', 'pizzeria', 'market', 'trading', 'agriturismo', 'lodge', 'resort',
+  'hotel', 'albergo', 'locanda', 'shop', 'store', 'negozio', 'pharmacy', 'farmacia',
+  'cafe', 'caffe', 'coffee', 'restaurant', 'ristorante', 'bar', 'farm', 'inn', 'studio',
+  'company', 'group', 'deli', 'bakery', 'bistro', 'trattoria', 'pizzeria', 'market',
+  'trading', 'agriturismo', 'lodge', 'resort',
 ]);
 
+/**
+ * Same kind of place, in the languages operators actually type. A "negozio" hint should hit a shop
+ * note, and "albergo" should hit hotel, without one-business aliases.
+ */
+const ACCOUNT_TYPE_FAMILIES: readonly (readonly string[])[] = [
+  ['hotel', 'albergo', 'locanda'],
+  ['shop', 'store', 'negozio'],
+  ['pharmacy', 'farmacia'],
+  ['cafe', 'caffe', 'coffee'],
+  ['restaurant', 'ristorante'],
+];
+
+function typeFamily(word: string) {
+  return ACCOUNT_TYPE_FAMILIES.find(family => family.includes(word)) ?? [word];
+}
+
+/** Street-label filler: useful place words still show; via/road/2 do not. */
+const STREET_FILLER = new Set([
+  'via', 'viale', 'corso', 'piazza', 'strada', 'vicolo', 'street', 'road', 'lane', 'walk',
+  'dock', 'way', 'avenue', 'rue', 'plaza', 'square',
+]);
+
+function distinctivePlaceWords(value: string) {
+  return normalize(value).split(' ').filter(word => word.length > 2 && !/^\d+$/.test(word) && !STREET_FILLER.has(word) && !GENERIC_ACCOUNT_WORDS.has(word));
+}
+
+function addsDistinctivePlace(existing: string, extra: string) {
+  const have = new Set(distinctivePlaceWords(existing));
+  return distinctivePlaceWords(extra).some(word => !have.has(word));
+}
+
+function clientContains(text: string, token: string) {
+  return typeFamily(token).some(needle => contains(text, needle));
+}
+
 function hitsText(text: string, word: string, allowNearMiss: boolean) {
-  if (contains(text, word)) return true;
+  if (clientContains(text, word)) return true;
   return allowNearMiss && text.split(' ').filter(Boolean).some(token => oneLetterOff(word, token));
 }
 
@@ -185,7 +221,7 @@ function smallEndingOff(left: string, right: string): boolean {
 function clientScore(queryWords: string[], client: ClientSearchRecord, allowNearMiss = false, allowEnding = false) {
   const text = clientText(client);
   const haystack = allowNearMiss || allowEnding ? text.split(' ').filter(Boolean) : [];
-  return queryWords.filter(word => contains(text, word)
+  return queryWords.filter(word => clientContains(text, word)
     || (allowNearMiss && haystack.some(token => oneLetterOff(word, token)))
     || (allowEnding && haystack.some(token => smallEndingOff(word, token)))).length;
 }
@@ -261,9 +297,12 @@ export function searchClients<T extends ClientSearchRecord>(query: string, clien
   return scored.filter(entry => entry.score === best).map(entry => entry.client);
 }
 
-/** Button label: legal name, then the everyday name from notes or the contact person when it adds something. */
-export function clientPickLabel(client: { name: string; code?: string; city?: string; country?: string; vatNumber?: string; notes?: string; contactPerson?: string; aliases?: string[] }) {
+/** Button label: legal name, then the everyday name from notes or the contact person, then street when it still adds a place word. */
+export function clientPickLabel(client: { name: string; code?: string; city?: string; country?: string; vatNumber?: string; notes?: string; contactPerson?: string; street?: string; aliases?: string[] }) {
   const extra = [...new Set([...(client.aliases ?? []), client.notes?.trim() ?? '', client.contactPerson?.trim() ?? ''].filter(value => value && !normalize(client.name).includes(normalize(value))))];
+  const soFar = [client.name, ...extra, client.city ?? ''].join(' ');
+  const street = client.street?.trim() ?? '';
+  if (street && addsDistinctivePlace(soFar, street)) extra.push(street);
   return [client.code, client.name, ...extra, client.city, client.country, client.vatNumber].filter(Boolean).join(' — ');
 }
 
