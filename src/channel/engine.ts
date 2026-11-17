@@ -54,7 +54,7 @@ export function remembered(plan: Pick<ReplyPlan, 'texts' | 'agentText'>) {
 export const replySchema = (fallback: AppConfig['locale'], currency: AppConfig['currency']) => z.object({
   // Chosen before the reply is written, so the reply follows it.
   locale: z.enum(['it', 'en']).describe(`The language operatorWords are written in, unless the operator asked for another. Only words with no language of their own ("ok", a product name) keep the conversation's language; with no cue at all, ${fallback === 'it' ? 'Italian' : 'English'}.`),
-  reply: z.string().describe(`Your own words in that language, shown above any draft: short, no greeting or recap, or empty when the draft speaks for itself. Answer product questions by listing the matches yourself, one per line, "name — code — ${currency} net" (catalogue prices are net; a tester only when asked for). Never write a draft or summary yourself.`),
+  reply: z.string().describe(`Your own words in that language, shown above any draft: short, no greeting or recap, or empty when the draft speaks for itself. Answer product questions by listing the matches yourself, one per line, "name — code — ${currency} net" (catalogue prices are net; a tester only when asked for). If no product has every requested detail, say that combination is not in the catalogue, then list the real products that match each detail; never present a product missing a requested detail as the requested item. Never write a draft or summary yourself.`),
 });
 
 /**

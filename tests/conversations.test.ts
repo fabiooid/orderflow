@@ -12,23 +12,30 @@ import { createConversationEngine, type Converse } from '../src/channel/engine.j
 import { LibSQLStore } from '@mastra/libsql';
 import { config, message, press } from './helpers.js';
 
-const fab49Ids = ['voice-note-keeps-lines-after-customer', 'photo-keeps-lines-and-still-asks-size', 'customer-only-does-not-invent-lines', 'cancelled-request-does-not-copy-lines'];
+const scriptedIds = [
+  'missing-combination-offers-alternatives',
+  'voice-note-keeps-lines-after-customer',
+  'photo-keeps-lines-and-still-asks-size',
+  'customer-only-does-not-invent-lines',
+  'cancelled-request-does-not-copy-lines',
+];
 
 function asOrderDraft(act: ScriptedAct | undefined): OrderDraft {
   if (!act || act === 'cancel') throw new Error('expected an order draft');
   return structuredClone(act);
 }
 
-it('scripts the FAB-49 conversation cases', () => {
-  expect(fab49Ids.filter(id => conversationCases.some(c => c.id === id && c.scripted))).toEqual(fab49Ids);
+it('scripts the offline conversation cases', () => {
+  expect(scriptedIds.filter(id => conversationCases.some(c => c.id === id && c.scripted))).toEqual(scriptedIds);
 });
 
-it.each(fab49Ids)('scripted conversation: %s', async id => {
+it.each(scriptedIds)('scripted conversation: %s', async id => {
   const scenario = conversationCases.find(c => c.id === id);
   expect(scenario?.scripted).toBeTruthy();
   const outcome = await runConversation(config(), evalConnector(), scenario!.turns, { converse: scriptedTurns(scenario!.scripted!) });
   expect(scenario!.check(outcome)).toEqual([]);
 });
+
 
 /**
  * Scripted stand-in for the model. It follows the written conversation rules: if they say a short
@@ -162,3 +169,4 @@ it('updates the customer from a short name and still allows confirm-and-save aft
     await storage.close();
   }
 });
+

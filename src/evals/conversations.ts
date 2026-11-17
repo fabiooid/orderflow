@@ -17,6 +17,11 @@ export function evalConnector() {
   const connector = new DemoConnector();
   connector.clients.push(structuredClone(northwind), structuredClone(maplePine));
   connector.products.push({ id: '104', code: 'DEMO-A5', name: 'Pebble hand wash 500 ml', description: '', netPrice: 20 });
+  // A requested fig hand soap does not exist; fig shower gel and cedar hand soap do.
+  connector.products.push(
+    { id: '105', code: 'DEMO-FIG-GEL', name: 'Fig shower gel 250 ml', description: '', netPrice: 14 },
+    { id: '106', code: 'DEMO-CEDAR-SOAP', name: 'Cedar hand soap 250 ml', description: '', netPrice: 12 },
+  );
   // Italian words in a description, as a real catalogue has, so Italian questions can find the English-named candle.
   connector.products.find(p => p.id === '103')!.description = 'Candela profumata al lino';
   return connector;
@@ -277,6 +282,32 @@ export const conversationCases: ConversationCase[] = [
     id: 'english-request',
     turns: [{ text: 'Prepare an order for Northwind Bistro: 3 Linen candle 200 g, delivery 8 euros' }],
     check: all(neverGaveUp, orderFor(northwind.id), o => expect(last(o).includes('📦 Order preview'), 'no English order preview')),
+  },
+  {
+    id: 'missing-combination-offers-alternatives',
+    // Fig hand soap is not sold; fig shower gel and cedar hand soap are. Say so, and do not lock a different scent.
+    turns: [{ text: 'Prepare an order for Example Studio: 2 fig hand soap, delivery 8 euros' }],
+    scripted: [draftSchema.parse({
+      clientQuery: 'Example Studio',
+      lines: [{ query: 'fig hand soap', quantity: 2 }],
+      shippingPrice: 8,
+    })],
+    check: all(neverGaveUp, o => {
+      const line = o.open?.draft.lines[0];
+      const issue = o.open?.issues?.find(i => i.field === 'lines.0');
+      const labels = issue?.candidates?.map(c => c.label).join(' ') ?? '';
+      return [
+        ...expect(o.open?.draft.clientId === '201' || /example studio/i.test(o.open?.draft.clientQuery ?? ''), `client is ${o.open?.draft.clientId ?? `"${o.open?.draft.clientQuery ?? 'none'}"`}, expected Example Studio`),
+        ...expect(!o.open?.draft.newClient, `proposes creating new customer "${o.open?.draft.newClient?.name}"`),
+        ...expect(o.open?.status !== 'ready', 'treated a missing combination as a ready order'),
+        ...expect(line?.productId !== '106', 'presented cedar hand soap as the requested fig hand soap'),
+        ...expect(line?.productId !== '105', 'presented fig shower gel as the requested fig hand soap'),
+        ...expect(/fig hand soap/i.test(line?.query ?? ''), 'lost the requested wording'),
+        ...expect(/not in the catalogue/i.test(issue?.message ?? ''), `did not say the combination is missing: ${issue?.message}`),
+        ...expect(/fig shower gel/i.test(labels), `did not offer the fig products that exist: ${labels}`),
+        ...expect(/cedar hand soap/i.test(labels), `did not offer the hand soaps that exist: ${labels}`),
+      ];
+    }),
   },
   {
     id: 'weak-customer-stays-unmatched',

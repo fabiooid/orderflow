@@ -3,7 +3,7 @@ import { configSchema } from '../src/config/schema.js';
 import { draftSchema, preparedOrderSchema } from '../src/domain/types.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { prepareOrder } from '../src/domain/prepare.js';
-import { matchClients, matchProducts, searchCatalogue, searchClients } from '../src/domain/matching.js';
+import { matchClients, matchProducts, relatedProducts, searchCatalogue, searchClients } from '../src/domain/matching.js';
 import { calculateLineTotals } from '../src/domain/totals.js';
 import { config, draft, harborSiblings, pharmacyTypeAccounts, prepared, sampleNameAccounts, willowmereStayAccounts } from './helpers.js';
 
@@ -56,6 +56,20 @@ describe('product matching', () => {
     expect(searchCatalogue('spray menta', catalogue).map(p => p.id)).toEqual(['1', '2']);
     expect(searchCatalogue('candela menta', catalogue)[0]!.id).toBe('2');
     expect(searchCatalogue('gelsomino', catalogue)).toEqual([]);
+  });
+  it('keeps products for each requested word when the combination itself is missing', () => {
+    const catalogue = [
+      { id: 'gel', code: 'FIG-GEL', name: 'Fig shower gel 250 ml', description: '', netPrice: 14 },
+      { id: 'cedar', code: 'CEDAR-SOAP', name: 'Cedar hand soap 250 ml', description: '', netPrice: 12 },
+      ...Array.from({ length: 20 }, (_, i) => ({
+        id: `soap-${i}`, code: `SOAP-${i}`, name: `Grove ${i} hand soap 250 ml`, description: '', netPrice: 11,
+      })),
+    ];
+    expect(matchProducts('fig hand soap', catalogue)).toEqual([]);
+    const related = relatedProducts('fig hand soap', catalogue);
+    expect(related.map(p => p.name)).toContain('Fig shower gel 250 ml');
+    expect(related.map(p => p.name)).toContain('Cedar hand soap 250 ml');
+    expect(searchCatalogue('fig hand soap', catalogue).map(p => p.name)).not.toContain('Fig shower gel 250 ml');
   });
   it('keeps testers out unless asked', () => {
     const withTester = [...products, { id: '3', code: 'FAKE013T', name: 'TESTER Lunara Sapone Mani 250ml', description: '', netPrice: 5 }];
@@ -250,6 +264,20 @@ describe('order preparation', () => {
     const result = await prepareOrder({ ...draft(), lines: [{ query: 'candele lunara', quantity: 1 }] }, config(), connector, '2026-01-15');
     expect(result.ready).toBe(false);
     if (!result.ready) expect(result.issues.find(i => i.field === 'lines.0')?.candidates?.map(c => c.id)).toEqual(['101']);
+  });
+  it('says a missing combination is not in the catalogue and lists both kinds of real products', async () => {
+    const connector = new DemoConnector();
+    connector.products.push(
+      { id: '105', code: 'DEMO-FIG-GEL', name: 'Fig shower gel 250 ml', description: '', netPrice: 14 },
+      { id: '106', code: 'DEMO-CEDAR-SOAP', name: 'Cedar hand soap 250 ml', description: '', netPrice: 12 },
+    );
+    const result = await prepareOrder({ ...draft(), lines: [{ query: 'fig hand soap', quantity: 2 }] }, config(), connector, '2026-01-15');
+    expect(result.ready).toBe(false);
+    if (result.ready) return;
+    const issue = result.issues.find(i => i.field === 'lines.0');
+    expect(issue?.message).toMatch(/not in the catalogue/i);
+    expect(issue?.candidates?.map(c => c.label)).toEqual(expect.arrayContaining(['Fig shower gel 250 ml', 'Cedar hand soap 250 ml']));
+    expect(result.draft.lines[0]?.productId).toBeUndefined();
   });
   it('accepts the agent’s product pick for a loose description, but not an unasked tester', async () => {
     const connector = new DemoConnector();

@@ -2,7 +2,7 @@ import type { AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
 import { clientSchema, draftSchema, preparedOrderSchema, type Client, type Issue, type OrderDraft, type OrderLine, type PreparedOrder, type Product, type VatValidation } from './types.js';
 import { missingCustomerFields } from './customer.js';
-import { asksForTester, clientPickLabel, exactClients, isTester, matchClients, matchProducts, nameInText, namedAlternatives, normalize, sameClient, searchCatalogue, searchClients } from './matching.js';
+import { asksForTester, clientPickLabel, exactClients, isTester, matchClients, matchProducts, nameInText, namedAlternatives, normalize, relatedProducts, sameClient, searchClients } from './matching.js';
 
 /** `draft` is the draft as preparation read it, for example without a delivery address equal to the billing one. */
 export type Preparation = { ready: false; issues: Issue[]; draft: OrderDraft; clientId?: string } | { ready: true; order: PreparedOrder; draft: OrderDraft };
@@ -76,8 +76,8 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
       continue;
     }
     const named = matches.length ? [] : namedAlternatives(line.query, catalogue);
-    const candidates = matches.length ? matches : named.length ? named : searchCatalogue(line.query, catalogue);
-    const message = matches.length || named.length ? 'Choose the exact product or variant' : candidates.length ? 'No exact product for this description; choose one of the related products' : 'No matching product; clarify the name and size';
+    const candidates = matches.length ? matches : named.length ? named : relatedProducts(line.query, catalogue);
+    const message = matches.length || named.length ? 'Choose the exact product or variant' : candidates.length ? 'This combination is not in the catalogue. Related products that match part of the request are listed; none of them is the requested item.' : 'No matching product; clarify the name and size';
     issues.push({ field, message, candidates: candidates.map(p => ({ id: p.id, label: p.name })) });
   }
 
