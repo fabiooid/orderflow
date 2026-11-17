@@ -9,7 +9,7 @@ import { WriteJournal } from '../src/storage/write-journal.js';
 import { mkdir } from 'node:fs/promises';
 import { LibSQLStore } from '@mastra/libsql';
 import { connectorMode, loadAppConfig } from '../src/config/load.js';
-import { TelegramApi } from '../src/channels/telegram/api.js';
+import { pollingRetryWarning, TelegramApi } from '../src/channels/telegram/api.js';
 import { TELEGRAM_STATE_URL, TelegramStore, pollerLockPath, telegramMemoryUrl, telegramScopePrefix } from '../src/channel/store.js';
 import { TelegramController } from '../src/channel/controller.js';
 import { createConversationEngine } from '../src/channel/engine.js';
@@ -81,9 +81,9 @@ async function main() {
         updates = await api.updates(offset);
         // Album photos arrive as separate updates; give the rest of an album a moment to arrive with its first part.
         if (albumOf(updates.at(-1)) !== undefined) { await delay(1500); updates = await api.updates(offset); }
-      } catch {
+      } catch (error) {
         if (stopping) break;
-        console.warn('Telegram polling unavailable; retrying the read in 5 seconds. No writes retried.');
+        console.warn(pollingRetryWarning(error));
         await delay(5000);
         continue;
       }
