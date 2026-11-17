@@ -61,6 +61,7 @@ export const en = {
   markChecked: '👀 Mark as checked',
   cancelButton: '❌ Cancel',
   fileTooLarge: 'File too large: the limit is 20 MB.',
+  attachmentUnused: 'I cannot use this file. Send a photo, a voice note, a PDF, or a spreadsheet.',
   forwarded: '[Message forwarded from {from}]',
   voiceNotConfigured: 'Voice notes are not configured in this deployment.',
   transcribed: '[Transcribed voice note]\n{text}',
