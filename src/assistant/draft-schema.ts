@@ -47,7 +47,7 @@ export const orderDraftInput = z.object({
   discountShipping: z.boolean().nullable().describe('Whether the discount also applies to delivery, only when the operator says so.'),
   delivery: z.object({ country: z.string().nullable(), address: z.string().min(1) }).strict().nullable()
     .describe("Only when the operator asks to ship somewhere other than the customer's own address. A signature or letterhead address is never a delivery address."),
-  notes: z.string().describe('Printed on the order: delivery or handling instructions from the operator or the customer\'s message (such as express delivery or a deadline), or a note the operator asks for. The operator sees it in the draft. Never prices, VAT codes, discounts or your own remarks.'),
+  notes: z.string().describe('Printed on the order: delivery or handling instructions from the operator or the customer\'s message (such as a rush delivery or a deadline), or a note the operator asks for. The operator sees it in the draft. Write it in the same language as the operator\'s messages in this request: Italian when they write in Italian, English when they write in English. Keep catalogue product names as they appear; do not translate them. Never prices, VAT codes, discounts or your own remarks.'),
   priceTier: z.string().regex(/^[a-z0-9-]+$/).nullable().describe('Always null: named price lists are not connected. Ask for explicit unit prices instead.'),
 }).strict();
 
