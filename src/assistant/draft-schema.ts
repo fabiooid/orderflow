@@ -16,6 +16,7 @@ const clientFields: Record<string, string> = {
   sdiCode: 'Seven-character SDI recipient code.',
   vatNumber: 'VAT number (partita IVA) exactly as written.',
   taxCode: 'Tax code (codice fiscale).',
+  contactPerson: 'Contact person at the business, only when the operator or the record gives one. Never invent a person.',
   notes: 'Only a note the operator explicitly asks for.',
 };
 // OpenAI strict structured outputs require explicit nulls for unknown fields.

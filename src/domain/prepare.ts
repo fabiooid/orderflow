@@ -2,7 +2,7 @@ import type { AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
 import { clientSchema, draftSchema, preparedOrderSchema, type Client, type Issue, type OrderDraft, type OrderLine, type PreparedOrder, type Product, type VatValidation } from './types.js';
 import { missingCustomerFields } from './customer.js';
-import { asksForTester, clientPickLabel, isTester, matchClients, matchProducts, namedAlternatives, normalize, sameClient, searchCatalogue, searchClients } from './matching.js';
+import { asksForTester, clientPickLabel, isTester, matchClients, matchProducts, namedAlternatives, normalize, sameClient, sameClientIds, searchCatalogue, searchClients } from './matching.js';
 
 /** `draft` is the draft as preparation read it, for example without a delivery address equal to the billing one. */
 export type Preparation = { ready: false; issues: Issue[]; draft: OrderDraft; clientId?: string } | { ready: true; order: PreparedOrder; draft: OrderDraft };
@@ -17,7 +17,9 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
   const matches = draft.clientId
     ? clients.filter(c => c.id === draft.clientId)
     : query ? matchClients(query, clients) : [];
-  let client: Partial<Client> | undefined = draft.newClient ?? (matches.length === 1 ? matches[0] : undefined);
+  const related = !draft.clientId && query ? searchClients(query, clients) : [];
+  const uniqueMatch = matches.length === 1 && (Boolean(draft.clientId) || sameClientIds(matches, related));
+  let client: Partial<Client> | undefined = draft.newClient ?? (uniqueMatch ? matches[0] : undefined);
   if (draft.newClient) {
     const duplicates = clients.filter(c => sameClient(c, draft.newClient!));
     if (duplicates.length) {
@@ -25,7 +27,7 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
       client = undefined;
     }
   } else if (!client) {
-    const offered = matches.length ? matches : query ? searchClients(query, clients) : [];
+    const offered = related.length ? related : matches;
     issues.push({ field: 'client', message: 'Choose an existing client or supply complete new-client details', candidates: toCandidates(offered) });
   }
   if (client) {

@@ -46,7 +46,8 @@ export function toFicClient(client: NewCustomer): FicClient {
     id: client.id === undefined ? undefined : ficId(client.id), type: 'company', name: client.name, country_iso: client.country, country: client.country ? italianRegions.of(client.country) : undefined,
     address_street: client.street, address_city: client.city, address_postal_code: client.postalCode,
     address_province: client.province, email: client.email, certified_email: client.certifiedEmail, phone: client.phone,
-    vat_number: client.vatNumber, tax_code: client.taxCode, ei_code: client.sdiCode, notes: client.notes,
+    vat_number: client.vatNumber, tax_code: client.taxCode, ei_code: client.sdiCode,
+    contact_person: client.contactPerson, notes: client.notes,
   };
 }
 
@@ -57,7 +58,7 @@ function fromFicClient(client: FicClient): Client {
     street: client.address_street ?? '', city: client.address_city ?? '', postalCode: client.address_postal_code ?? '',
     province: client.address_province || undefined, email: client.email || undefined, certifiedEmail: client.certified_email || undefined, phone: client.phone || undefined,
     vatNumber: client.vat_number || undefined, taxCode: client.tax_code || undefined,
-    sdiCode: client.ei_code || undefined, notes: client.notes ?? '',
+    sdiCode: client.ei_code || undefined, contactPerson: client.contact_person || undefined, notes: client.notes ?? '',
   };
 }
 

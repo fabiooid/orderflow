@@ -3,7 +3,7 @@ import { withCompleteClientSearch } from './client-search.js';
 import { z } from 'zod';
 import type { AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
-import { asksForTester, clientPickLabel, isTester, matchClients, normalize, searchClients } from '../domain/matching.js';
+import { asksForTester, clientPickLabel, isTester, matchClients, normalize, sameClientIds, searchClients } from '../domain/matching.js';
 import { draftSchema, type Client, type Product, type Issue, type OrderDraft } from '../domain/types.js';
 import { productCandidates, clientCandidates } from './candidates.js';
 import { loadMatchingConfig, type MatchingConfig } from './config.js';
@@ -80,7 +80,7 @@ export function createIdentityResolver(app: AppConfig, connector: OrderConnector
     const eligibleRecords = listed.filter(c => (!namedCities.length || namedCities.includes(c.city)) && (!vat || normalize(c.vatNumber ?? '') === normalize(vat)) && (!country || c.country === country));
     const allWord = clientQuery ? matchClients(clientQuery, eligibleRecords) : [];
     const related = clientQuery ? searchClients(clientQuery, eligibleRecords) : [];
-    const lexical = allWord.length ? allWord : related;
+    const lexical = related.length ? related : allWord;
     const ca = aliases.clientAliases.filter(a => normalize(a.phrase) === normalize(clientQuery));
     const addAliases = (c: Candidate, values: string[]) => {
       const merged = [...new Set([...(c.aliases ?? []), ...values].filter(Boolean))];
@@ -91,7 +91,7 @@ export function createIdentityResolver(app: AppConfig, connector: OrderConnector
     const confirmedClient = context.confirmedChoices?.find(c => c.field === 'client' && c.queryHash === hash(normalize(clientQuery)) && clientSet.some(record => record.id === c.id && identityHash(record) === c.identityHash));
     const exactClients = clientSet.filter(c => choice?.field === 'client' ? c.id === choice.id : confirmedClient ? c.id === confirmedClient.id : [c.name, c.vatNumber ?? ''].some(v => normalize(v) === normalize(clientQuery) && has(context.operatorText, v)));
     const siblingAsk = choice?.field !== 'client' && !confirmedClient && exactClients.length !== 1
-      && (allWord.length > 1 || (allWord.length === 0 && related.length > 0));
+      && (allWord.length > 1 || (allWord.length === 0 && related.length > 0) || (related.length > 0 && !sameClientIds(allWord, related)));
     pending.push({ field: 'client', kind: 'client', query: clientQuery, candidates: clientSet,
       operator: choice?.field === 'client' || !!confirmedClient,
       exact: exactClients.length === 1 && (choice?.field === 'client' || confirmedClient || new Set(ca.map(a => a.clientId)).size <= 1) ? exactClients[0] : undefined,

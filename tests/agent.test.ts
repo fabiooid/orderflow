@@ -6,7 +6,7 @@ import { replySchema } from '../src/channel/engine.js';
 import { orderDraftInput } from '../src/assistant/draft-schema.js';
 import { systemPrompt } from '../src/assistant/system-prompt.js';
 import { DemoConnector } from '../src/connector/demo.js';
-import { config, harborSiblings, pharmacyTypeAccounts } from './helpers.js';
+import { config, harborSiblings, pharmacyTypeAccounts, willowmereStayAccounts } from './helpers.js';
 
 it('gives the agent the order and customer APIs and lookups, and no way to save', async () => {
   const storage = new LibSQLStore({ id: 'agent-tools', url: ':memory:' });
@@ -118,5 +118,24 @@ it('finds a pharmacy from a one-letter slip on the distinctive name, and does no
     const search = (query: string) => tools.searchClients!.execute!({ query }, {} as never) as Promise<{ id: string }[]>;
     expect(await search('Willomere Pharmacy')).toEqual([expect.objectContaining({ id: '310' })]);
     expect(await search('Pharmacy Zorblax')).toEqual([]);
+  } finally { await storage.close(); }
+});
+
+it('suggests a distinctive account when extra query words are only a person name, and still lists two close accounts', async () => {
+  const storage = new LibSQLStore({ id: 'client-person-name-search', url: ':memory:' });
+  try {
+    const connector = new DemoConnector();
+    const { agriturismo, streetOnly, east } = willowmereStayAccounts();
+    connector.clients.push(agriturismo, streetOnly);
+    const tools = await createOrderAgent(config(), connector, storage).agent.listTools();
+    const search = (query: string) => tools.searchClients!.execute!({ query }, {} as never) as Promise<{ id: string; contactPerson?: string }[]>;
+    expect(await search('Giulia Willowmere')).toEqual([expect.objectContaining({ id: '410' })]);
+    expect((await search('Giulia Willowmere')).map(c => c.id)).not.toContain('411');
+    connector.clients.push(east);
+    expect((await search('Giulia Willowmere')).map(c => c.id).sort()).toEqual(['410', '412']);
+    const withPerson = new DemoConnector();
+    withPerson.clients.push({ ...agriturismo, contactPerson: 'Giulia Neri' }, streetOnly);
+    const personTools = await createOrderAgent(config(), withPerson, storage).agent.listTools();
+    expect(await personTools.searchClients!.execute!({ query: 'Giulia Willowmere' }, {} as never)).toEqual([expect.objectContaining({ id: '410', contactPerson: 'Giulia Neri' })]);
   } finally { await storage.close(); }
 });

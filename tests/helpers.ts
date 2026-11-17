@@ -30,6 +30,16 @@ export const pharmacyTypeAccounts = (): { willowmere: Client; cinderford: Client
     pebblebrook: { id: '312', name: 'Pebblebrook Pharmacy Srl', ...place, street: 'Pebblebrook Way 3', vatNumber: 'DEMO-PEBBLEBROOK', notes: '' },
   };
 };
+
+/** Distinctive business name versus another account that only has that word in its street. */
+export const willowmereStayAccounts = (): { agriturismo: Client; streetOnly: Client; east: Client } => {
+  const place = { country: 'IT' as const, city: 'Genova', postalCode: '16100', email: 'orders@willowmere-stay.invalid' };
+  return {
+    agriturismo: { id: '410', name: 'Willowmere Agriturismo', ...place, street: 'Hill Road 12', vatNumber: 'DEMO-WILLOWMERE-STAY', notes: 'Willowmere stay' },
+    streetOnly: { id: '411', name: 'Oakridge Farm Srl', ...place, street: 'Willowmere Lane 8', vatNumber: 'DEMO-OAKRIDGE', notes: '' },
+    east: { id: '412', name: 'Willowmere East Farm Srl', ...place, street: 'East Lane 4', vatNumber: 'DEMO-WILLOWMERE-EAST-STAY', notes: '' },
+  };
+};
 export const draft = () => draftSchema.parse({
   clientQuery: 'Example Studio', lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 8, discountPercent: 10,
 });
