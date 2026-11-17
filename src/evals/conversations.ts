@@ -42,6 +42,11 @@ const orderFor = (id: string): Check => o => [
   ...expect(o.open?.draft.clientId === id, `client is ${o.open?.draft.clientId ?? `"${o.open?.draft.clientQuery ?? 'none'}"`}, expected ${id}`),
   ...expect(!o.open?.draft.newClient, `proposes creating new customer "${o.open?.draft.newClient?.name}"`),
 ];
+/** Offline matching may leave the name on the draft without a locked id. */
+const namedFor = (id: string, name: RegExp): Check => o => [
+  ...expect(o.open?.draft.clientId === id || name.test(o.open?.draft.clientQuery ?? ''), `client is ${o.open?.draft.clientId ?? `"${o.open?.draft.clientQuery ?? 'none'}"`}, expected ${id}`),
+  ...expect(!o.open?.draft.newClient, `proposes creating new customer "${o.open?.draft.newClient?.name}"`),
+];
 /** A question, or a request phrased as an instruction ("dimmi il cliente"): a keyword heuristic, not a judge. */
 const lastAsks: Check = o => expect(/\?|\b(?:dimmi|indica|indicami|specifica|quale|tell me|which|specify)\b/i.test(last(o)), 'the last reply asks nothing');
 const nothingOpen: Check = o => expect(!o.open, `request ${o.open?.orderId} is still open (${o.open?.status})`);
@@ -188,11 +193,79 @@ export const conversationCases: ConversationCase[] = [
     id: 'customer-only-does-not-invent-lines',
     turns: [{ text: 'che saponi abbiamo?' }, { text: 'crea un nuovo ordine per Northwind Bistro' }],
     // Naming only a customer after a product-rich thread: lock that customer, leave lines empty, ask what to add.
-    check: all(neverGaveUp, o => [
-      ...expect(o.open?.draft.clientId === northwind.id || /northwind bistro/i.test(o.open?.draft.clientQuery ?? ''), `client is ${o.open?.draft.clientId ?? `"${o.open?.draft.clientQuery ?? 'none'}"`}, expected ${northwind.id}`),
-      ...expect(!o.open?.draft.newClient, `proposes creating new customer "${o.open?.draft.newClient?.name}"`),
+    // Offline: the second draft omits lines, as FAB-39 guards leftover conversation memory.
+    scripted: [null, draftSchema.parse({ clientQuery: 'Northwind Bistro' })],
+    check: all(neverGaveUp, namedFor(northwind.id, /northwind bistro/i), o => [
       ...expect(!o.open?.draft.lines.length, `invented lines from the earlier catalogue answer: ${JSON.stringify(o.open?.draft.lines)}`),
-      ...lastAsks(o),
+      ...expect(!!o.open?.issues?.some(i => i.field === 'lines'), 'did not ask for products on the empty draft'),
+    ]),
+  },
+  {
+    id: 'voice-note-keeps-lines-after-customer',
+    // Voice note already listed the products; the later customer lock must not wipe them (FAB-49).
+    // The second scripted draft drops the lines, as the live bug did when the customer was resolved.
+    turns: [
+      { text: '', voice: 'Due Pebble hand wash 250 ml e una Linen candle 200 g, spedizione 8 euro' },
+      { text: 'cliente Northwind Bistro' },
+    ],
+    scripted: [
+      draftSchema.parse({ lines: [
+        { query: 'Pebble hand wash 250 ml', quantity: 2 },
+        { query: 'Linen candle 200 g', quantity: 1 },
+      ] }),
+      draftSchema.parse({ clientQuery: 'Northwind Bistro' }),
+    ],
+    check: all(neverGaveUp, namedFor(northwind.id, /northwind bistro/i), o => [
+      ...expect(!!o.open?.draft.lines.some(l => l.productId === '101' || /pebble/i.test(l.query)), 'the voice-note hand wash was lost'),
+      ...expect(!!o.open?.draft.lines.some(l => l.productId === '103' || /linen candle/i.test(l.query)), 'the voice-note candle was lost'),
+      ...expect(!o.open?.issues?.some(i => i.field === 'lines'), 'asked to restate products already on the draft'),
+      ...expect(o.open?.draft.shippingPrice === undefined, `changed shipping behaviour: ${o.open?.draft.shippingPrice}`),
+      ...expect(!!o.open?.issues?.some(i => i.field === 'shippingPrice'), 'stopped asking for shipping'),
+    ]),
+  },
+  {
+    id: 'photo-keeps-lines-and-still-asks-size',
+    // A photo can leave a size open or an unmatched item: keep those lines, still ask, do not re-add from scratch.
+    turns: [
+      { text: 'ordine', attachment: '2 x Pebble hand wash\n1 x Fable fog lantern' },
+      { text: 'cliente Northwind Bistro' },
+    ],
+    scripted: [
+      draftSchema.parse({ lines: [
+        { query: 'Pebble hand wash', quantity: 2 },
+        { query: 'Fable fog lantern', quantity: 1 },
+      ] }),
+      draftSchema.parse({ clientQuery: 'Northwind Bistro' }),
+    ],
+    check: all(neverGaveUp, namedFor(northwind.id, /northwind bistro/i), o => {
+      const lines = o.open?.draft.lines ?? [];
+      const pebble = lines.findIndex(l => /pebble/i.test(l.query) || l.productId === '101' || l.productId === '104');
+      const unmatched = lines.findIndex(l => /fog lantern/i.test(l.query));
+      return [
+        ...expect(pebble >= 0, `the photo hand wash was lost: ${JSON.stringify(lines)}`),
+        ...expect(unmatched >= 0, `the unmatched photo line was lost: ${JSON.stringify(lines)}`),
+        ...expect(!o.open?.issues?.some(i => i.field === 'lines'), 'asked to restate products already on the draft'),
+        ...expect(!!o.open?.issues?.some(i => i.field === `lines.${pebble}`), 'stopped asking for the missing size'),
+        ...expect(!!o.open?.issues?.some(i => i.field === `lines.${unmatched}`), 'dropped the unmatched item instead of asking about it'),
+      ];
+    }),
+  },
+  {
+    id: 'cancelled-request-does-not-copy-lines',
+    // A previous request's products must not reappear on a later customer-only order (FAB-39 / FAB-49).
+    turns: [
+      { text: 'ordine', attachment: '2 x Pebble hand wash 250 ml' },
+      { text: 'lascia stare, non serve più' },
+      { text: 'crea un nuovo ordine per Northwind Bistro' },
+    ],
+    scripted: [
+      draftSchema.parse({ lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }] }),
+      'cancel',
+      draftSchema.parse({ clientQuery: 'Northwind Bistro' }),
+    ],
+    check: all(neverGaveUp, namedFor(northwind.id, /northwind bistro/i), o => [
+      ...expect(!o.open?.draft.lines.length, `copied lines from the cancelled request: ${JSON.stringify(o.open?.draft.lines)}`),
+      ...expect(!!o.open?.issues?.some(i => i.field === 'lines'), 'did not ask for products on the new request'),
     ]),
   },
   {

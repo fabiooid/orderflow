@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 import { conversationCases, evalConnector, northwind } from '../src/evals/conversations.js';
-import { runConversation } from '../src/evals/harness.js';
+import { runConversation, scriptedTurns, type ScriptedAct } from '../src/evals/harness.js';
+import type { OrderDraft } from '../src/domain/types.js';
 import { systemPrompt } from '../src/assistant/system-prompt.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { WriteJournal } from '../src/storage/write-journal.js';
@@ -10,6 +11,24 @@ import { TelegramStore } from '../src/channel/store.js';
 import { createConversationEngine, type Converse } from '../src/channel/engine.js';
 import { LibSQLStore } from '@mastra/libsql';
 import { config, message, press } from './helpers.js';
+
+const fab49Ids = ['voice-note-keeps-lines-after-customer', 'photo-keeps-lines-and-still-asks-size', 'customer-only-does-not-invent-lines', 'cancelled-request-does-not-copy-lines'];
+
+function asOrderDraft(act: ScriptedAct | undefined): OrderDraft {
+  if (!act || act === 'cancel') throw new Error('expected an order draft');
+  return structuredClone(act);
+}
+
+it('scripts the FAB-49 conversation cases', () => {
+  expect(fab49Ids.filter(id => conversationCases.some(c => c.id === id && c.scripted))).toEqual(fab49Ids);
+});
+
+it.each(fab49Ids)('scripted conversation: %s', async id => {
+  const scenario = conversationCases.find(c => c.id === id);
+  expect(scenario?.scripted).toBeTruthy();
+  const outcome = await runConversation(config(), evalConnector(), scenario!.turns, { converse: scriptedTurns(scenario!.scripted!) });
+  expect(scenario!.check(outcome)).toEqual([]);
+});
 
 /**
  * Scripted stand-in for the model. It follows the written conversation rules: if they say a short
@@ -22,7 +41,7 @@ function correctionConverse(scenario: (typeof conversationCases)[number]): Conve
     && /not a request to save/.test(systemPrompt(config().invoicing.label));
   return async (prompt, act) => {
     if (!prompt.openRequest) {
-      await act.order(structuredClone(drafts[0]!));
+      await act.order(asOrderDraft(drafts[0]));
       return { reply: '', locale: 'it' };
     }
     const readyWithCustomer = prompt.openRequest.status === 'ready'
@@ -32,7 +51,7 @@ function correctionConverse(scenario: (typeof conversationCases)[number]): Conve
     const shortName = prompt.operatorWords.trim().split(/\s+/).length <= 4 && !saveWords;
     if (readyWithCustomer && (shortName || changeWords) && !saveWords) {
       if (!followsRule) return { reply: 'Vuoi salvare l\'ordine così com\'è per Example Studio?', locale: 'it' };
-      await act.order(structuredClone(drafts[1]!));
+      await act.order(asOrderDraft(drafts[1]));
       return { reply: '', locale: 'it' };
     }
     await act.order(structuredClone(prompt.openRequest.draft));
@@ -63,7 +82,7 @@ it('still saves when the operator presses confirm-and-save on a ready draft', as
   await journal.init();
   const scenario = conversationCases.find(c => c.id === 'short-name-on-ready-draft-is-new-search')!;
   const converse: Converse = async (_prompt, act) => {
-    await act.order(structuredClone(scenario.scripted![0]!));
+    await act.order(asOrderDraft(scenario.scripted![0]));
     return { reply: '', locale: 'it' };
   };
   let messageId = 100;
