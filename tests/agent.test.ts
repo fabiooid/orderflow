@@ -6,7 +6,7 @@ import { replySchema } from '../src/channel/engine.js';
 import { orderDraftInput } from '../src/assistant/draft-schema.js';
 import { systemPrompt } from '../src/assistant/system-prompt.js';
 import { DemoConnector } from '../src/connector/demo.js';
-import { config, harborSiblings, pharmacyTypeAccounts } from './helpers.js';
+import { config, harborSiblings, pharmacyTypeAccounts, sampleNameAccounts } from './helpers.js';
 
 it('gives the agent the order and customer APIs and lookups, and no way to save', async () => {
   const storage = new LibSQLStore({ id: 'agent-tools', url: ':memory:' });
@@ -118,5 +118,26 @@ it('finds a pharmacy from a one-letter slip on the distinctive name, and does no
     const search = (query: string) => tools.searchClients!.execute!({ query }, {} as never) as Promise<{ id: string }[]>;
     expect(await search('Willomere Pharmacy')).toEqual([expect.objectContaining({ id: '310' })]);
     expect(await search('Pharmacy Zorblax')).toEqual([]);
+  } finally { await storage.close(); }
+});
+
+it('suggests a customer from a small extra ending on a distinctive name, prefers an exact neighbour, and still lists two close accounts', async () => {
+  const storage = new LibSQLStore({ id: 'client-extra-ending-search', url: ':memory:' });
+  try {
+    const connector = new DemoConnector();
+    const { sample, sampler, east } = sampleNameAccounts();
+    connector.clients.push(sample);
+    const tools = await createOrderAgent(config(), connector, storage).agent.listTools();
+    const search = (query: string) => tools.searchClients!.execute!({ query }, {} as never) as Promise<{ id: string }[]>;
+    expect(await search('cliente sampler')).toEqual([expect.objectContaining({ id: '510' })]);
+    expect(await search('cliente samp')).toEqual([expect.objectContaining({ id: '510' })]);
+    connector.clients.push(sampler);
+    expect(await search('cliente sampler')).toEqual([expect.objectContaining({ id: '511' })]);
+    connector.clients.push(east);
+    expect((await search('cliente sampler')).map(c => c.id)).toEqual(['511']);
+    const two = new DemoConnector();
+    two.clients.push(sample, east);
+    const twoTools = await createOrderAgent(config(), two, storage).agent.listTools();
+    expect(((await twoTools.searchClients!.execute!({ query: 'cliente sampler' }, {} as never)) as { id: string }[]).map(c => c.id).sort()).toEqual(['510', '512']);
   } finally { await storage.close(); }
 });
