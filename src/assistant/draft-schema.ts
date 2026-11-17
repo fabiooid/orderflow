@@ -16,6 +16,7 @@ const clientFields: Record<string, string> = {
   sdiCode: 'Seven-character SDI recipient code.',
   vatNumber: 'VAT number (partita IVA) exactly as written.',
   taxCode: 'Tax code (codice fiscale).',
+  contactPerson: 'Contact person at the business, only when the operator or the record gives one. Never invent a person.',
   notes: 'Only a note the operator explicitly asks for.',
 };
 // OpenAI strict structured outputs require explicit nulls for unknown fields.
@@ -28,8 +29,8 @@ const nullableClient = z.object(Object.fromEntries(Object.entries(clientSchema.o
 }))).strict();
 
 export const orderDraftInput = z.object({
-  clientQuery: z.string().describe('The customer name or VAT number the operator gave, as written, or the matched business name from search-clients. Include hint words they gave (hotel, shop, a city). When they clarify, replace this with the refined name. When the operator names the customer, that name wins over any company named in attached content. Empty when no customer is known yet.'),
-  clientId: z.string().min(1).nullable().describe('Keep the clientId already in the open draft only when it is still the same customer. If search-clients found one clear match this turn, you may send that id. If the operator named a different customer or added a hint (hotel, shop), search-clients again and do not keep the old id. Otherwise null: the application resolves clientQuery against current records.'),
+  clientQuery: z.string().describe('The customer name or VAT number the operator gave, as written, or the matched business name from search-clients. Include hint words they gave (hotel, shop, a city). When they clarify, replace this with the refined name. A short customer name typed against an open draft is a new search, not a request to save: put those words here. When the operator names the customer, that name wins over any company named in attached content. Empty when no customer is known yet.'),
+  clientId: z.string().min(1).nullable().describe('Keep the clientId already in the open draft only when it is still the same customer. Send an id only when search-clients matched the exact name or VAT the operator just typed. A single close or related account is a question: leave this null so the application can show a pick. If the operator named a different customer, typed a short customer name, or added a hint (hotel, shop), search-clients again and do not keep the old id. Otherwise null: the application resolves clientQuery against current records.'),
   newClient: nullableClient.nullable().describe('Only when the operator says the customer is new or types its billing details themselves. A customer named, signed or printed in an attached email or document only identifies it: put its name in clientQuery and leave this null.'),
   manualVatCheck: z.object({ country: z.string().regex(/^[A-Z]{2}$/), vatNumber: z.string().min(1), status: z.enum(['valid', 'invalid']) }).strict().nullable()
     .describe('Only after the operator explicitly confirms a completed VIES check and its result, bound to that exact country and VAT number. Never inferred from a name, number format or location.'),
@@ -40,13 +41,13 @@ export const orderDraftInput = z.object({
     netPrice: z.number().nonnegative().nullable().describe('Net unit price the operator states for this order, including later corrections. null otherwise: catalogue prices apply. Never a price read from a document, never learned for future orders.'),
     documentPrice: z.object({ amount: z.number().nonnegative(), basis: z.enum(['net', 'gross', 'unclear']), decision: z.enum(['pending', 'catalogue', 'document']) }).strict().nullable().default(null)
       .describe('A price printed or handwritten in a document, kept as evidence with its basis and decision pending. Set catalogue or document only after the operator answers that price question; document needs an explicitly confirmed net amount. Reset to pending when the amount or product changes.'),
-  }).strict()).describe('Every product line of the order, kept from the open draft unless the operator changes it. A new request starts with no lines. Do not copy products from earlier messages, other customers, or group history unless this request names them, an attachment lists them, a short follow-up clearly refers to what was just discussed, or the operator asks to repeat this customer\'s last order.'),
+  }).strict()).describe('Every product line of the order, kept from the open draft unless the operator changes it. If you send none while the open draft has lines, they stay. A new request starts with no lines. Do not copy products from earlier messages, other customers, leftover conversation, or group history unless this request names them, an attachment lists them, a short follow-up clearly refers to what was just discussed, or the operator asks to repeat this customer\'s last order.'),
   shippingPrice: z.number().nonnegative().nullable().describe('Delivery charge, net. null unless the operator states or confirms it; 0 when they say there is no charge.'),
   discountPercent: z.number().min(0).max(100).describe('Order discount the operator states, otherwise 0.'),
   discountShipping: z.boolean().nullable().describe('Whether the discount also applies to delivery, only when the operator says so.'),
   delivery: z.object({ country: z.string().nullable(), address: z.string().min(1) }).strict().nullable()
     .describe("Only when the operator asks to ship somewhere other than the customer's own address. A signature or letterhead address is never a delivery address."),
-  notes: z.string().describe('Printed on the order: delivery or handling instructions from the operator or the customer\'s message (such as express delivery or a deadline), or a note the operator asks for. The operator sees it in the draft. Never prices, VAT codes, discounts or your own remarks.'),
+  notes: z.string().describe('Printed on the order: delivery or handling instructions from the operator or the customer\'s message (such as a rush delivery or a deadline), or a note the operator asks for. The operator sees it in the draft. Write it in the same language as the operator\'s messages in this request: Italian when they write in Italian, English when they write in English. Keep catalogue product names as they appear; do not translate them. Never prices, VAT codes, discounts or your own remarks.'),
   priceTier: z.string().regex(/^[a-z0-9-]+$/).nullable().describe('Always null: named price lists are not connected. Ask for explicit unit prices instead.'),
 }).strict();
 

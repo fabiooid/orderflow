@@ -7,10 +7,15 @@ export const northwind = {
   id: '202', name: 'Northwind Bistro', country: 'IT', street: 'Via Nord 5', city: 'Bergamo', postalCode: '24100',
   email: 'orders@northwind.invalid', vatNumber: 'DEMO-NORTHWIND', notes: '',
 };
+/** A fictional account whose legal name is longer than the everyday word an operator might type. */
+export const maplePine = {
+  id: '401', name: 'Maple & Pine Trading Ltd', country: 'IT', street: 'Harbour Lane 12', city: 'Example City',
+  postalCode: '00000', email: 'orders@maple-pine.invalid', vatNumber: 'DEMO-MAPLE-PINE', notes: '',
+};
 /** The fictional catalogue plus a second customer and a second size, so cases can change customer or pick a size. */
 export function evalConnector() {
   const connector = new DemoConnector();
-  connector.clients.push(structuredClone(northwind));
+  connector.clients.push(structuredClone(northwind), structuredClone(maplePine));
   connector.products.push({ id: '104', code: 'DEMO-A5', name: 'Pebble hand wash 500 ml', description: '', netPrice: 20 });
   // A requested fig hand soap does not exist; fig shower gel and cedar hand soap do.
   connector.products.push(
@@ -47,10 +52,41 @@ const orderFor = (id: string): Check => o => [
   ...expect(o.open?.draft.clientId === id, `client is ${o.open?.draft.clientId ?? `"${o.open?.draft.clientQuery ?? 'none'}"`}, expected ${id}`),
   ...expect(!o.open?.draft.newClient, `proposes creating new customer "${o.open?.draft.newClient?.name}"`),
 ];
+/** Offline matching may leave the name on the draft without a locked id. */
+const namedFor = (id: string, name: RegExp): Check => o => [
+  ...expect(o.open?.draft.clientId === id || name.test(o.open?.draft.clientQuery ?? ''), `client is ${o.open?.draft.clientId ?? `"${o.open?.draft.clientQuery ?? 'none'}"`}, expected ${id}`),
+  ...expect(!o.open?.draft.newClient, `proposes creating new customer "${o.open?.draft.newClient?.name}"`),
+];
 /** A question, or a request phrased as an instruction ("dimmi il cliente"): a keyword heuristic, not a judge. */
 const lastAsks: Check = o => expect(/\?|\b(?:dimmi|indica|indicami|specifica|quale|tell me|which|specify)\b/i.test(last(o)), 'the last reply asks nothing');
 const nothingOpen: Check = o => expect(!o.open, `request ${o.open?.orderId} is still open (${o.open?.status})`);
 const all = (...checks: Check[]): Check => o => checks.flatMap(check => check(o));
+/** A ready Example Studio order, so a later short name can be a customer correction rather than a first search. */
+const readyExampleDraft = () => draftSchema.parse({
+  clientQuery: 'Example Studio', lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 8,
+});
+/** Same lines, new customer query, no locked id: the application searches again and must not save. */
+const northwindCorrectionDraft = () => draftSchema.parse({
+  clientQuery: 'Northwind', lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 8,
+});
+const askedToSaveAsIs = (o: ConversationOutcome) => /vuoi salvare|salv[aeio].{0,60}cos[iì]|save (?:the |this )?(?:order |draft )?as-?is|want me to save/i.test(o.replies.join('\n'));
+const notSavedAsIs: Check = o => [
+  ...expect(!askedToSaveAsIs(o), `asked to save the current draft as-is: ${(last(o) || '').split('\n')[0]}`),
+  ...expect(o.open?.status !== 'saved' && o.open?.status !== 'saving', `saved without confirm-and-save (${o.open?.status ?? 'none'})`),
+];
+const keptReadyLines: Check = o => expect(!!o.open?.draft.lines.some(l => l.productId === '101' || /pebble/i.test(l.query)), 'the order lines were lost');
+/** Ready draft, then a short name or change request: lock or ask, never keep the previous account or ask to save as-is. */
+const switchedCustomer = (id: string, name: RegExp): Check => o => {
+  const locked = o.open?.draft.clientId === id || o.open?.prepared?.client.id === id;
+  const named = name.test(o.open?.draft.clientQuery ?? '');
+  const picking = !!o.open?.issues?.some(i => i.field === 'client' && i.candidates?.some(c => name.test(c.label)));
+  return [
+    ...expect(locked || named || picking, `client is ${o.open?.prepared?.client.id ?? o.open?.draft.clientId ?? `"${o.open?.draft.clientQuery ?? 'none'}"`}, expected ${id}`),
+    ...expect(!o.open?.draft.newClient, `proposes creating new customer "${o.open?.draft.newClient?.name}"`),
+    ...expect(o.open?.prepared?.client.id !== '201', `kept the previous account ${o.open?.prepared?.client.id}`),
+  ];
+};
+const readyCustomerCorrection = all(neverGaveUp, keptReadyLines, switchedCustomer(northwind.id, /northwind/i), notSavedAsIs);
 // Notes and delivery are the agent's judgement, shown in the draft for the operator to keep or change, so they are not checked.
 const attachmentOrderFor = (id: string) => all(neverGaveUp, keptAttachmentLines, orderFor(id));
 
@@ -167,11 +203,79 @@ export const conversationCases: ConversationCase[] = [
     id: 'customer-only-does-not-invent-lines',
     turns: [{ text: 'che saponi abbiamo?' }, { text: 'crea un nuovo ordine per Northwind Bistro' }],
     // Naming only a customer after a product-rich thread: lock that customer, leave lines empty, ask what to add.
-    check: all(neverGaveUp, o => [
-      ...expect(o.open?.draft.clientId === northwind.id || /northwind bistro/i.test(o.open?.draft.clientQuery ?? ''), `client is ${o.open?.draft.clientId ?? `"${o.open?.draft.clientQuery ?? 'none'}"`}, expected ${northwind.id}`),
-      ...expect(!o.open?.draft.newClient, `proposes creating new customer "${o.open?.draft.newClient?.name}"`),
+    // Offline: the second draft omits lines, as FAB-39 guards leftover conversation memory.
+    scripted: [null, draftSchema.parse({ clientQuery: 'Northwind Bistro' })],
+    check: all(neverGaveUp, namedFor(northwind.id, /northwind bistro/i), o => [
       ...expect(!o.open?.draft.lines.length, `invented lines from the earlier catalogue answer: ${JSON.stringify(o.open?.draft.lines)}`),
-      ...lastAsks(o),
+      ...expect(!!o.open?.issues?.some(i => i.field === 'lines'), 'did not ask for products on the empty draft'),
+    ]),
+  },
+  {
+    id: 'voice-note-keeps-lines-after-customer',
+    // Voice note already listed the products; the later customer lock must not wipe them (FAB-49).
+    // The second scripted draft drops the lines, as the live bug did when the customer was resolved.
+    turns: [
+      { text: '', voice: 'Due Pebble hand wash 250 ml e una Linen candle 200 g, spedizione 8 euro' },
+      { text: 'cliente Northwind Bistro' },
+    ],
+    scripted: [
+      draftSchema.parse({ lines: [
+        { query: 'Pebble hand wash 250 ml', quantity: 2 },
+        { query: 'Linen candle 200 g', quantity: 1 },
+      ] }),
+      draftSchema.parse({ clientQuery: 'Northwind Bistro' }),
+    ],
+    check: all(neverGaveUp, namedFor(northwind.id, /northwind bistro/i), o => [
+      ...expect(!!o.open?.draft.lines.some(l => l.productId === '101' || /pebble/i.test(l.query)), 'the voice-note hand wash was lost'),
+      ...expect(!!o.open?.draft.lines.some(l => l.productId === '103' || /linen candle/i.test(l.query)), 'the voice-note candle was lost'),
+      ...expect(!o.open?.issues?.some(i => i.field === 'lines'), 'asked to restate products already on the draft'),
+      ...expect(o.open?.draft.shippingPrice === undefined, `changed shipping behaviour: ${o.open?.draft.shippingPrice}`),
+      ...expect(!!o.open?.issues?.some(i => i.field === 'shippingPrice'), 'stopped asking for shipping'),
+    ]),
+  },
+  {
+    id: 'photo-keeps-lines-and-still-asks-size',
+    // A photo can leave a size open or an unmatched item: keep those lines, still ask, do not re-add from scratch.
+    turns: [
+      { text: 'ordine', attachment: '2 x Pebble hand wash\n1 x Fable fog lantern' },
+      { text: 'cliente Northwind Bistro' },
+    ],
+    scripted: [
+      draftSchema.parse({ lines: [
+        { query: 'Pebble hand wash', quantity: 2 },
+        { query: 'Fable fog lantern', quantity: 1 },
+      ] }),
+      draftSchema.parse({ clientQuery: 'Northwind Bistro' }),
+    ],
+    check: all(neverGaveUp, namedFor(northwind.id, /northwind bistro/i), o => {
+      const lines = o.open?.draft.lines ?? [];
+      const pebble = lines.findIndex(l => /pebble/i.test(l.query) || l.productId === '101' || l.productId === '104');
+      const unmatched = lines.findIndex(l => /fog lantern/i.test(l.query));
+      return [
+        ...expect(pebble >= 0, `the photo hand wash was lost: ${JSON.stringify(lines)}`),
+        ...expect(unmatched >= 0, `the unmatched photo line was lost: ${JSON.stringify(lines)}`),
+        ...expect(!o.open?.issues?.some(i => i.field === 'lines'), 'asked to restate products already on the draft'),
+        ...expect(!!o.open?.issues?.some(i => i.field === `lines.${pebble}`), 'stopped asking for the missing size'),
+        ...expect(!!o.open?.issues?.some(i => i.field === `lines.${unmatched}`), 'dropped the unmatched item instead of asking about it'),
+      ];
+    }),
+  },
+  {
+    id: 'cancelled-request-does-not-copy-lines',
+    // A previous request's products must not reappear on a later customer-only order (FAB-39 / FAB-49).
+    turns: [
+      { text: 'ordine', attachment: '2 x Pebble hand wash 250 ml' },
+      { text: 'lascia stare, non serve più' },
+      { text: 'crea un nuovo ordine per Northwind Bistro' },
+    ],
+    scripted: [
+      draftSchema.parse({ lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }] }),
+      'cancel',
+      draftSchema.parse({ clientQuery: 'Northwind Bistro' }),
+    ],
+    check: all(neverGaveUp, namedFor(northwind.id, /northwind bistro/i), o => [
+      ...expect(!o.open?.draft.lines.length, `copied lines from the cancelled request: ${JSON.stringify(o.open?.draft.lines)}`),
+      ...expect(!!o.open?.issues?.some(i => i.field === 'lines'), 'did not ask for products on the new request'),
     ]),
   },
   {
@@ -204,5 +308,49 @@ export const conversationCases: ConversationCase[] = [
         ...expect(/cedar hand soap/i.test(labels), `did not offer the hand soaps that exist: ${labels}`),
       ];
     }),
+  },
+  {
+    id: 'weak-customer-stays-unmatched',
+    turns: [
+      { text: 'ordine per Maple' },
+      { text: '2 Pebble hand wash 250 ml, spedizione 8 euro, nota: express' },
+    ],
+    // A unique close account is a question. Filling products, shipping and a note must not lock it.
+    scripted: [
+      draftSchema.parse({ clientQuery: 'Maple', clientId: maplePine.id }),
+      draftSchema.parse({ clientQuery: maplePine.name, clientId: maplePine.id, lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 8, notes: 'express' }),
+    ],
+    check: all(neverGaveUp, o => [
+      ...expect(!o.open?.draft.clientId && o.open?.status === 'suspended', `customer locked as ${o.open?.draft.clientId ?? o.open?.status}`),
+      ...expect(!!o.open?.issues?.some(i => i.field === 'client' && i.candidates?.some(c => c.id === maplePine.id)), 'did not offer the close account as a question'),
+      ...expect(/🏪 Maple(?: & Pine Trading Ltd)? ❓/.test(last(o)), 'presented the customer as already selected'),
+      ...expect(!!o.open?.draft.lines.some(l => l.query === 'Pebble hand wash 250 ml' && l.quantity === 2), 'the product follow-up was lost'),
+      ...expect(o.open?.draft.shippingPrice === 8 && o.open?.draft.notes === 'express', 'shipping or note was lost'),
+    ]),
+  },
+  {
+    id: 'exact-customer-name-locks',
+    turns: [{ text: 'ordine per Maple & Pine Trading Ltd: 2 Pebble hand wash 250 ml, spedizione 8 euro' }],
+    scripted: [draftSchema.parse({ clientQuery: maplePine.name, lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 8 })],
+    check: all(neverGaveUp, orderFor(maplePine.id)),
+  },
+  {
+    id: 'short-name-on-ready-draft-is-new-search',
+    // Ready draft for one fictional account; a short name must search again, not ask to save as-is.
+    turns: [
+      { text: 'ordine per Example Studio: 2 Pebble hand wash 250 ml, spedizione 8 euro' },
+      { text: 'Northwind' },
+    ],
+    scripted: [readyExampleDraft(), northwindCorrectionDraft()],
+    check: readyCustomerCorrection,
+  },
+  {
+    id: 'change-customer-on-ready-draft',
+    turns: [
+      { text: 'ordine per Example Studio: 2 Pebble hand wash 250 ml, spedizione 8 euro' },
+      { text: 'change the customer to Northwind Bistro' },
+    ],
+    scripted: [readyExampleDraft(), northwindCorrectionDraft()],
+    check: readyCustomerCorrection,
   },
 ];
