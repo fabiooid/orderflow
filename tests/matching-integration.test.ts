@@ -5,7 +5,7 @@ import { createJevBatchSelector } from '../src/matching/jev-client.js';
 import type { SelectionResult } from '../src/matching/types.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { createDraftApi } from '../src/assistant/drafts.js';
-import { config, draft, harborSiblings, pharmacyTypeAccounts } from './helpers.js';
+import { config, draft, harborSiblings, pharmacyTypeAccounts, sampleNameAccounts, willowmereStayAccounts } from './helpers.js';
 
 const on = matchingConfigSchema.parse({ mode: 'on' });
 const context = { orderId: 'test', revision: 1, operatorText: 'Order for the example shop: two small pebble washes. Delivery eight.' };
@@ -263,6 +263,48 @@ it('locks a one-letter slip on a distinctive name, and does not ask which pharma
   expect(leftover.decisions[0]?.status).not.toBe('ambiguous');
   expect(leftover.issues[0]?.candidates?.map(c => c.id).sort()).not.toEqual(['310', '311', '312']);
   expect(select.mock.calls.some(call => call[0].some(req => req.kind === 'client' && req.candidates.length === 3 && req.candidates.every(c => ['310', '311', '312'].includes(c.id))))).toBe(false);
+});
+
+it('asks to confirm a leftover first name plus a distinctive business word, and does not pick a street-only account', async () => {
+  const connector = new DemoConnector();
+  const { agriturismo, streetOnly, east } = willowmereStayAccounts();
+  connector.clients.push(agriturismo, streetOnly, east);
+  const select = vi.fn<SelectMany>(async requests => requests.map(r => r.candidates.length ? result('matched', r.candidates[0]!.id) : result('no-match')));
+  const r = resolver(connector, select);
+  const asked = await r.resolve({ ...draft(), clientQuery: 'Giulia Willowmere', lines: [] }, { ...context, operatorText: 'crea ordine per giulia willowmere' });
+  expect(asked.decisions[0]?.status).toBe('ambiguous');
+  expect(asked.draft.clientId).toBeUndefined();
+  expect(asked.issues[0]?.candidates?.map(c => c.id).sort()).toEqual(['410', '412']);
+  expect(select.mock.calls.some(call => call[0].some(req => req.kind === 'client'))).toBe(false);
+  const onlyStay = new DemoConnector();
+  onlyStay.clients.push(agriturismo, streetOnly);
+  const one = await resolver(onlyStay, select).resolve({ ...draft(), clientQuery: 'Giulia Willowmere', lines: [] }, { ...context, operatorText: 'crea ordine per giulia willowmere' });
+  expect(one.decisions[0]?.status).toBe('ambiguous');
+  expect(one.issues[0]?.candidates?.map(c => c.id)).toEqual(['410']);
+});
+
+it('asks to confirm a small extra ending on a distinctive name, prefers an exact neighbour, and still asks when two close accounts fit', async () => {
+  const connector = new DemoConnector();
+  const { sample, sampler, east } = sampleNameAccounts();
+  connector.clients.push(sample);
+  const select = vi.fn<SelectMany>(async requests => requests.map(r => r.candidates.length ? result('matched', r.candidates[0]!.id) : result('no-match')));
+  const asked = await resolver(connector, select).resolve({ ...draft(), clientQuery: 'cliente sampler', lines: [] }, { ...context, operatorText: 'crea ordine per cliente sampler' });
+  expect(asked.decisions[0]?.status).toBe('ambiguous');
+  expect(asked.draft.clientId).toBeUndefined();
+  expect(asked.issues[0]?.candidates?.map(c => c.id)).toEqual(['510']);
+  expect(select.mock.calls.some(call => call[0].some(req => req.kind === 'client'))).toBe(false);
+  const exact = await resolver(connector, select).resolve({ ...draft(), clientQuery: 'Cliente Sample', lines: [] }, { ...context, operatorText: 'crea ordine per Cliente Sample' });
+  expect(exact.decisions[0]?.status).toBe('matched');
+  expect(exact.draft.clientId).toBe('510');
+  connector.clients.push(sampler, east);
+  const locked = await resolver(connector, select).resolve({ ...draft(), clientQuery: 'cliente sampler', lines: [] }, { ...context, operatorText: 'crea ordine per cliente sampler' });
+  expect(locked.decisions[0]?.status).toBe('matched');
+  expect(locked.draft.clientId).toBe('511');
+  const two = new DemoConnector();
+  two.clients.push(sample, east);
+  const choice = await resolver(two, select).resolve({ ...draft(), clientQuery: 'cliente sampler', lines: [] }, { ...context, operatorText: 'crea ordine per cliente sampler' });
+  expect(choice.decisions[0]?.status).toBe('ambiguous');
+  expect(choice.issues[0]?.candidates?.map(c => c.id).sort()).toEqual(['510', '512']);
 });
 
 it('reads catalogue litres written as "5lt" so a "5 L" request keeps them as candidates', async () => {
