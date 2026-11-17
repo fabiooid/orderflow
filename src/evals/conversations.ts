@@ -211,6 +211,39 @@ export const conversationCases: ConversationCase[] = [
     ]),
   },
   {
+    id: 'spreadsheet-keeps-named-customer',
+    // A filled sheet with a blank customer header must keep the customer already named in chat (FAB-55).
+    // The second scripted draft sends only the extracted lines, as a blank form header would.
+    turns: [
+      { text: 'crea un nuovo ordine per Example Studio' },
+      { text: 'aggiungi questo', attachment: 'SKU-100 | Hand cream 100 ml | Qty: 2\nSKU-250 | Room spray 250 ml | tester: 1' },
+    ],
+    scripted: [
+      draftSchema.parse({ clientQuery: 'Example Studio' }),
+      draftSchema.parse({ lines: [
+        { query: 'Hand cream 100 ml SKU-100', quantity: 2 },
+        { query: 'Room spray 250 ml SKU-250 tester', quantity: 1 },
+      ] }),
+    ],
+    check: all(neverGaveUp, namedFor('201', /example studio/i), o => [
+      ...expect(!!o.open?.draft.lines.some(l => /SKU-100|hand cream/i.test(l.query) && l.quantity === 2), 'the filled cream line was lost'),
+      ...expect(!!o.open?.draft.lines.some(l => /tester/i.test(l.query) && /SKU-250|room spray/i.test(l.query)), 'the tester line was lost'),
+      ...expect(o.open?.status !== 'saved' && o.open?.status !== 'saving', `saved without confirm (${o.open?.status ?? 'none'})`),
+    ]),
+  },
+  {
+    id: 'spreadsheet-header-names-customer',
+    turns: [{ text: 'ordine', attachment: 'Header: Customer: Northwind Bistro\nSKU-100 | Hand cream 100 ml | Qty: 2' }],
+    scripted: [draftSchema.parse({
+      clientQuery: 'Northwind Bistro',
+      lines: [{ query: 'Hand cream 100 ml SKU-100', quantity: 2 }],
+    })],
+    check: all(neverGaveUp, namedFor(northwind.id, /northwind/i), o => [
+      ...expect(!!o.open?.draft.lines.some(l => /SKU-100|hand cream/i.test(l.query)), 'the filled spreadsheet line was lost'),
+      ...expect(o.open?.status !== 'saved' && o.open?.status !== 'saving', `saved without confirm (${o.open?.status ?? 'none'})`),
+    ]),
+  },
+  {
     id: 'voice-note-keeps-lines-after-customer',
     // Voice note already listed the products; the later customer lock must not wipe them (FAB-49).
     // The second scripted draft drops the lines, as the live bug did when the customer was resolved.

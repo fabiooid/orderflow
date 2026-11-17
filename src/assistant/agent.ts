@@ -5,7 +5,7 @@ export { sharedKnowledgeSchema } from './aliases.js';
 import { customerOrderHistoryTool } from './customer-order-history.js';
 import { systemPrompt } from './system-prompt.js';
 import { customerDraftInput, orderDraftInput, parseCustomer, parseDraft } from './draft-schema.js';
-import { createDraftApi, forAgent, preserveDraftLines, type DraftResult } from './drafts.js';
+import { createDraftApi, forAgent, preserveDraftCustomer, preserveDraftLines, type DraftResult } from './drafts.js';
 import { Agent } from '@mastra/core/agent';
 import type { RequestContext } from '@mastra/core/request-context';
 import { createTool } from '@mastra/core/tools';
@@ -95,7 +95,10 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
         outcome.refused = true;
         return { status: 'blocked' as const, note: `Another request is open: ${turn.locked}. The operator can finish it first.` };
       }
-      if (kind === 'order' && turn?.request?.kind === 'order') draft = preserveDraftLines(draft, turn.request.lines);
+      if (kind === 'order' && turn?.request?.kind === 'order') {
+        draft = preserveDraftLines(draft, turn.request.lines);
+        draft = preserveDraftCustomer(draft, turn.request);
+      }
       // An empty order with no customer is not a useful draft: search-clients first when a name was given, then ask for products.
       if (kind === 'order' && !draft.clientId && !draft.clientQuery.trim() && !draft.newClient && !draft.lines.length) {
         return { status: 'needs' as const, issues: [{ field: 'client', problem: 'Resolve the client first. When the operator named a customer, always call search-clients with that name and any hint words, then send a clear match on the draft. Do not skip search-clients or open an empty order.' }], note: 'Nothing was shown. Call search-clients first, then call again. Leave product lines empty unless this request names them, an attachment lists them, a short follow-up clearly refers to what was just discussed, or the operator asks to repeat that customer\'s last order.' };

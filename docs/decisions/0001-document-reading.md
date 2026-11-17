@@ -53,7 +53,9 @@ General transcription runs per page to preserve provenance, so call count and la
 can increase compared with the previous batched reader. Template identification also
 runs without configured templates in production to retain orientation handling.
 
-The baseline accepts PDF, JPEG, PNG, WebP, static GIF and TIFF. Multi-page TIFF is
+The baseline accepts PDF, JPEG, PNG, WebP, static GIF, TIFF, and spreadsheet workbooks
+(.xlsx) plus CSV. Spreadsheets are decoded as cell facts (filled quantities, tester
+marks, header text), not as scanned pages, and still require review. Multi-page TIFF is
 expanded into pages. Decoding checks actual bytes rather than trusting MIME hints.
 Limits are 20 MiB per file, ten pages per request and 40 million decoded pixels per
 image page. All input pages are validated before model calls. Animated images fail

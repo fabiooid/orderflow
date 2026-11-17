@@ -30,9 +30,13 @@ describe('normalizing Telegram media', () => {
     expect(pdf).toMatchObject({ attachments: [{ kind: 'pdf', fileId: 'pdf3', mimeType: 'application/pdf' }] });
     expect(pdf).not.toHaveProperty('unusableAttachment');
     expect(normalizeMessage(message(4, { document: { file_id: 'img4', mime_type: 'image/png' } }), config())?.attachments?.[0]).toMatchObject({ kind: 'image', mimeType: 'image/png' });
+    const sheet = normalizeMessage(message(5, { document: { file_id: 'xls5', mime_type: 'application/vnd.ms-excel' } }), config());
+    expect(sheet).toMatchObject({ attachments: [{ kind: 'spreadsheet', fileId: 'xls5' }] });
+    expect(sheet).not.toHaveProperty('unusableAttachment');
+    expect(normalizeMessage(message(6, { document: { file_id: 'xlsx6', mime_type: 'application/octet-stream', file_name: 'filled.xlsx' } }), config())?.attachments?.[0]?.kind).toBe('spreadsheet');
   });
   it('keeps an unrecognized document as a message to refuse, and still ignores other chats', () => {
-    // A generic binary document, not a photo, voice note, or PDF. Do not pin this test to a
+    // A generic binary document, not a photo, voice note, PDF, or spreadsheet. Do not pin this test to a
     // format that a later change may start reading.
     const unknown = normalizeMessage(message(1, { document: { file_id: 'x', mime_type: 'application/octet-stream' } }), config());
     expect(unknown).toMatchObject({ text: '', unusableAttachment: true });
@@ -54,8 +58,9 @@ describe('normalizing Telegram media', () => {
 
 describe('routing media', () => {
   const base = (extra: Partial<MessageEvent>): MessageEvent => ({ updateId: 1, groupId: '-1000000000001', senderId: '5', messageId: 1, text: '', ...extra });
-  const image = [{ kind: 'image' as const, fileId: 'f', mimeType: 'image/jpeg' }];
-  const audio = [{ kind: 'voice' as const, fileId: 'v', mimeType: 'audio/ogg' }];
+    const image = [{ kind: 'image' as const, fileId: 'f', mimeType: 'image/jpeg' }];
+    const audio = [{ kind: 'voice' as const, fileId: 'v', mimeType: 'audio/ogg' }];
+    const sheet = [{ kind: 'spreadsheet' as const, fileId: 's', mimeType: 'application/vnd.ms-excel' }];
   it('asks before reading uncaptioned media, except replies and voice notes where typed text would be read', () => {
     const c = config();
     expect(asksFirst(base({ attachments: image }), { config: c })).toBe(true);
@@ -64,6 +69,8 @@ describe('routing media', () => {
     expect(asksFirst(base({ attachments: image }), { config: c, active: conv('u1', 1) })).toBe(true);
     expect(asksFirst(base({ attachments: audio }), { config: c, active: conv('u1', 1) })).toBe(false);
     expect(asksFirst(base({ attachments: audio }), { config: c })).toBe(true);
+    expect(asksFirst(base({ attachments: sheet }), { config: c })).toBe(true);
+    expect(asksFirst(base({ attachments: sheet, text: 'ordine per Example Studio' }), { config: c })).toBe(false);
     c.channel.respondToAllMessages = true;
     expect(asksFirst(base({ attachments: audio }), { config: c })).toBe(false);
   });
@@ -163,7 +170,7 @@ describe('controller media flow', () => {
     const { store, engine, send, read, controller } = await setup();
     try {
       await controller.handle(message(1, { document: { file_id: 'bin1', mime_type: 'application/octet-stream' } }));
-      expect(send).toHaveBeenLastCalledWith('Non posso usare questo file. Invia una foto, una nota vocale o un PDF.', 1, undefined);
+      expect(send).toHaveBeenLastCalledWith('Non posso usare questo file. Invia una foto, una nota vocale, un PDF o un foglio di calcolo.', 1, undefined);
       expect(read).not.toHaveBeenCalled();
       expect(engine.turn).not.toHaveBeenCalled();
       expect(await store.activeRequest()).toBeUndefined();
@@ -172,10 +179,20 @@ describe('controller media flow', () => {
       const open = await store.activeRequest();
       expect(open?.revision).toBe(1);
       await controller.handle(message(3, { caption: 'aggiungi due saponi', document: { file_id: 'bin3', mime_type: 'application/octet-stream' } }));
-      expect(send).toHaveBeenLastCalledWith('Non posso usare questo file. Invia una foto, una nota vocale o un PDF.', 3, undefined);
+      expect(send).toHaveBeenLastCalledWith('Non posso usare questo file. Invia una foto, una nota vocale, un PDF o un foglio di calcolo.', 3, undefined);
       expect(engine.turn).toHaveBeenCalledTimes(1);
       const still = await store.activeRequest();
       expect(still).toMatchObject({ orderId: open!.orderId, revision: open!.revision, status: open!.status });
+    } finally { store.close(); }
+  });
+
+  it('reads a spreadsheet instead of refusing it as an unused file', async () => {
+    const { store, engine, send, read, controller } = await setup();
+    try {
+      await controller.handle(message(1, { caption: '@demo_bot ordine', document: { file_id: 'xls1', mime_type: 'application/vnd.ms-excel' } }));
+      expect(read).toHaveBeenCalledTimes(1);
+      expect(engine.turn).toHaveBeenCalledTimes(1);
+      expect(send.mock.calls.map(call => String(call[0])).join('\n')).not.toMatch(/non posso usare questo file/i);
     } finally { store.close(); }
   });
 
@@ -188,7 +205,7 @@ describe('controller media flow', () => {
     const controller = new TelegramController(english, 'demo_bot', store, engine, send);
     try {
       await controller.handle(message(1, { document: { file_id: 'bin1', mime_type: 'application/octet-stream' } }));
-      expect(send).toHaveBeenLastCalledWith('I cannot use this file. Send a photo, a voice note, or a PDF.', 1, undefined);
+      expect(send).toHaveBeenLastCalledWith('I cannot use this file. Send a photo, a voice note, a PDF, or a spreadsheet.', 1, undefined);
       expect(engine.turn).not.toHaveBeenCalled();
     } finally { store.close(); }
   });
@@ -222,7 +239,7 @@ describe('controller media flow', () => {
     const { store, engine, send, controller } = await setup(createMediaReader(config(), new DemoConnector(), async () => new Uint8Array([1]), { documents: { id: 'test-reader', read: pages } }));
     try {
       await controller.handle(photo(1, { caption: '@demo_bot ordine' }));
-      expect(send).toHaveBeenLastCalledWith('Non riesco a leggere tutte le pagine. Invia un PDF non protetto di massimo 10 pagine o immagini statiche JPEG, PNG, WebP, GIF o TIFF leggibili; nessuna bozza aggiornata.', 1, undefined);
+      expect(send).toHaveBeenLastCalledWith('Non riesco a leggere tutte le pagine. Invia un PDF non protetto di massimo 10 pagine, un foglio di calcolo (.xlsx o CSV), o immagini statiche JPEG, PNG, WebP, GIF o TIFF leggibili; nessuna bozza aggiornata.', 1, undefined);
       expect(engine.turn).not.toHaveBeenCalled();
       expect(pages).toHaveBeenCalledTimes(2);
       expect(await store.activeRequest()).toBeUndefined();
