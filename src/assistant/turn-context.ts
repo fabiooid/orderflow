@@ -3,7 +3,7 @@ import type { ConfirmedChoice } from '../matching/resolver.js';
 import type { DraftResult } from './drafts.js';
 
 /** The request a turn works on. */
-export type TurnRequest = { kind: 'order' | 'customer'; orderId: string; revision: number; confirmedChoices?: ConfirmedChoice[] };
+export type TurnRequest = { kind: 'order' | 'customer'; orderId: string; revision: number; confirmedChoices?: ConfirmedChoice[]; clientId?: string };
 
 /** What the application tells the tools about a turn. Absent in Studio, where no request is open. */
 export type Turn = {

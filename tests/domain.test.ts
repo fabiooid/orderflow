@@ -112,28 +112,33 @@ describe('order preparation', () => {
     if (result.ready) throw new Error('Expected a client question');
     expect(result.issues.find(i => i.field === 'client')?.candidates).toEqual([]);
   });
-  it('locks the hotel from an everyday name plus hint, and asks when only the shared place name is given', async () => {
+  it('offers the hotel from an everyday name plus hint, and asks when only the shared place name is given', async () => {
     const connector = new DemoConnector();
     const { shop, hotel, cafe } = harborSiblings();
     connector.clients.push(shop, hotel, cafe);
-    const locked = await prepareOrder({ ...draft(), clientQuery: 'Fable Harbor hotel' }, config(), connector, '2026-01-15');
-    expect(locked.ready && locked.order.client.id).toBe('211');
+    const offered = await prepareOrder({ ...draft(), clientQuery: 'Fable Harbor hotel' }, config(), connector, '2026-01-15');
+    if (offered.ready) throw new Error('Expected a customer question, not a lock');
+    expect(offered.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id)).toEqual(['211']);
     const asked = await prepareOrder({ ...draft(), clientQuery: 'Fable Harbor' }, config(), connector, '2026-01-15');
     if (asked.ready) throw new Error('Expected a client question');
     expect(asked.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id).sort()).toEqual(['210', '211', '212']);
     expect(asked.issues.find(i => i.field === 'client')?.candidates?.some(c => c.label.includes('hotel'))).toBe(true);
     const shopHint = await prepareOrder({ ...draft(), clientQuery: 'Fable Harbor shop' }, config(), connector, '2026-01-15');
-    expect(shopHint.ready && shopHint.order.client.id).toBe('210');
+    if (shopHint.ready) throw new Error('Expected a customer question, not a lock');
+    expect(shopHint.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id)).toEqual(['210']);
     const refine = await prepareOrder({ ...draft(), clientQuery: 'Fable Harbor spa' }, config(), connector, '2026-01-15');
     if (refine.ready) throw new Error('Expected sibling picks, not a missing customer');
     expect(refine.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id).sort()).toEqual(['210', '211', '212']);
+    const exactCafe = await prepareOrder({ ...draft(), clientQuery: 'Fable Harbor Cafe' }, config(), connector, '2026-01-15');
+    expect(exactCafe.ready && exactCafe.order.client.id).toBe('212');
   });
-  it('locks the intended pharmacy from a one-letter slip, and does not offer every pharmacy when only the trade word matches', async () => {
+  it('offers the intended pharmacy from a one-letter slip, and does not offer every pharmacy when only the trade word matches', async () => {
     const connector = new DemoConnector();
     const { willowmere, cinderford, pebblebrook } = pharmacyTypeAccounts();
     connector.clients.push(willowmere, cinderford, pebblebrook);
-    const locked = await prepareOrder({ ...draft(), clientQuery: 'Willomere Pharmacy' }, config(), connector, '2026-01-15');
-    expect(locked.ready && locked.order.client.id).toBe('310');
+    const offered = await prepareOrder({ ...draft(), clientQuery: 'Willomere Pharmacy' }, config(), connector, '2026-01-15');
+    if (offered.ready) throw new Error('Expected a customer question, not a lock');
+    expect(offered.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id)).toEqual(['310']);
     const leftover = await prepareOrder({ ...draft(), clientQuery: 'Pharmacy Zorblax' }, config(), connector, '2026-01-15');
     if (leftover.ready) throw new Error('Expected no pharmacy list for a leftover trade word');
     expect(leftover.issues.find(i => i.field === 'client')?.candidates).toEqual([]);

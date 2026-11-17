@@ -76,7 +76,12 @@ function clientText(client: ClientSearchRecord) {
   return normalize([client.name, client.vatNumber, client.city, client.notes, client.street].filter(Boolean).join(' '));
 }
 
-function exactClients<T extends ClientSearchRecord>(query: string, clients: T[]): T[] {
+/** True when `value` appears as a whole word in the operator's text. */
+export function nameInText(text: string, value: string) {
+  return !!normalize(value) && ` ${normalize(text)} `.includes(` ${normalize(value)} `);
+}
+
+export function exactClients<T extends ClientSearchRecord>(query: string, clients: T[]): T[] {
   const q = normalize(query);
   return q ? clients.filter(c => normalize(c.name) === q || normalize(c.vatNumber ?? '') === q) : [];
 }

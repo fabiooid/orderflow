@@ -36,7 +36,7 @@ export function createDraftApi(config: AppConfig, connector: OrderConnector, mat
     const result = await traceOperation('Prepare order', () => prepareOrder(draft, config, {
       listProducts: async () => products = await connector.listProducts(),
       listClients: async () => clients = await connector.listClients(),
-    }, date, validateVat));
+    }, date, validateVat, context.operatorText));
     const changed = matching.mode === 'on' ? changedIdentities(decisions, products, clients) : [];
     if (changed.length) return { kind: 'order', status: 'needs', draft, decisions, issues: changed };
     if (!result.ready) {
