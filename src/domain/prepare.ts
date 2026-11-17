@@ -2,24 +2,26 @@ import type { AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
 import { clientSchema, draftSchema, preparedOrderSchema, type Client, type Issue, type OrderDraft, type OrderLine, type PreparedOrder, type Product, type VatValidation } from './types.js';
 import { missingCustomerFields } from './customer.js';
-import { asksForTester, clientPickLabel, isTester, matchClients, matchProducts, namedAlternatives, normalize, sameClient, sameClientIds, searchCatalogue, searchClients } from './matching.js';
+import { asksForTester, clientPickLabel, exactClients, isTester, matchClients, matchProducts, nameInText, namedAlternatives, normalize, sameClient, searchCatalogue, searchClients } from './matching.js';
 
 /** `draft` is the draft as preparation read it, for example without a delivery address equal to the billing one. */
 export type Preparation = { ready: false; issues: Issue[]; draft: OrderDraft; clientId?: string } | { ready: true; order: PreparedOrder; draft: OrderDraft };
 export type ValidationLookup = (country: string, vatNumber: string) => Promise<VatValidation>;
 const toCandidates = (clients: Client[]) => clients.filter(c => c.id).map(c => ({ id: c.id!, label: clientPickLabel(c) }));
 
-export async function prepareOrder(input: OrderDraft, config: AppConfig, connector: Pick<OrderConnector, 'listProducts' | 'listClients'>, date: string, validateVat?: ValidationLookup): Promise<Preparation> {
+export async function prepareOrder(input: OrderDraft, config: AppConfig, connector: Pick<OrderConnector, 'listProducts' | 'listClients'>, date: string, validateVat?: ValidationLookup, operatorText = ''): Promise<Preparation> {
   const draft = draftSchema.parse(input);
   const [products, clients] = await Promise.all([connector.listProducts(), connector.listClients()]);
   const issues: Issue[] = [];
   const query = draft.clientQuery.trim();
+  const exact = query ? exactClients(query, clients) : [];
+  const typedExact = !operatorText.trim() ? exact : exact.filter(c => [c.name, c.vatNumber ?? ''].some(value => nameInText(operatorText, value)));
   const matches = draft.clientId
     ? clients.filter(c => c.id === draft.clientId)
-    : query ? matchClients(query, clients) : [];
-  const related = !draft.clientId && query ? searchClients(query, clients) : [];
-  const uniqueMatch = matches.length === 1 && (Boolean(draft.clientId) || sameClientIds(matches, related));
+    : typedExact;
+  const uniqueMatch = matches.length === 1 && (Boolean(draft.clientId) || typedExact.length === 1);
   let client: Partial<Client> | undefined = draft.newClient ?? (uniqueMatch ? matches[0] : undefined);
+  if (!draft.newClient && uniqueMatch && matches[0]?.id) draft.clientId = matches[0].id;
   if (draft.newClient) {
     const duplicates = clients.filter(c => sameClient(c, draft.newClient!));
     if (duplicates.length) {
@@ -27,7 +29,8 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
       client = undefined;
     }
   } else if (!client) {
-    const offered = related.length ? related : matches;
+    const suggested = query ? searchClients(query, clients) : [];
+    const offered = suggested.length ? suggested : matchClients(query, clients);
     issues.push({ field: 'client', message: 'Choose an existing client or supply complete new-client details', candidates: toCandidates(offered) });
   }
   if (client) {

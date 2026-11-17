@@ -127,8 +127,11 @@ it('updates the customer from a short name and still allows confirm-and-save aft
   const converse = correctionConverse(scenario);
   let messageId = 100;
   let lastSave: string | undefined;
+  let lastPick: string | undefined;
   const send = async (_text: string, _reply: number, keyboard?: { inline_keyboard: { text: string; callback_data: string }[][] }) => {
-    lastSave = keyboard?.inline_keyboard.flat().find(b => b.callback_data.startsWith('save:'))?.callback_data;
+    const buttons = keyboard?.inline_keyboard.flat() ?? [];
+    lastSave = buttons.find(b => b.callback_data.startsWith('save:'))?.callback_data;
+    lastPick = buttons.find(b => b.callback_data.includes(`:client:${northwind.id}`))?.callback_data;
     return { message_id: messageId++ };
   };
   try {
@@ -136,12 +139,19 @@ it('updates the customer from a short name and still allows confirm-and-save aft
     const controller = new TelegramController(c, 'bot', store, engine, send, undefined, orderCreator(c, connector, journal), async () => ({ message_id: 200 }));
     await controller.handle(message(1, 'ordine per Example Studio: 2 Pebble hand wash 250 ml, spedizione 8 euro'));
     await controller.handle(message(2, 'Northwind', 100));
+    const asked = await store.activeRequest();
+    expect(asked?.prepared?.client.id ?? asked?.draft.clientId).not.toBe('201');
+    expect(asked?.status).not.toBe('saved');
+    expect(asked?.status).toBe('suspended');
+    expect(asked?.issues?.some(i => i.field === 'client' && i.candidates?.some(c => c.id === northwind.id))).toBe(true);
+    expect(connector.createCalls).toBe(0);
+    expect(lastPick).toMatch(new RegExp(`^pick:u1:\\d+:client:${northwind.id}$`));
+    await controller.handle(press(3, lastPick!, 101));
     const corrected = await store.activeRequest();
     expect(corrected?.prepared?.client.id ?? corrected?.draft.clientId).toBe(northwind.id);
     expect(corrected?.status).toBe('ready');
-    expect(connector.createCalls).toBe(0);
     expect(lastSave).toMatch(/^save:u1:\d+$/);
-    await controller.handle(press(3, lastSave!, 101));
+    await controller.handle(press(4, lastSave!, 102));
     expect((await store.order('u1'))?.status).toBe('saved');
     expect(connector.createCalls).toBe(1);
     expect((await store.order('u1'))?.prepared?.client.id).toBe(northwind.id);

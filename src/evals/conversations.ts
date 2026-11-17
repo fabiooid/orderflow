@@ -7,10 +7,15 @@ export const northwind = {
   id: '202', name: 'Northwind Bistro', country: 'IT', street: 'Via Nord 5', city: 'Bergamo', postalCode: '24100',
   email: 'orders@northwind.invalid', vatNumber: 'DEMO-NORTHWIND', notes: '',
 };
+/** A fictional account whose legal name is longer than the everyday word an operator might type. */
+export const maplePine = {
+  id: '401', name: 'Maple & Pine Trading Ltd', country: 'IT', street: 'Harbour Lane 12', city: 'Example City',
+  postalCode: '00000', email: 'orders@maple-pine.invalid', vatNumber: 'DEMO-MAPLE-PINE', notes: '',
+};
 /** The fictional catalogue plus a second customer and a second size, so cases can change customer or pick a size. */
 export function evalConnector() {
   const connector = new DemoConnector();
-  connector.clients.push(structuredClone(northwind));
+  connector.clients.push(structuredClone(northwind), structuredClone(maplePine));
   connector.products.push({ id: '104', code: 'DEMO-A5', name: 'Pebble hand wash 500 ml', description: '', netPrice: 20 });
   // Italian words in a description, as a real catalogue has, so Italian questions can find the English-named candle.
   connector.products.find(p => p.id === '103')!.description = 'Candela profumata al lino';
@@ -272,6 +277,31 @@ export const conversationCases: ConversationCase[] = [
     id: 'english-request',
     turns: [{ text: 'Prepare an order for Northwind Bistro: 3 Linen candle 200 g, delivery 8 euros' }],
     check: all(neverGaveUp, orderFor(northwind.id), o => expect(last(o).includes('📦 Order preview'), 'no English order preview')),
+  },
+  {
+    id: 'weak-customer-stays-unmatched',
+    turns: [
+      { text: 'ordine per Maple' },
+      { text: '2 Pebble hand wash 250 ml, spedizione 8 euro, nota: express' },
+    ],
+    // A unique close account is a question. Filling products, shipping and a note must not lock it.
+    scripted: [
+      draftSchema.parse({ clientQuery: 'Maple', clientId: maplePine.id }),
+      draftSchema.parse({ clientQuery: maplePine.name, clientId: maplePine.id, lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 8, notes: 'express' }),
+    ],
+    check: all(neverGaveUp, o => [
+      ...expect(!o.open?.draft.clientId && o.open?.status === 'suspended', `customer locked as ${o.open?.draft.clientId ?? o.open?.status}`),
+      ...expect(!!o.open?.issues?.some(i => i.field === 'client' && i.candidates?.some(c => c.id === maplePine.id)), 'did not offer the close account as a question'),
+      ...expect(/🏪 Maple(?: & Pine Trading Ltd)? ❓/.test(last(o)), 'presented the customer as already selected'),
+      ...expect(!!o.open?.draft.lines.some(l => l.query === 'Pebble hand wash 250 ml' && l.quantity === 2), 'the product follow-up was lost'),
+      ...expect(o.open?.draft.shippingPrice === 8 && o.open?.draft.notes === 'express', 'shipping or note was lost'),
+    ]),
+  },
+  {
+    id: 'exact-customer-name-locks',
+    turns: [{ text: 'ordine per Maple & Pine Trading Ltd: 2 Pebble hand wash 250 ml, spedizione 8 euro' }],
+    scripted: [draftSchema.parse({ clientQuery: maplePine.name, lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 8 })],
+    check: all(neverGaveUp, orderFor(maplePine.id)),
   },
   {
     id: 'short-name-on-ready-draft-is-new-search',

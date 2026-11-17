@@ -108,7 +108,12 @@ function looksLikePersonName(words: string[]) {
     && words.every(word => word.length >= 3 && word.length <= 16 && /^[a-z]+$/u.test(word) && !GENERIC_ACCOUNT_WORDS.has(word));
 }
 
-function exactClients<T extends ClientSearchRecord>(query: string, clients: T[]): T[] {
+/** True when `value` appears as a whole word in the operator's text. */
+export function nameInText(text: string, value: string) {
+  return !!normalize(value) && ` ${normalize(text)} `.includes(` ${normalize(value)} `);
+}
+
+export function exactClients<T extends ClientSearchRecord>(query: string, clients: T[]): T[] {
   const q = normalize(query);
   return q ? clients.filter(c => normalize(c.name) === q || normalize(c.vatNumber ?? '') === q) : [];
 }

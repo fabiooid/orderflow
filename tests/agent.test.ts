@@ -22,6 +22,8 @@ it('gives the agent the order and customer APIs and lookups, and no way to save'
     expect(tools.searchClients?.description).toContain('not a request to save');
     expect(tools.prepareOrder?.description).toContain('always call search-clients first');
     expect(tools.prepareOrder?.description).toContain('not a substitute');
+    expect(tools.prepareOrder?.description).toContain('exact name or VAT');
+    expect(tools.searchClients?.description).toContain('One close or related account is still a question');
     expect(tools.prepareOrder?.description).toContain('If this request already has lines, keep them');
     expect(tools.prepareOrder?.description).toContain('short customer name');
     expect(tools.prepareOrder?.description).toContain('Do not ask to save the current draft as-is');
@@ -38,6 +40,8 @@ it('keeps business rules in the prompt and field rules in the API schema, with n
   expect(prompt).toContain('# Start an order');
   expect(prompt).toContain('always call search-clients');
   expect(prompt).toContain("Do not let prepare-order's internal match choose the customer");
+  expect(prompt).toContain('exact name or VAT');
+  expect(prompt).toContain('does not confirm the customer');
   expect(prompt).toContain('call search-clients again with the refined words');
   expect(prompt).toContain('Naming a customer is not a request to copy products');
   expect(prompt).toContain('Keep any product lines already on this request');
