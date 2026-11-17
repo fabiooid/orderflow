@@ -45,6 +45,18 @@ it('keeps business rules in the prompt and field rules in the API schema, with n
   expect(fields.lines.description).toContain('A new request starts with no lines');
 });
 
+it('tells the agent to write automatic order notes in the operator language without translating catalogue names', () => {
+  const prompt = systemPrompt(config().invoicing.label);
+  const notes = orderDraftInput.shape.notes.description ?? '';
+  expect(prompt).toContain('Write order notes in that same language');
+  expect(prompt).toContain('keep catalogue product names as they appear');
+  expect(notes).toContain("same language as the operator's messages");
+  expect(notes).toContain('Italian when they write in Italian');
+  expect(notes).toContain('English when they write in English');
+  expect(notes).toContain('Keep catalogue product names as they appear');
+  expect(notes).toContain('do not translate them');
+});
+
 /**
  * Every schema the model receives becomes JSON Schema at call time. A transform or other unrepresentable step passes
  * the scripted tests but fails every live turn, so each one is converted here.
