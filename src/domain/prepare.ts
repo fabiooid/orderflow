@@ -16,12 +16,12 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
   const query = draft.clientQuery.trim();
   const exact = query ? exactClients(query, clients) : [];
   const typedExact = !operatorText.trim() ? exact : exact.filter(c => [c.name, c.vatNumber ?? ''].some(value => nameInText(operatorText, value)));
-  const related = query ? matchClients(query, clients) : [];
   const matches = draft.clientId
     ? clients.filter(c => c.id === draft.clientId)
     : typedExact;
-  let client: Partial<Client> | undefined = draft.newClient ?? (matches.length === 1 ? matches[0] : undefined);
-  if (!draft.newClient && matches.length === 1 && matches[0]?.id) draft.clientId = matches[0].id;
+  const uniqueMatch = matches.length === 1 && (Boolean(draft.clientId) || typedExact.length === 1);
+  let client: Partial<Client> | undefined = draft.newClient ?? (uniqueMatch ? matches[0] : undefined);
+  if (!draft.newClient && uniqueMatch && matches[0]?.id) draft.clientId = matches[0].id;
   if (draft.newClient) {
     const duplicates = clients.filter(c => sameClient(c, draft.newClient!));
     if (duplicates.length) {
@@ -29,7 +29,8 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
       client = undefined;
     }
   } else if (!client) {
-    const offered = related.length ? related : query ? searchClients(query, clients) : [];
+    const suggested = query ? searchClients(query, clients) : [];
+    const offered = suggested.length ? suggested : matchClients(query, clients);
     issues.push({ field: 'client', message: 'Choose an existing client or supply complete new-client details', candidates: toCandidates(offered) });
   }
   if (client) {

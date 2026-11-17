@@ -3,8 +3,8 @@ import type { Client, Product } from './types.js';
 /** Most choices shown to the operator for one question. */
 export const MAX_CHOICES = 10;
 
-/** Fields used to find a customer: legal name, everyday name in notes, and street when the place-name lives there. */
-export type ClientSearchRecord = Pick<Client, 'name'> & Partial<Pick<Client, 'id' | 'vatNumber' | 'city' | 'street' | 'notes'>>;
+/** Fields used to find a customer: legal name, everyday name in notes, contact person, and street when the place-name lives there. */
+export type ClientSearchRecord = Pick<Client, 'name'> & Partial<Pick<Client, 'id' | 'vatNumber' | 'city' | 'street' | 'notes' | 'contactPerson'>>;
 
 export function normalize(value: string): string {
   return value.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
@@ -73,7 +73,39 @@ export function searchCatalogue(query: string, products: Product[]): Product[] {
 }
 
 function clientText(client: ClientSearchRecord) {
-  return normalize([client.name, client.vatNumber, client.city, client.notes, client.street].filter(Boolean).join(' '));
+  return normalize([client.name, client.vatNumber, client.city, client.notes, client.contactPerson, client.street].filter(Boolean).join(' '));
+}
+
+/** Legal name, everyday name in notes, and contact person: stronger than the same words in a street. */
+function identityText(client: ClientSearchRecord) {
+  return normalize([client.name, client.notes, client.contactPerson].filter(Boolean).join(' '));
+}
+
+function businessIdentityText(client: ClientSearchRecord) {
+  return normalize([client.name, client.notes].filter(Boolean).join(' '));
+}
+
+/** Trade or legal-form words that name a kind of account, not one account. */
+const GENERIC_ACCOUNT_WORDS = new Set([
+  'srl', 'spa', 'sas', 'snc', 'ltd', 'llc', 'inc', 'gmbh', 'plc', 'corp', 'bv', 'nv',
+  'hotel', 'shop', 'store', 'pharmacy', 'farmacia', 'cafe', 'restaurant', 'ristorante',
+  'bar', 'farm', 'inn', 'studio', 'company', 'group', 'deli', 'bakery', 'bistro',
+  'trattoria', 'pizzeria', 'market', 'trading', 'agriturismo', 'lodge', 'resort',
+]);
+
+function hitsText(text: string, word: string, allowNearMiss: boolean) {
+  if (contains(text, word)) return true;
+  return allowNearMiss && text.split(' ').filter(Boolean).some(token => oneLetterOff(word, token));
+}
+
+function leftoverWords(text: string, queryWords: string[], allowNearMiss: boolean) {
+  return queryWords.filter(word => !hitsText(text, word, allowNearMiss));
+}
+
+/** First or first-and-last name: a few letter tokens, not a trade or legal-form word. */
+function looksLikePersonName(words: string[]) {
+  return words.length >= 1 && words.length <= 2
+    && words.every(word => word.length >= 3 && word.length <= 16 && /^[a-z]+$/u.test(word) && !GENERIC_ACCOUNT_WORDS.has(word));
 }
 
 /** True when `value` appears as a whole word in the operator's text. */
@@ -86,7 +118,7 @@ export function exactClients<T extends ClientSearchRecord>(query: string, client
   return q ? clients.filter(c => normalize(c.name) === q || normalize(c.vatNumber ?? '') === q) : [];
 }
 
-/** True when the words differ by one substitution, insertion or deletion. Short tokens stay exact. */
+/** True when the words differ by one substitution, or by one insertion or deletion that is not only an extra or missing ending. Short tokens stay exact. */
 function oneLetterOff(left: string, right: string): boolean {
   if (left === right || left.length < 4 || right.length < 4) return false;
   const gap = Math.abs(left.length - right.length);
@@ -105,22 +137,54 @@ function oneLetterOff(left: string, right: string): boolean {
     if (skipped || shorter[i] !== longer[i + 1]) return false;
     skipped = 1;
   }
-  return true;
+  // An extra or missing letter only at the end is a small ending change, not a mid-word slip.
+  return skipped === 1;
 }
 
-function clientScore(queryWords: string[], client: ClientSearchRecord, allowNearMiss = false) {
+/** True when one distinctive word is the other plus a short extra or missing ending. Not general spelling correction. */
+function smallEndingOff(left: string, right: string): boolean {
+  if (left === right || left.length < 4 || right.length < 4) return false;
+  const [shorter, longer] = left.length < right.length ? [left, right] : [right, left];
+  if (!longer.startsWith(shorter)) return false;
+  const extra = longer.length - shorter.length;
+  return extra >= 1 && extra <= Math.min(3, Math.floor(shorter.length / 2));
+}
+
+function clientScore(queryWords: string[], client: ClientSearchRecord, allowNearMiss = false, allowEnding = false) {
   const text = clientText(client);
-  const haystack = allowNearMiss ? text.split(' ').filter(Boolean) : [];
-  return queryWords.filter(word => contains(text, word) || (allowNearMiss && haystack.some(token => oneLetterOff(word, token)))).length;
-}
-
-function everyWordHits<T extends ClientSearchRecord>(words: string[], clients: T[], allowNearMiss: boolean) {
-  return clients.filter(client => clientScore(words, client, allowNearMiss) === words.length);
+  const haystack = allowNearMiss || allowEnding ? text.split(' ').filter(Boolean) : [];
+  return queryWords.filter(word => contains(text, word)
+    || (allowNearMiss && haystack.some(token => oneLetterOff(word, token)))
+    || (allowEnding && haystack.some(token => smallEndingOff(word, token)))).length;
 }
 
 /**
- * Clients whose legal name, VAT, city, notes or street contain every word of the query, or an exact
- * name or VAT. A distinctive word may be one letter off when no exact-word hit exists.
+ * Distinctive name, notes, or contact-person hits whose leftover words look like a person's name,
+ * not another business. Street-only hits stay out of this list.
+ */
+function personNameSuggestions<T extends ClientSearchRecord>(words: string[], clients: T[]): T[] {
+  const scored = clients.flatMap(client => {
+    const leftover = leftoverWords(identityText(client), words, true);
+    if (!leftover.length || leftover.length === words.length) return [];
+    const distinctive = words.filter(word => !GENERIC_ACCOUNT_WORDS.has(word) && hitsText(identityText(client), word, true));
+    if (!distinctive.length || !looksLikePersonName(leftover)) return [];
+    const leftoverIsAnotherBusiness = leftover.some(word => GENERIC_ACCOUNT_WORDS.has(word) || clients.some(other => other !== client
+      && !GENERIC_ACCOUNT_WORDS.has(word) && hitsText(businessIdentityText(other), word, true)));
+    if (leftoverIsAnotherBusiness) return [];
+    return [{ client, score: distinctive.length }];
+  });
+  const best = Math.max(0, ...scored.map(entry => entry.score));
+  return best ? scored.filter(entry => entry.score === best).map(entry => entry.client) : [];
+}
+
+function everyWordHits<T extends ClientSearchRecord>(words: string[], clients: T[], allowNearMiss: boolean, allowEnding = false) {
+  return clients.filter(client => clientScore(words, client, allowNearMiss, allowEnding) === words.length);
+}
+
+/**
+ * Clients whose legal name, VAT, city, notes, contact person or street contain every word of the query,
+ * or an exact name or VAT. A distinctive word may be one letter off when no exact-word hit exists.
+ * Extra or missing endings are not locked here; search still offers them for confirmation.
  */
 export function matchClients<T extends ClientSearchRecord>(query: string, clients: T[]): T[] {
   const exact = exactClients(query, clients);
@@ -131,17 +195,32 @@ export function matchClients<T extends ClientSearchRecord>(query: string, client
   return exactWords.length ? exactWords : everyWordHits(words, clients, true);
 }
 
+export function sameClientIds<T extends ClientSearchRecord>(left: T[], right: T[]) {
+  if (left.length !== right.length) return false;
+  const ids = new Set(left.map(client => client.id));
+  return right.every(client => ids.has(client.id));
+}
+
 /**
  * Find customers by the name people use, not only the legal name. A distinctive word that is one letter
- * off still counts. Prefer every-word hits; if a tighter refine (a hint such as hotel or shop) finds
- * nobody, fall back to siblings that share the remaining distinctive words, not every account of the
- * same generic type.
+ * off still counts. A small extra or missing ending on a distinctive word still suggests the account
+ * when no exact-word hit exists. Prefer every-word hits; if a leftover personal name hides a complete
+ * match, still suggest the account whose legal name, notes, or contact person has the distinctive
+ * words — not a weaker street-only hit. If a tighter refine (a hint such as hotel or shop) finds nobody,
+ * fall back to siblings that share the remaining distinctive words, not every account of the same generic type.
  */
 export function searchClients<T extends ClientSearchRecord>(query: string, clients: T[]): T[] {
   const matched = matchClients(query, clients);
-  if (matched.length) return matched;
   const words = normalize(query).split(' ').filter(Boolean);
+  const named = words.length ? personNameSuggestions(words, clients) : [];
+  if (named.length) {
+    const identityComplete = matched.filter(client => leftoverWords(identityText(client), words, true).length === 0);
+    return identityComplete.length ? identityComplete : named;
+  }
+  if (matched.length) return matched;
   if (!words.length) return [];
+  const extraEnding = everyWordHits(words, clients, true, true);
+  if (extraEnding.length) return extraEnding;
   const scored = clients.map(client => ({ client, score: clientScore(words, client, true) })).filter(entry => entry.score > 0);
   const best = Math.max(0, ...scored.map(entry => entry.score));
   // A single leftover word is often just the kind of business (hotel, pharmacy, spa). That is not enough
@@ -150,9 +229,9 @@ export function searchClients<T extends ClientSearchRecord>(query: string, clien
   return scored.filter(entry => entry.score === best).map(entry => entry.client);
 }
 
-/** Button label: legal name, then the everyday name from notes when it adds something. */
-export function clientPickLabel(client: { name: string; code?: string; city?: string; country?: string; vatNumber?: string; notes?: string; aliases?: string[] }) {
-  const extra = [...new Set([...(client.aliases ?? []), client.notes?.trim() ?? ''].filter(value => value && !normalize(client.name).includes(normalize(value))))];
+/** Button label: legal name, then the everyday name from notes or the contact person when it adds something. */
+export function clientPickLabel(client: { name: string; code?: string; city?: string; country?: string; vatNumber?: string; notes?: string; contactPerson?: string; aliases?: string[] }) {
+  const extra = [...new Set([...(client.aliases ?? []), client.notes?.trim() ?? '', client.contactPerson?.trim() ?? ''].filter(value => value && !normalize(client.name).includes(normalize(value))))];
   return [client.code, client.name, ...extra, client.city, client.country, client.vatNumber].filter(Boolean).join(' — ');
 }
 

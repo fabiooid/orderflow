@@ -19,6 +19,12 @@ export type CustomerResult = { kind: 'customer'; draft: OrderDraft; decisions: D
   | { status: 'needs'; issues: Issue[] });
 export type DraftResult = OrderResult | CustomerResult;
 
+/** Keep this request's product lines when a later draft only names the customer. A new request still starts empty. */
+export function preserveDraftLines(draft: OrderDraft, openLines?: OrderDraft['lines']): OrderDraft {
+  if (draft.lines.length || !openLines?.length) return draft;
+  return { ...draft, lines: structuredClone(openLines) };
+}
+
 /**
  * The order and customer APIs: validation only, never a write. Identities go through the resolver, which accepts an
  * ID only from exact evidence in the operator's words, a judged match or the operator's own button choice.

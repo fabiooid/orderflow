@@ -30,6 +30,26 @@ export const pharmacyTypeAccounts = (): { willowmere: Client; cinderford: Client
     pebblebrook: { id: '312', name: 'Pebblebrook Pharmacy Srl', ...place, street: 'Pebblebrook Way 3', vatNumber: 'DEMO-PEBBLEBROOK', notes: '' },
   };
 };
+
+/** Distinctive business name versus another account that only has that word in its street. */
+export const willowmereStayAccounts = (): { agriturismo: Client; streetOnly: Client; east: Client } => {
+  const place = { country: 'IT' as const, city: 'Genova', postalCode: '16100', email: 'orders@willowmere-stay.invalid' };
+  return {
+    agriturismo: { id: '410', name: 'Willowmere Agriturismo', ...place, street: 'Hill Road 12', vatNumber: 'DEMO-WILLOWMERE-STAY', notes: 'Willowmere stay' },
+    streetOnly: { id: '411', name: 'Oakridge Farm Srl', ...place, street: 'Willowmere Lane 8', vatNumber: 'DEMO-OAKRIDGE', notes: '' },
+    east: { id: '412', name: 'Willowmere East Farm Srl', ...place, street: 'East Lane 4', vatNumber: 'DEMO-WILLOWMERE-EAST-STAY', notes: '' },
+  };
+};
+
+/** Distinctive account names that differ only by a short extra or missing ending. */
+export const sampleNameAccounts = (): { sample: Client; sampler: Client; east: Client } => {
+  const place = { country: 'IT' as const, city: 'Genova', postalCode: '16100', email: 'orders@sample-name.invalid' };
+  return {
+    sample: { id: '510', name: 'Cliente Sample', ...place, street: 'Sample Lane 1', vatNumber: 'DEMO-CLIENTE-SAMPLE', notes: '' },
+    sampler: { id: '511', name: 'Cliente Sampler', ...place, street: 'Sampler Road 2', vatNumber: 'DEMO-CLIENTE-SAMPLER', notes: '' },
+    east: { id: '512', name: 'Cliente Sample East', ...place, street: 'East Lane 5', vatNumber: 'DEMO-CLIENTE-SAMPLE-EAST', notes: '' },
+  };
+};
 export const draft = () => draftSchema.parse({
   clientQuery: 'Example Studio', lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 8, discountPercent: 10,
 });

@@ -118,7 +118,7 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
     const outcome = startTurn(requestContext, {
       evidence, operatorWords: input.operatorText, senderId: input.senderId,
       knownPhrases: [request?.draft.clientQuery, ...request?.draft.lines.map(line => line.query) ?? []].filter((p): p is string => !!p),
-      ...(request ? { request: { kind: kindOf(request), orderId: request.orderId, revision: request.revision, confirmedChoices: request.confirmedChoices, ...(request.draft.clientId ? { clientId: request.draft.clientId } : {}) } } : {}),
+      ...(request ? { request: { kind: kindOf(request), orderId: request.orderId, revision: request.revision, confirmedChoices: request.confirmedChoices, lines: request.draft.lines, ...(request.draft.clientId ? { clientId: request.draft.clientId } : {}) } } : {}),
       ...(input.locked ? { locked: input.locked } : {}),
     });
     const prompt: TurnPrompt = {

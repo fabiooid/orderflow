@@ -15,6 +15,8 @@ export const clientSchema = z.object({
   vatNumber: z.string().min(1).optional(),
   taxCode: z.string().min(1).optional(),
   sdiCode: z.string().regex(/^[A-Z0-9]{7}$/).optional(),
+  /** Person named on the invoicing record, when that backend provides one. */
+  contactPerson: z.string().min(1).optional(),
   notes: z.string().default(''),
 }).strict();
 export type Client = z.infer<typeof clientSchema>;

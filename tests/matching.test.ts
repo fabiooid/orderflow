@@ -92,6 +92,8 @@ describe('read-only JEV selection boundary', () => {
       .toEqual([{ id: '1', name: 'Shop', country: 'IT', city: 'Roma', aliases: ['Harbor shop'] }]);
     expect(clientCandidates([{ id: '2', name: 'Shop', country: 'IT', city: 'Roma', street: 'private-street', postalCode: '00100', notes: '' }]))
       .toEqual([{ id: '2', name: 'Shop', country: 'IT', city: 'Roma' }]);
+    expect(clientCandidates([{ id: '3', name: 'Stay', country: 'IT', city: 'Roma', street: 'private-street', postalCode: '00100', notes: '', contactPerson: 'Giulia Neri' }]))
+      .toEqual([{ id: '3', name: 'Stay', country: 'IT', city: 'Roma', aliases: ['Giulia Neri'] }]);
   });
   it('bounds SDK retries and does not retry authentication failures', async () => {
     for (const status of [401, 503]) {
