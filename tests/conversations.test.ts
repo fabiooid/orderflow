@@ -18,6 +18,8 @@ const scriptedIds = [
   'photo-keeps-lines-and-still-asks-size',
   'customer-only-does-not-invent-lines',
   'cancelled-request-does-not-copy-lines',
+  'spreadsheet-keeps-named-customer',
+  'spreadsheet-header-names-customer',
 ];
 
 function asOrderDraft(act: ScriptedAct | undefined): OrderDraft {

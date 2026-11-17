@@ -3,12 +3,13 @@ import type { AppConfig } from '../../config/schema.js';
 import { callbackActions, callbackLabels } from '../../channel/callbacks.js';
 import { installInbound } from '../../channel/inbound.js';
 import { MAX_FILE_BYTES, type Attachment, type ChannelAdapter, type MessageEvent, type OrderLink } from '../../channel/contract.js';
+import { spreadsheetHint } from '../../documents/spreadsheet.js';
 import { TelegramApi } from './api.js';
 
 export { MAX_FILE_BYTES, type Attachment, type MessageEvent, type OrderLink };
 export { callbackData, mediaCallbackData, pickData } from '../../channel/callbacks.js';
 
-const file = z.object({ file_id: z.string().min(1), file_size: z.number().int().optional(), mime_type: z.string().optional() });
+const file = z.object({ file_id: z.string().min(1), file_size: z.number().int().optional(), mime_type: z.string().optional(), file_name: z.string().optional() });
 const person = z.object({ first_name: z.string(), last_name: z.string().optional() });
 const updateSchema = z.object({
   update_id: z.number().int().nonnegative(),
@@ -41,6 +42,11 @@ function attachments(message: NonNullable<z.infer<typeof updateSchema>['message'
   const doc = message.document;
   if (doc?.mime_type === 'application/pdf') found.push({ kind: 'pdf', fileId: doc.file_id, mimeType: doc.mime_type, size: doc.file_size });
   else if (doc?.mime_type && /^image\/(jpeg|png|webp|gif|tiff)$/.test(doc.mime_type)) found.push({ kind: 'image', fileId: doc.file_id, mimeType: doc.mime_type, size: doc.file_size });
+  else if (doc && spreadsheetHint(doc.mime_type ?? '', doc.file_name ?? '')) {
+    const name = (doc.file_name ?? '').toLowerCase();
+    const mime = /\.csv$/.test(name) && !doc.mime_type ? 'text/csv' : (doc.mime_type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    found.push({ kind: 'spreadsheet', fileId: doc.file_id, mimeType: mime, size: doc.file_size });
+  }
   return found;
 }
 

@@ -25,6 +25,19 @@ export function preserveDraftLines(draft: OrderDraft, openLines?: OrderDraft['li
   return { ...draft, lines: structuredClone(openLines) };
 }
 
+/** Keep this request's customer when a later draft only adds lines (a blank form header must not clear a name given in chat). */
+export function preserveDraftCustomer(draft: OrderDraft, open?: Partial<Pick<OrderDraft, 'clientQuery' | 'clientId' | 'newClient'>>): OrderDraft {
+  if (draft.clientQuery.trim() || draft.clientId || draft.newClient || !open) return draft;
+  const clientQuery = open.clientQuery?.trim() ? open.clientQuery : '';
+  if (!clientQuery && !open.clientId && !open.newClient) return draft;
+  return {
+    ...draft,
+    ...(clientQuery ? { clientQuery } : {}),
+    ...(open.clientId ? { clientId: open.clientId } : {}),
+    ...(open.newClient ? { newClient: structuredClone(open.newClient) } : {}),
+  };
+}
+
 /**
  * The order and customer APIs: validation only, never a write. Identities go through the resolver, which accepts an
  * ID only from exact evidence in the operator's words, a judged match or the operator's own button choice.

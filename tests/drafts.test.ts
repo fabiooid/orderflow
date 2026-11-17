@@ -77,6 +77,36 @@ it('does not open an empty order card when prepare is called with no customer an
   } finally { await storage.close(); }
 });
 
+it('keeps this request\'s customer when a later draft only adds product lines', async () => {
+  const storage = new LibSQLStore({ id: 'keep-customer', url: ':memory:' });
+  try {
+    const { calls } = createOrderAgent(config(), new DemoConnector(), storage);
+    const context = new RequestContext();
+    const outcome = startTurn(context, {
+      evidence: 'cliente Example Studio', operatorWords: 'cliente Example Studio', senderId: '5', knownPhrases: ['Example Studio'],
+      request: { kind: 'order', orderId: 'u1', revision: 1, clientQuery: 'Example Studio', clientId: '201' },
+    });
+    const result = await calls.order(draftSchema.parse({
+      lines: [
+        { query: 'Hand cream 100 ml SKU-100', quantity: 2 },
+        { query: 'Room spray 250 ml SKU-250 tester', quantity: 1 },
+      ],
+    }), context);
+    expect(result.status).toBe('needs');
+    expect(outcome.result).toMatchObject({
+      kind: 'order',
+      draft: {
+        clientQuery: 'Example Studio',
+        clientId: '201',
+        lines: [
+          expect.objectContaining({ query: 'Hand cream 100 ml SKU-100', quantity: 2 }),
+          expect.objectContaining({ query: 'Room spray 250 ml SKU-250 tester', quantity: 1 }),
+        ],
+      },
+    });
+  } finally { await storage.close(); }
+});
+
 it('keeps this request\'s product lines when a later draft only locks the customer', async () => {
   const storage = new LibSQLStore({ id: 'keep-lines', url: ':memory:' });
   try {

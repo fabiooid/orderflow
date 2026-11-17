@@ -28,9 +28,11 @@ describe('normalizing Telegram media', () => {
     expect(normalizeMessage(voice(2), config())?.attachments).toEqual([{ kind: 'voice', fileId: 'voice2', mimeType: 'audio/ogg', size: 2000 }]);
     expect(normalizeMessage(message(3, { document: { file_id: 'pdf3', mime_type: 'application/pdf' } }), config())?.attachments?.[0]?.kind).toBe('pdf');
     expect(normalizeMessage(message(4, { document: { file_id: 'img4', mime_type: 'image/png' } }), config())?.attachments?.[0]).toMatchObject({ kind: 'image', mimeType: 'image/png' });
+    expect(normalizeMessage(message(5, { document: { file_id: 'xls5', mime_type: 'application/vnd.ms-excel' } }), config())?.attachments?.[0]).toMatchObject({ kind: 'spreadsheet', fileId: 'xls5' });
+    expect(normalizeMessage(message(6, { document: { file_id: 'xlsx6', mime_type: 'application/octet-stream', file_name: 'filled.xlsx' } }), config())?.attachments?.[0]?.kind).toBe('spreadsheet');
   });
   it('ignores unsupported files without text, and other chats', () => {
-    expect(normalizeMessage(message(1, { document: { file_id: 'x', mime_type: 'application/vnd.ms-excel' } }), config())).toBeNull();
+    expect(normalizeMessage(message(1, { document: { file_id: 'x', mime_type: 'video/mp4' } }), config())).toBeNull();
     const other = photo(2); other.message.chat = { id: -999, type: 'supergroup' };
     expect(normalizeMessage(other, config())).toBeNull();
   });
@@ -47,8 +49,9 @@ describe('normalizing Telegram media', () => {
 
 describe('routing media', () => {
   const base = (extra: Partial<MessageEvent>): MessageEvent => ({ updateId: 1, groupId: '-1000000000001', senderId: '5', messageId: 1, text: '', ...extra });
-  const image = [{ kind: 'image' as const, fileId: 'f', mimeType: 'image/jpeg' }];
-  const audio = [{ kind: 'voice' as const, fileId: 'v', mimeType: 'audio/ogg' }];
+    const image = [{ kind: 'image' as const, fileId: 'f', mimeType: 'image/jpeg' }];
+    const audio = [{ kind: 'voice' as const, fileId: 'v', mimeType: 'audio/ogg' }];
+    const sheet = [{ kind: 'spreadsheet' as const, fileId: 's', mimeType: 'application/vnd.ms-excel' }];
   it('asks before reading uncaptioned media, except replies and voice notes where typed text would be read', () => {
     const c = config();
     expect(asksFirst(base({ attachments: image }), { config: c })).toBe(true);
@@ -57,6 +60,8 @@ describe('routing media', () => {
     expect(asksFirst(base({ attachments: image }), { config: c, active: conv('u1', 1) })).toBe(true);
     expect(asksFirst(base({ attachments: audio }), { config: c, active: conv('u1', 1) })).toBe(false);
     expect(asksFirst(base({ attachments: audio }), { config: c })).toBe(true);
+    expect(asksFirst(base({ attachments: sheet }), { config: c })).toBe(true);
+    expect(asksFirst(base({ attachments: sheet, text: 'ordine per Example Studio' }), { config: c })).toBe(false);
     c.channel.respondToAllMessages = true;
     expect(asksFirst(base({ attachments: audio }), { config: c })).toBe(false);
   });
@@ -181,7 +186,7 @@ describe('controller media flow', () => {
     const { store, engine, send, controller } = await setup(createMediaReader(config(), new DemoConnector(), async () => new Uint8Array([1]), { documents: { id: 'test-reader', read: pages } }));
     try {
       await controller.handle(photo(1, { caption: '@demo_bot ordine' }));
-      expect(send).toHaveBeenLastCalledWith('Non riesco a leggere tutte le pagine. Invia un PDF non protetto di massimo 10 pagine o immagini statiche JPEG, PNG, WebP, GIF o TIFF leggibili; nessuna bozza aggiornata.', 1, undefined);
+      expect(send).toHaveBeenLastCalledWith('Non riesco a leggere tutte le pagine. Invia un PDF non protetto di massimo 10 pagine, un foglio di calcolo (.xlsx o CSV), o immagini statiche JPEG, PNG, WebP, GIF o TIFF leggibili; nessuna bozza aggiornata.', 1, undefined);
       expect(engine.turn).not.toHaveBeenCalled();
       expect(pages).toHaveBeenCalledTimes(2);
       expect(await store.activeRequest()).toBeUndefined();
