@@ -77,6 +77,20 @@ it('tells the agent to write automatic order notes in the operator language with
   expect(notes).toContain('do not translate them');
 });
 
+it('tells the agent to put only the requested instruction in order notes', () => {
+  const prompt = systemPrompt(config().invoicing.label);
+  const notes = orderDraftInput.shape.notes.description ?? '';
+  expect(prompt).toContain('only the instruction the operator asked to write');
+  expect(prompt).toContain('Do not summarise an attached message');
+  expect(prompt).toContain('repeat product lines already on the draft');
+  expect(prompt).toContain('Leave notes empty when they did not ask for a note');
+  expect(notes).toContain('only a note the operator explicitly asks to write');
+  expect(notes).toContain('Do not summarise an attached message');
+  expect(notes).toContain('repeat product lines already on the draft');
+  expect(notes).toContain('Empty when they did not ask for a note');
+  expect(notes).not.toContain("customer's message");
+});
+
 /**
  * Every schema the model receives becomes JSON Schema at call time. A transform or other unrepresentable step passes
  * the scripted tests but fails every live turn, so each one is converted here.
