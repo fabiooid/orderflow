@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { checkConnections, type HealthPorts } from '../src/health/check.js';
-import { TelegramApi } from '../src/channels/telegram/api.js';
+import { pollingRetryWarning, TelegramApi } from '../src/channels/telegram/api.js';
 import { config } from './helpers.js';
 function ports(): HealthPorts {
   return { telegram: async () => ({ member: true, canSend: true, polling: true }), company: async () => true,
@@ -27,6 +27,34 @@ it('does not leak Telegram token or upstream error details', async () => {
   const api = new TelegramApi('top-secret', vi.fn().mockRejectedValue(new Error('https://api.telegram.org/bottop-secret/getMe')));
   await expect(api.getMe()).rejects.toThrow('Telegram getMe failed');
   await expect(api.getMe()).rejects.not.toThrow('top-secret');
+});
+it.each([
+  ['timeout', Object.assign(new Error('aborted'), { name: 'TimeoutError' }), undefined, 'timeout'],
+  ['undici connect timeout', new TypeError('fetch failed', { cause: Object.assign(new Error('Connect Timeout Error'), { code: 'UND_ERR_CONNECT_TIMEOUT' }) }), undefined, 'timeout'],
+  ['auth', undefined, { status: 401, error_code: 401, description: 'Unauthorized' }, 'auth'],
+  ['rate limit', undefined, { status: 429, error_code: 429, description: 'Too Many Requests: retry after 12' }, 'rate_limit'],
+] as const)('records a safe %s class on a failed getUpdates retry', async (_label, thrown, body, failure) => {
+  const request = thrown
+    ? vi.fn().mockRejectedValue(thrown)
+    : vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: false, error_code: body!.error_code, description: body!.description }), { status: body!.status }));
+  const error = await new TelegramApi('fake', request).updates(0).catch((caught: unknown) => caught);
+  expect(pollingRetryWarning(error)).toBe(`Telegram polling unavailable (${failure}); retrying the read in 5 seconds. No writes retried.`);
+});
+it('keeps tokens, request URLs and message content out of a getUpdates retry log', async () => {
+  const token = 'top-secret';
+  const chatter = 'please send 12 notebooks to Via Fittizia 1';
+  const url = `https://api.telegram.org/bot${token}/getUpdates`;
+  const request = vi.fn()
+    .mockRejectedValueOnce(new Error(`${url} ${chatter}`))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ ok: false, error_code: 401, description: `Unauthorized bot ${token}: ${chatter}` }), { status: 401 }));
+  const api = new TelegramApi(token, request);
+  for (const error of [await api.updates(0).catch((caught: unknown) => caught), await api.updates(0).catch((caught: unknown) => caught)]) {
+    const log = pollingRetryWarning(error);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).not.toMatch(/top-secret|api\.telegram\.org|notebooks|Via Fittizia/);
+    expect(log).toMatch(/^Telegram polling unavailable \((unavailable|auth)\); retrying the read in 5 seconds\. No writes retried\.$/);
+    expect(log).not.toMatch(/top-secret|api\.telegram\.org|notebooks|Via Fittizia|Unauthorized/);
+  }
 });
 it('uses only read operations for Telegram diagnostics', async () => {
   const calls: string[] = [];

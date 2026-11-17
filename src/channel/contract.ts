@@ -3,7 +3,7 @@ import type { AppConfig } from '../config/schema.js';
 /** Transport cap for one inbound file. Telegram's Bot API stops at 20 MB; other channels can document their own cap. */
 export const MAX_FILE_BYTES = 20 * 1024 * 1024;
 
-export type Attachment = { kind: 'voice' | 'image' | 'pdf'; fileId: string; mimeType: string; size?: number };
+export type Attachment = { kind: 'voice' | 'image' | 'pdf' | 'spreadsheet'; fileId: string; mimeType: string; size?: number };
 
 /** A message the conversation core can route. Ids are the channel's own ids. */
 export type MessageEvent = {
@@ -13,7 +13,7 @@ export type MessageEvent = {
   forwardedFrom?: string;
   album?: string;
   /**
-   * The operator sent a file this channel cannot map to a voice note, photo, or PDF.
+   * The operator sent a file this channel cannot map to a voice note, photo, PDF, or spreadsheet.
    * Still a message: do not return null, or the bot stays silent.
    */
   unusableAttachment?: boolean;

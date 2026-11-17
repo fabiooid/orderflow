@@ -3,8 +3,8 @@ import type { ConfirmedChoice } from '../matching/resolver.js';
 import type { OrderDraft } from '../domain/types.js';
 import type { DraftResult } from './drafts.js';
 
-/** The request a turn works on. `lines` are this request's product lines, so a later customer lock can keep them. `clientId` is a customer already confirmed on the open draft. */
-export type TurnRequest = { kind: 'order' | 'customer'; orderId: string; revision: number; confirmedChoices?: ConfirmedChoice[]; clientId?: string; lines?: OrderDraft['lines'] };
+/** The request a turn works on. `lines` are this request's product lines, so a later customer lock can keep them. `clientId` / `clientQuery` keep a customer already named on the open draft. */
+export type TurnRequest = { kind: 'order' | 'customer'; orderId: string; revision: number; confirmedChoices?: ConfirmedChoice[]; clientId?: string; clientQuery?: string; newClient?: OrderDraft['newClient']; lines?: OrderDraft['lines'] };
 
 /** What the application tells the tools about a turn. Absent in Studio, where no request is open. */
 export type Turn = {

@@ -1,6 +1,7 @@
 import sharp from 'sharp';
 import { renderPdfPages } from './pdf-pages.js';
 import type { DocumentFile, DocumentProvider, DocumentPage, Read, CellRow } from './contract.js';
+import { isSpreadsheetFile, readSpreadsheet } from './spreadsheet.js';
 
 const MAX_BYTES = 20 * 1024 * 1024;
 const MAX_PAGES = 10;
@@ -40,13 +41,32 @@ export function createVisionDocumentProvider(ports: { read: Read; templates?: Te
   return {
     id: 'direct-vision-v1',
     async read(files) {
-      const normalized = await documentPages(files);
       const pages: DocumentPage[] = [];
-      for (const page of normalized) {
-        const identified = ports.templates ? await ports.templates(page.image) : { image: page.image };
-        const text = await ports.read([{ data: identified.image, mimeType: 'image/png' }], !!identified.template);
-        pages.push({ source: page.source, text, ...(identified.template ? { template: identified.template } : {}) });
+      const images: DocumentFile[] = [];
+      const imageAt: number[] = [];
+      for (const [fileIndex, file] of files.entries()) {
+        if (!file.data.byteLength || file.data.byteLength > MAX_BYTES) throw new Error('Invalid document size');
+        if (isSpreadsheetFile(file)) {
+          pages.push({ source: { fileIndex, pageNumber: 1 }, text: await readSpreadsheet(file) });
+        } else {
+          images.push(file);
+          imageAt.push(fileIndex);
+        }
       }
+      if (images.length) {
+        const normalized = await documentPages(images);
+        if (pages.length + normalized.length > MAX_PAGES) throw new Error('Too many document pages');
+        for (const page of normalized) {
+          const identified = ports.templates ? await ports.templates(page.image) : { image: page.image };
+          const text = await ports.read([{ data: identified.image, mimeType: 'image/png' }], !!identified.template);
+          pages.push({
+            source: { fileIndex: imageAt[page.source.fileIndex] ?? page.source.fileIndex, pageNumber: page.source.pageNumber },
+            text,
+            ...(identified.template ? { template: identified.template } : {}),
+          });
+        }
+      }
+      pages.sort((a, b) => a.source.fileIndex - b.source.fileIndex || a.source.pageNumber - b.source.pageNumber);
       return { provider: this.id, status: 'needs_review', pages };
     },
   };
