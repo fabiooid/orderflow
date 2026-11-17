@@ -15,7 +15,7 @@ The project is in foundation development and is licensed under the [MIT License]
 A channel turns a provider's updates into the conversation core and sends replies back. It does not prepare orders.
 
 1. Add a folder under `src/channels/<name>/`. Telegram lives in `src/channels/telegram/`.
-2. Implement `ChannelAdapter` from `src/channel/contract.ts`: parse inbound messages and buttons, and send text back. Leave drafts, totals and confirmation in `src/channel/`.
+2. Implement `ChannelAdapter` from `src/channel/contract.ts`: parse inbound messages and buttons, and send text back. Leave drafts, totals and confirmation in `src/channel/`. Map inbound files to the attachment kinds the core can use (voice, image, PDF). If the operator sends a file you cannot map, still return a `MessageEvent` with `unusableAttachment: true`, even when there is no caption. Returning `null` for that file makes the bot stay silent; the core replies that the file could not be used and leaves any open draft unchanged.
 3. Read who may speak, and which conversation to join, from `config.channel`. Do not hardcode a chat id.
 4. Call `installInbound` from the process entrypoint (`scripts/` or `src/mastra/`). Core folders must not import the adapter. `npm run boundaries` checks this.
 5. Add the adapter to `tests/channel-contract.test.ts`, and document the config keys in `.env.example` and the README.

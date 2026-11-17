@@ -61,6 +61,7 @@ export const it = {
   markChecked: '👀 Segna come controllato',
   cancelButton: '❌ Annulla',
   fileTooLarge: 'File troppo grande: il limite è 20 MB.',
+  attachmentUnused: 'Non posso usare questo file. Invia una foto, una nota vocale o un PDF.',
   forwarded: '[Messaggio inoltrato da {from}]',
   voiceNotConfigured: 'Le note vocali non sono configurate in questa installazione.',
   transcribed: '[Nota vocale trascritta]\n{text}',

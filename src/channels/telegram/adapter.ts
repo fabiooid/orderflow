@@ -59,11 +59,14 @@ export function normalizeMessage(input: unknown, config: AppConfig): MessageEven
   if (!['group', 'supergroup'].includes(message.chat.type) || String(message.chat.id) !== config.channel.groupId) return null;
   const files = attachments(message);
   const text = message.text ?? message.caption ?? '';
-  if (!text && !files.length) return null;
+  // A document that is not a PDF or image still counts: returning null here is the silent skip.
+  const unusableAttachment = Boolean(message.document) && !files.some(file => file.fileId === message.document!.file_id);
+  if (!text && !files.length && !unusableAttachment) return null;
   return {
     updateId: update_id, groupId: String(message.chat.id), senderId: String(message.from.id),
     messageId: message.message_id, replyTo: message.reply_to_message?.message_id, text,
     ...(files.length ? { attachments: files } : {}),
+    ...(unusableAttachment ? { unusableAttachment: true } : {}),
     ...(message.forward_origin ? { forwardedFrom: forwardName(message.forward_origin) } : {}),
     ...(message.media_group_id ? { album: message.media_group_id } : {}),
   };

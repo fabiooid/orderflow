@@ -41,7 +41,7 @@ OrderFlow then:
 4. **Posts a summary** with a **Conferma e salva** button. Every edit creates a new revision, and buttons from older revisions stop working.
 5. **Saves the order** only after explicit confirmation, then sends the order PDF back to the group.
 
-Operators can also send **voice notes**, **photos and screenshots**, **PDFs** and **forwarded customer messages**. Voice notes are transcribed (the transcript is shown with the reply); images and PDFs are read into text for the agent, kept apart from the operator's own words. Media sent without a caption gets a *Preparo un ordine da questo?* question with yes/no buttons, so nothing is read or charged until someone says yes. Several photos sent together as an album are handled as one message. Media files are not stored; only the text read from them is.
+Operators can also send **voice notes**, **photos and screenshots**, **PDFs** and **forwarded customer messages**. Voice notes are transcribed (the transcript is shown with the reply); images and PDFs are read into text for the agent, kept apart from the operator's own words. Media sent without a caption gets a *Preparo un ordine da questo?* question with yes/no buttons, so nothing is read or charged until someone says yes. Several photos sent together as an album are handled as one message. A file the bot cannot use gets a short reply naming the kinds it can read; the open draft is left unchanged. Media files are not stored; only the text read from them is.
 
 It can also create new customers (with duplicate checks) and answer catalogue questions, such as `@your_bot quali varianti di Sapone di Esempio abbiamo?`
 
