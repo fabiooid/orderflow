@@ -1,4 +1,5 @@
 import { DemoConnector } from '../connector/demo.js';
+import { draftSchema } from '../domain/types.js';
 import { expect, type ConversationCase, type ConversationOutcome } from './harness.js';
 
 /** A second fictional customer, so a case can move an order away from the one named in an attachment. */
@@ -45,6 +46,32 @@ const orderFor = (id: string): Check => o => [
 const lastAsks: Check = o => expect(/\?|\b(?:dimmi|indica|indicami|specifica|quale|tell me|which|specify)\b/i.test(last(o)), 'the last reply asks nothing');
 const nothingOpen: Check = o => expect(!o.open, `request ${o.open?.orderId} is still open (${o.open?.status})`);
 const all = (...checks: Check[]): Check => o => checks.flatMap(check => check(o));
+/** A ready Example Studio order, so a later short name can be a customer correction rather than a first search. */
+const readyExampleDraft = () => draftSchema.parse({
+  clientQuery: 'Example Studio', lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 8,
+});
+/** Same lines, new customer query, no locked id: the application searches again and must not save. */
+const northwindCorrectionDraft = () => draftSchema.parse({
+  clientQuery: 'Northwind', lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 8,
+});
+const askedToSaveAsIs = (o: ConversationOutcome) => /vuoi salvare|salv[aeio].{0,60}cos[iì]|save (?:the |this )?(?:order |draft )?as-?is|want me to save/i.test(o.replies.join('\n'));
+const notSavedAsIs: Check = o => [
+  ...expect(!askedToSaveAsIs(o), `asked to save the current draft as-is: ${(last(o) || '').split('\n')[0]}`),
+  ...expect(o.open?.status !== 'saved' && o.open?.status !== 'saving', `saved without confirm-and-save (${o.open?.status ?? 'none'})`),
+];
+const keptReadyLines: Check = o => expect(!!o.open?.draft.lines.some(l => l.productId === '101' || /pebble/i.test(l.query)), 'the order lines were lost');
+/** Ready draft, then a short name or change request: lock or ask, never keep the previous account or ask to save as-is. */
+const switchedCustomer = (id: string, name: RegExp): Check => o => {
+  const locked = o.open?.draft.clientId === id || o.open?.prepared?.client.id === id;
+  const named = name.test(o.open?.draft.clientQuery ?? '');
+  const picking = !!o.open?.issues?.some(i => i.field === 'client' && i.candidates?.some(c => name.test(c.label)));
+  return [
+    ...expect(locked || named || picking, `client is ${o.open?.prepared?.client.id ?? o.open?.draft.clientId ?? `"${o.open?.draft.clientQuery ?? 'none'}"`}, expected ${id}`),
+    ...expect(!o.open?.draft.newClient, `proposes creating new customer "${o.open?.draft.newClient?.name}"`),
+    ...expect(o.open?.prepared?.client.id !== '201', `kept the previous account ${o.open?.prepared?.client.id}`),
+  ];
+};
+const readyCustomerCorrection = all(neverGaveUp, keptReadyLines, switchedCustomer(northwind.id, /northwind/i), notSavedAsIs);
 // Notes and delivery are the agent's judgement, shown in the draft for the operator to keep or change, so they are not checked.
 const attachmentOrderFor = (id: string) => all(neverGaveUp, keptAttachmentLines, orderFor(id));
 
@@ -172,5 +199,24 @@ export const conversationCases: ConversationCase[] = [
     id: 'english-request',
     turns: [{ text: 'Prepare an order for Northwind Bistro: 3 Linen candle 200 g, delivery 8 euros' }],
     check: all(neverGaveUp, orderFor(northwind.id), o => expect(last(o).includes('📦 Order preview'), 'no English order preview')),
+  },
+  {
+    id: 'short-name-on-ready-draft-is-new-search',
+    // Ready draft for one fictional account; a short name must search again, not ask to save as-is.
+    turns: [
+      { text: 'ordine per Example Studio: 2 Pebble hand wash 250 ml, spedizione 8 euro' },
+      { text: 'Northwind' },
+    ],
+    scripted: [readyExampleDraft(), northwindCorrectionDraft()],
+    check: readyCustomerCorrection,
+  },
+  {
+    id: 'change-customer-on-ready-draft',
+    turns: [
+      { text: 'ordine per Example Studio: 2 Pebble hand wash 250 ml, spedizione 8 euro' },
+      { text: 'change the customer to Northwind Bistro' },
+    ],
+    scripted: [readyExampleDraft(), northwindCorrectionDraft()],
+    check: readyCustomerCorrection,
   },
 ];
