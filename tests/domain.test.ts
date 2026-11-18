@@ -222,7 +222,7 @@ describe('order preparation', () => {
     const { clientId: _id, ...unnamed } = draft();
     const result = await complete({ ...unnamed, clientQuery: '' }, connector);
     if (result.ready) throw new Error('Expected a client question');
-    expect(result.issues.find(i => i.field === 'client')?.candidates).toEqual([]);
+    expect(result.issues.find(i => i.field === 'client')?.candidates ?? []).toEqual([]);
   });
   it('offers the hotel from an everyday name plus hint, and asks when only the shared place name is given', async () => {
     const connector = new DemoConnector();
@@ -418,7 +418,7 @@ describe('order preparation', () => {
     expect(result.ready).toBe(false);
     if (!result.ready) expect(result.issues.find(i => i.field === 'lines.0')?.candidates?.map(c => c.id)).toEqual(expect.arrayContaining(['101', '102']));
   });
-  it('asks to confirm the delivery amount rather than silently using the default', async () => {
+  it('leaves the delivery amount unset rather than silently using the default', async () => {
     const result = await prepareOrder({ ...draft(), shippingPrice: undefined }, config(), new DemoConnector(), '2026-01-15');
     expect(!result.ready && result.issues.some(i => i.field === 'shippingPrice')).toBe(true);
   });

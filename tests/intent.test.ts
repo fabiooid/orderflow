@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { statedShipping } from '../src/assistant/intent.js';
+import { clientSearchNamedThisTurn, statedShipping } from '../src/assistant/intent.js';
 import { testerRestatementOf } from '../src/domain/matching.js';
 
 it('reads no-charge and amount statements from Italian or English wording, and the last statement wins', () => {
@@ -16,6 +16,14 @@ it('reads no-charge and amount statements from Italian or English wording, and t
   expect(statedShipping('niente consegna', 'spedizione 8')).toBe(8);
   expect(statedShipping('spedizione 8 euro', 'niente consegna')).toBe(0);
   expect(statedShipping('')).toBeUndefined();
+});
+
+it('grounds a client search in this message and ignores a previous-chat name', () => {
+  expect(clientSearchNamedThisTurn('Northwind', 'Northwind')).toBe(true);
+  expect(clientSearchNamedThisTurn('Northwind Bistro', 'Northwind')).toBe(true);
+  expect(clientSearchNamedThisTurn('Northwind Bistro', 'cliente Northwind')).toBe(true);
+  expect(clientSearchNamedThisTurn('Example Studio', 'Yes, prepare an order from this.')).toBe(false);
+  expect(clientSearchNamedThisTurn('Example Studio', 'Prepare an order from this list: 3 Pebble hand wash 250 ml')).toBe(false);
 });
 
 it('treats a tester alias as the same source line and keeps sale+tester and distinct quantities apart', () => {

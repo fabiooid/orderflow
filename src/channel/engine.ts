@@ -24,7 +24,7 @@ import { documentTemplates } from './order-forms.js';
 import { createDocumentWorkflow, workflowTemplatePages } from '../documents/workflow.js';
 import { createVisionDocumentProvider } from '../documents/reader.js';
 import { omitMedia } from '../assistant/omit-media.js';
-import { labelledCustomerQuery, operatorAskedToCancel, operatorAskedToCreateOrder, statedLineQuantity, statedShipping } from '../assistant/intent.js';
+import { clientSearchNamedThisTurn, labelledCustomerQuery, operatorAskedToCancel, operatorAskedToCreateOrder, statedLineQuantity, statedShipping } from '../assistant/intent.js';
 
 function pendingFromIssues(issues: Issue[] | undefined, revision: number): PendingQuestion | undefined {
   const client = issues?.find(issue => issue.field === 'client' && issue.candidates?.length);
@@ -68,7 +68,7 @@ export function remembered(plan: Pick<ReplyPlan, 'texts' | 'agentText'>) {
 export const replySchema = (fallback: AppConfig['locale'], currency: AppConfig['currency']) => z.object({
   // Chosen before the reply is written, so the reply follows it.
   locale: z.enum(['it', 'en']).describe(`The language operatorWords are written in, unless the operator asked for another. Only words with no language of their own ("ok", a product name) keep the conversation's language; with no cue at all, ${fallback === 'it' ? 'Italian' : 'English'}.`),
-  reply: z.string().describe(`Your own words in that language, shown above any draft: short, no greeting or recap, or empty when the draft speaks for itself. Ask about the tool's actual issues. Do not ask the operator to confirm an instruction they just gave. Do not restate unchanged fields. If customer.status is missing, ask who the customer is; do not offer a customer from earlier messages, a previous request, or letterhead. Never say the draft is ready while prepare-order status is needs. Answer product questions by listing matches, one per line, "name — code — ${currency} net". If no product has every requested detail, say that combination is not in the catalogue, then list related products; never present a related product as the requested item. Never write a draft or summary yourself.`),
+  reply: z.string().describe(`Your own words in that language, shown above any draft: short, no greeting or recap, or empty when the draft speaks for itself. Ask about issues that still need a pick or exact name. Do not ask the operator to confirm an instruction they just gave. Do not restate unchanged fields. If customer.status is missing, the draft already shows a blank client: do not ask who the customer is, and do not offer a customer from earlier messages, a previous request, or letterhead. If shipping.status is unknown and this request did not name a charge, do not ask them to confirm shipping or propose 0, a list price, last paid, or an earlier-chat amount. Never say the draft is ready while prepare-order status is needs. Answer product questions by listing matches, one per line, "name — code — ${currency} net". If no product has every requested detail, say that combination is not in the catalogue, then list related products; never present a related product as the requested item. Never write a draft or summary yourself.`),
 });
 
 /**
@@ -170,6 +170,9 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
     const productSearch = [...(turnState?.searchEvidence ?? [])].reverse().find(item => item.kind === 'product');
     const lastProduct = productSearch ?? lastProductSearchBySender.get(input.senderId);
     const labelled = labelledCustomerQuery(input.operatorText);
+    const groundedSearch = clientSearch && clientSearchNamedThisTurn(clientSearch.query, operatorWords, attachmentText)
+      ? clientSearch : undefined;
+    const clientQueryFromThisTurn = labelled ?? (groundedSearch ? groundedSearch.query : '');
     const askedOrder = operatorAskedToCreateOrder(input.operatorText);
     const quantity = statedLineQuantity(input.operatorText);
     const customerDraft = outcome.result?.kind === 'customer' ? outcome.result.draft : openKind === 'customer' ? request?.draft : undefined;
@@ -180,11 +183,11 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
         ...(customerDraft?.newClient ? { newClient: customerDraft.newClient } : {}),
       }), requestContext);
     } else if (!outcome.refused && !outcome.result && openKind === 'order') {
-      await calls.order(draftSchema.parse({ clientQuery: clientSearch?.query ?? labelled ?? '' }), requestContext);
+      await calls.order(draftSchema.parse({ clientQuery: clientQueryFromThisTurn }), requestContext);
     } else if (!outcome.refused && !outcome.result && attachmentLines.length && openKind !== 'customer') {
       await calls.order(draftSchema.parse({}), requestContext);
-    } else if (!outcome.refused && !outcome.result && (clientSearch || labelled)) {
-      await calls.order(draftSchema.parse({ clientQuery: clientSearch?.query ?? labelled ?? '' }), requestContext);
+    } else if (!outcome.refused && !outcome.result && clientQueryFromThisTurn) {
+      await calls.order(draftSchema.parse({ clientQuery: clientQueryFromThisTurn }), requestContext);
     } else if (!outcome.refused && !outcome.result && !request && askedOrder && lastProduct?.ids.length === 1 && quantity) {
       const products = await connector.listProducts().catch(() => []);
       const product = products.find(item => item.id === lastProduct.ids[0]);

@@ -35,7 +35,7 @@ async function withLastPaid(issues: Issue[], draft: OrderDraft, connector: Order
       const hit = order.lines.find(item => item.netPrice > 0 && (/deliver|spediz|shipping/i.test(`${item.name} ${item.code}`) || item.code === 'DELIVERY'));
       if (hit) {
         return issues.map(issue => issue.field === 'shippingPrice'
-          ? { ...issue, lastPaidPrice: hit.netPrice, message: `${issue.message}. Last paid ${hit.netPrice} on #${order.number}` }
+          ? { ...issue, lastPaidPrice: hit.netPrice }
           : issue);
       }
     }
@@ -117,7 +117,7 @@ export function forAgent(result: DraftResult, revision?: number) {
         ...(issues?.find(i => i.field === 'client')?.candidates?.length ? { candidates: issues.find(i => i.field === 'client')!.candidates!.map(c => c.label) } : {}),
         action: customerStatus === 'accepted' ? undefined : 'Ask the operator to pick or type the legal name or VAT.',
       }
-      : { status: 'missing' as const, action: 'Ask who the customer is. Do not offer a name from earlier messages, a previous request, or letterhead.' };
+      : { status: 'missing' as const, action: 'The draft already shows a blank customer. Do not ask who it is. Do not offer, search for, or confirm a name from earlier messages, a previous request, or letterhead.' };
   const lines = result.kind === 'order'
     ? result.draft.lines.map((line, index) => {
       const field = `lines.${index}`;
@@ -138,7 +138,7 @@ export function forAgent(result: DraftResult, revision?: number) {
     : undefined;
   const shipping = result.kind === 'order'
     ? result.draft.shippingPrice === undefined
-      ? { status: 'unknown' as const, action: 'Ask the delivery charge. Do not say it is 0 while status is unknown.' }
+      ? { status: 'unknown' as const, action: 'The draft already shows blank delivery. Do not ask the operator to confirm a charge. Do not propose 0, a list price, last paid, or an amount from earlier messages unless they stated a charge this request.' }
       : { status: 'set' as const, amount: result.draft.shippingPrice }
     : undefined;
   return {
@@ -149,7 +149,7 @@ export function forAgent(result: DraftResult, revision?: number) {
     ...(shipping ? { shipping } : {}),
     ...(result.status === 'needs' ? { issues: issuesForAgent(result.issues) } : {}),
     note: result.status === 'needs'
-      ? 'Shown to the operator with these points. Use customer.status, lines[].status and shipping.status: accepted is already selected; unconfirmed and ambiguous still need a pick or exact name; unsupported is not in the catalogue as requested. shipping.status unknown is not 0; amount 0 means no charge. Ask about the returned issues. Never say the draft is ready while status is needs.'
+      ? 'Shown to the operator with these points. Use customer.status, lines[].status and shipping.status: accepted is already selected; unconfirmed and ambiguous still need a pick or exact name; unsupported is not in the catalogue as requested. shipping.status unknown is not 0; amount 0 means no charge. Missing customer and unknown shipping are already visible on the draft: do not ask the operator to confirm those blanks or propose a guessed customer, 0, a list price, last paid, or an earlier-chat amount. Ask about issues that still need a pick or exact name. Never say the draft is ready while status is needs.'
       : result.status === 'existing' ? 'This customer already exists; nothing will be created.'
       : 'Complete, and shown to the operator for review. Do not ask them to confirm a change they already instructed.',
   };

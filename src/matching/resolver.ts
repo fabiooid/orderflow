@@ -116,7 +116,13 @@ export function createIdentityResolver(app: AppConfig, connector: OrderConnector
     const allWord = clientQuery ? matchClients(clientQuery, eligibleRecords) : [];
     const related = clientQuery ? searchClients(clientQuery, eligibleRecords) : [];
     const searchedClients = context.searchEvidence?.filter(s => s.kind === 'client') ?? [];
-    const searchHits = listed.filter(c => searchedClients.some(s => s.ids.includes(c.id)));
+    const namedClientSearch = (s: { query: string; ids: string[] }) =>
+      !!clientQuery && (
+        normalize(s.query) === normalize(clientQuery)
+        || has(spoken(context), s.query)
+        || has(s.query, clientQuery)
+      );
+    const searchHits = listed.filter(c => searchedClients.some(s => s.ids.includes(c.id) && namedClientSearch(s)));
     const lexical = related.length ? related : allWord;
     const seenClients = new Set(lexical.map(c => c.id));
     const combined = [...lexical, ...searchHits.filter(c => !seenClients.has(c.id))];
@@ -152,13 +158,14 @@ export function createIdentityResolver(app: AppConfig, connector: OrderConnector
       : clientExact ? undefined
       : siblingAsk || new Set(ca.map(a => a.clientId)).size > 1 || clientSet.length > 0 ? 'ambiguous'
       : clientQuery ? 'no-match' : 'no-match';
-    pending.push({ field: 'client', kind: 'client', query: clientQuery, candidates: clientSet,
+    const unnamedCustomer = !clientQuery && choice?.field !== 'client' && !confirmClient;
+    pending.push({ field: 'client', kind: 'client', query: clientQuery, candidates: unnamedCustomer ? [] : clientSet,
       operator: choice?.field === 'client' || !!confirmedClient || !!confirmClient,
       exact: clientExact,
       reason: clientExact ? (choice?.field === 'client' || confirmedClient || confirmClient ? 'operator-pick' : 'exact-customer')
         : clientForced === 'ambiguous' ? 'unconfirmed-candidate' : 'missing-customer',
       ...(clientForced ? { forced: clientForced } : {}),
-      keepOnNoMatch: clientSet });
+      keepOnNoMatch: unnamedCustomer ? [] : clientSet });
 
     const catalogue = products.filter(p => p.id !== app.invoicing.shippingProductId);
     for (const [index, line] of draft.lines.entries()) {
@@ -240,7 +247,7 @@ export function createIdentityResolver(app: AppConfig, connector: OrderConnector
 
     const requests: SelectionRequest[] = [], requested: Pending[] = [];
     for (const item of pending) {
-      const largeClient = item.kind === 'client' && config.largeClientSearch && listed.length > 253 && !item.exact;
+      const largeClient = item.kind === 'client' && !!item.query && config.largeClientSearch && listed.length > 253 && !item.exact;
       if (largeClient) {
         item.candidates = clientCandidates(eligibleRecords.length ? eligibleRecords : listed);
         item.forced = undefined;
@@ -336,7 +343,7 @@ export function createIdentityResolver(app: AppConfig, connector: OrderConnector
           if (original.lines[Number(item.field.split('.')[1])]!.productId !== selectedId && line.documentPrice) line.documentPrice.decision = 'pending';
           line.productId = selectedId;
         }
-      } else if (!(item.field === 'client' && draft.newClient && status === 'no-match')) {
+      } else if (!(item.field === 'client' && ((draft.newClient && status === 'no-match') || (!item.query && !item.operator && !draft.newClient)))) {
         const offered = item.candidates;
         const missingCombination = item.kind === 'product' && status !== 'matched' && !item.exact && offered.length > 0
           && item.reason !== 'variant-conflict' && reason !== 'matcher-no-match-kept-candidates' && extraMessage(item, catalogue);
