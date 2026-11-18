@@ -33,7 +33,7 @@ A channel turns a provider's updates into the conversation core and sends replie
 Photos, voice notes, PDFs and spreadsheets are generic inputs. They become text or facts for the existing draft and matching flow. They are not shop-specific forms.
 
 1. Admit the file at the channel boundary (`src/channels/<name>/`) by MIME type and filename so it is not dropped before reading. Files that still cannot be mapped must return `unusableAttachment: true`, not `null`. Core folders must not import the adapter.
-2. Decode bytes in `src/documents` by content, not by a shop layout, sheet name or column heading. Return page text or labelled facts (product code, quantity, tester marks, a customer name found in a header). Do not resolve catalogue IDs or write orders here.
+2. Decode bytes in `src/documents` by content, not by a shop layout, sheet name or column heading. Return page text or labelled facts (product code, quantity, tester marks, a customer name found in a header). Supplier letterhead is not a customer. Do not resolve catalogue IDs or write orders here.
 3. Reuse `createMediaReader`: wrap the reading in the same attachment block as photos and PDFs, keep it apart from `operatorWords`, and let `prepare-order` match products and customers as today. Catalogue prices apply until the operator confirms a price from the file.
 4. Cover it with fictional fixtures only. Add a short note here and in the README when a new input type is accepted. Use `npm run check`, `npm test` and `npm run boundaries`.
 

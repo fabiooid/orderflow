@@ -186,6 +186,14 @@ Both replay the messages through the real Telegram controller and engine (`src/e
 
 Offline mode replaces the model with each case's scripted drafts, so it checks application behavior only. The second command uses the actual agent against the fictional `DemoConnector` and makes paid model calls. With `MATCHER_MODE=on` (or the deprecated `JEV_MODE=on`) the order API resolves identities as in Telegram, so JEV calls are made too. Set `EVAL_AGENT_MODEL` to compare models. It ignores business configuration and never writes FIC records or messages Telegram. Each run uses a temporary memory database, preventing prior evaluations from influencing it.
 
+A filled spreadsheet with supplier letterhead is covered by `spreadsheet-letterhead-is-not-customer` in the conversation suite (scripted offline) and by:
+
+```sh
+npm run eval:spreadsheet
+```
+
+That command generates a fictional workbook, reads it through the spreadsheet decoder, then runs the live agent against `DemoConnector`. Nothing is saved or sent. It needs `OPENAI_API_KEY` (and `TYPESAFE_API_KEY` when `MATCHER_MODE=on`). If those credentials are missing, the script reports that blocker instead of a pass.
+
 These cases do not certify media accuracy, conversational understanding, actual save permissions or every VAT scenario. The offline Vitest suite separately tests confirmation/revisions, duplicate prevention, alias persistence, PDF page rendering and recovery. `eval:orderforms` measures real document reading. A supervised live order remains the final integration check.
 
 Dated baselines are in [planning/run-log.md](planning/run-log.md). Treat them as a small, nondeterministic sample, not a reliability percentage. Failed runs print the fictional draft for diagnosis. Use `--case custom-price` to rerun one scenario.

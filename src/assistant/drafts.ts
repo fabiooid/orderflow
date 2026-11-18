@@ -88,11 +88,21 @@ export const issuesForAgent = (issues: Issue[]) => issues.map(i => ({ field: i.f
 
 /** The part of a result the agent reads back: what to tell or ask the operator. Records stay with the application. */
 export function forAgent(result: DraftResult) {
+  const customer = result.kind === 'order' && result.client
+    ? { matched: true as const, name: result.client.name, ...(result.client.city ? { city: result.client.city } : {}), ...(result.client.vatNumber ? { vatNumber: result.client.vatNumber } : {}) }
+    : result.draft.clientQuery.trim()
+      ? { matched: false as const, query: result.draft.clientQuery }
+      : undefined;
+  const lines = result.kind === 'order'
+    ? result.draft.lines.map(line => ({ query: line.query, quantity: line.quantity, matched: Boolean(line.productId) }))
+    : undefined;
   return {
     status: result.status,
+    ...(customer ? { customer } : {}),
+    ...(lines ? { lines } : {}),
     ...(result.status === 'needs' ? { issues: issuesForAgent(result.issues) } : {}),
     note: result.status === 'needs'
-      ? 'Shown to the operator with these points. Settle what you can from the conversation or a lookup and call again; ask about the rest. For a product with no match, look the catalogue up. If no product has every requested detail, say that combination is not in the catalogue and list the real products that match each detail. Do not send a different product as if it were the requested item.'
+      ? 'Shown to the operator with these points. customer.matched and lines[].matched are the identities already selected; do not say a customer or product was missing when matched is true, and do not say it was found when matched is false. Settle what you can from the conversation or a lookup and call again; ask about the rest. For a product with no match, look the catalogue up. If no product has every requested detail, say that combination is not in the catalogue and list the real products that match each detail. Do not send a different product as if it were the requested item. Catalogue prices apply unless the operator stated a unit price; do not ask file versus catalogue when no documentPrice is pending.'
       : result.status === 'existing' ? 'This customer already exists; nothing will be created.'
       : 'Complete, and shown to the operator for review.',
   };

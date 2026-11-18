@@ -61,10 +61,11 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
       issues.push({ field, message: 'Delivery belongs in shippingPrice, not merchandise lines' });
       continue;
     }
-    const accepted = pick && (!isTester(pick) || asksForTester(line.query) || normalize(pick.code) === normalize(line.query) || normalize(pick.name) === normalize(line.query)) ? pick : undefined;
+    const accepted = pick && (!isTester(pick) || asksForTester(line.query) || nameInText(line.query, pick.code) || normalize(pick.code) === normalize(line.query) || normalize(pick.name) === normalize(line.query)) ? pick : undefined;
     const matches = accepted || line.productId !== undefined ? [] : matchProducts(line.query, catalogue);
     const chosen = accepted ?? (matches.length === 1 ? matches[0] : undefined);
     if (chosen) {
+      line.productId = chosen.id;
       const documentPrice = line.documentPrice;
       let netPrice = line.netPrice;
       if (documentPrice) {

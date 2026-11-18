@@ -76,6 +76,15 @@ describe('product matching', () => {
     expect(matchProducts('Sapone Mani Lunara', withTester).map(p => p.id)).toEqual(['2']);
     expect(matchProducts('tester sapone lunara', withTester).map(p => p.id)).toEqual(['3']);
   });
+  it('matches a unique catalogue code even when a spreadsheet line adds quantity labels', () => {
+    const catalogue = [
+      { id: 'c1', code: 'CREAM100ML', name: 'Grove hand cream 100 ml', description: '', netPrice: 10 },
+      { id: 'c2', code: 'SPRAY250ML', name: 'Harbor room spray 250 ml', description: '', netPrice: 15 },
+    ];
+    expect(matchProducts('CREAM100ML | Grove hand cream 100 ml | Qty: 2', catalogue).map(p => p.id)).toEqual(['c1']);
+    expect(searchCatalogue('CREAM100ML | Qty: 2', catalogue).map(p => p.id)).toEqual(['c1']);
+    expect(matchProducts('Qty: 2', catalogue)).toEqual([]);
+  });
 });
 
 describe('client search', () => {

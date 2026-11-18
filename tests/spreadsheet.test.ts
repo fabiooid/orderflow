@@ -2,6 +2,7 @@ import ExcelJS from 'exceljs';
 import { describe, expect, it, vi } from 'vitest';
 import { createVisionDocumentProvider } from '../src/documents/reader.js';
 import { readSpreadsheet, spreadsheetHint } from '../src/documents/spreadsheet.js';
+import { fictionalOrderSpreadsheetText } from '../src/evals/spreadsheet-fixture.js';
 import { createMediaReader } from '../src/channel/media.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { draftSchema } from '../src/domain/types.js';
@@ -74,6 +75,60 @@ describe('spreadsheet hints and extraction', () => {
     expect(text).toContain('SKU-100');
     expect(text).toMatch(/tester/i);
     expect(text).not.toContain('SKU-400');
+  });
+
+  it('keeps tester-only rows and labelled tester marks, including a tester with no ordinary quantity', async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Order');
+    sheet.addRow(['Code', 'Product', 'Qty', 'Tester']);
+    sheet.addRow(['SKU-100', 'Hand cream 100 ml', '', 'x']);
+    sheet.addRow(['SKU-250', 'Room spray 250 ml', '', '✓']);
+    sheet.addRow(['SKU-400', 'Shelf bottle 500 ml', '', true]);
+    sheet.addRow(['SKU-500', 'Cedar mist 50 ml', '', '']);
+    const text = await readSpreadsheet({ data: Buffer.from(await workbook.xlsx.writeBuffer()), mimeType: xlsxMime });
+    expect(text).toContain('SKU-100');
+    expect(text).toContain('SKU-250');
+    expect(text).toContain('SKU-400');
+    expect(text).toMatch(/tester:\s*1/i);
+    expect(text).not.toContain('SKU-500');
+    expect(text).not.toContain('Cedar mist');
+  });
+
+  it('does not treat supplier letterhead as the customer or as the product table header', async () => {
+    const workbook = new ExcelJS.Workbook();
+    const layout = workbook.addWorksheet('Price list');
+    layout.addRow(['Code', 'Product', 'List price', 'Qty', 'Tester']);
+    layout.addRow(['SKU-100', 'Hand cream 100 ml', 12.5, '', '']);
+    layout.addRow(['SKU-250', 'Room spray 250 ml', 18.75, '', '']);
+    const order = workbook.addWorksheet('Order');
+    order.addRow(['Northwind Supplies Ltd', 'Harbour Lane 1', 'Example City', 'IT', 'P.IVA IT000111222', 'orders@northwind-supplies.invalid']);
+    order.addRow(['Tel', '000-000-000', 'www.northwind-supplies.invalid', '', '', '']);
+    order.addRow(['Customer', '']);
+    order.addRow([]);
+    order.addRow(['Code', 'Product', 'List price', 'Qty', 'Tester']);
+    order.addRow(['SKU-100', 'Hand cream 100 ml', 12.5, 2, '']);
+    order.addRow(['SKU-250', 'Room spray 250 ml', 18.75, '', 'x']);
+    const text = await readSpreadsheet({ data: Buffer.from(await workbook.xlsx.writeBuffer()), mimeType: xlsxMime });
+    expect(text).toMatch(/Letterhead \(supplier, not the customer\):.*Northwind Supplies Ltd/);
+    expect(text).not.toMatch(/Header:.*Northwind Supplies/);
+    expect(text).not.toMatch(/^Header:/m);
+    expect(text).toContain('SKU-100');
+    expect(text).toMatch(/Qty:\s*2/);
+    expect(text).not.toMatch(/IT:\s*2/);
+    expect(text).toContain('SKU-250');
+    expect(text).toMatch(/tester:\s*1/i);
+    expect(text).not.toMatch(/^Code \|/m);
+  });
+
+  it('reads the generated eval workbook without promoting letterhead or dropping testers', async () => {
+    const text = await fictionalOrderSpreadsheetText();
+    expect(text).toMatch(/Letterhead \(supplier, not the customer\):.*Northwind Supplies Ltd/);
+    expect(text).not.toMatch(/Header:/);
+    expect(text).toContain('CREAM100ML');
+    expect(text).toMatch(/Qty:\s*2/);
+    expect(text).toContain('SAMPLE-T');
+    expect(text).toMatch(/tester:\s*1/i);
+    expect(text).not.toMatch(/IT:\s*2/);
   });
 });
 

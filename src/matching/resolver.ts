@@ -3,7 +3,7 @@ import { withCompleteClientSearch } from './client-search.js';
 import { z } from 'zod';
 import type { AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
-import { asksForTester, clientPickLabel, isTester, matchClients, normalize, sameClientIds, searchClients } from '../domain/matching.js';
+import { asksForTester, clientPickLabel, isTester, matchClients, nameInText, normalize, productCodesIn, sameClientIds, searchClients } from '../domain/matching.js';
 import { draftSchema, type Client, type Product, type Issue, type OrderDraft } from '../domain/types.js';
 import { productCandidates, clientCandidates } from './candidates.js';
 import { loadMatchingConfig, type MatchingConfig } from './config.js';
@@ -106,11 +106,16 @@ export function createIdentityResolver(app: AppConfig, connector: OrderConnector
         if (line.productId !== chosen.id && line.documentPrice) line.documentPrice.decision = 'pending';
         line.query = chosen.name;
       }
-      const exactCodes = chosen ? [chosen] : all.filter(p => [p.code, p.name].some(value => normalize(value) === normalize(line.query) && has(context.operatorText, value)));
-      const requestedSizes = sizes(line.query);
-      const codes = all.filter(p => p.code && (normalize(p.code) === normalize(line.query) || (/\d/.test(p.code) || /\b(sku|code|codice)\b/i.test(line.query)) && has(line.query, p.code)));
+      const coded = productCodesIn(line.query, all);
+      const uniqueCode = coded.length === 1 ? coded[0] : undefined;
+      const uniqueInText = uniqueCode?.code && nameInText(context.operatorText, uniqueCode.code) ? uniqueCode : undefined;
+      const namedExact = all.filter(p => [p.code, p.name].some(value => normalize(value) === normalize(line.query) && has(context.operatorText, value)));
+      const exactCodes = chosen ? [chosen] : uniqueInText ? [uniqueInText] : namedExact;
+      // Size words that only appear inside a matched code are identity, not a second requested size.
+      const sizeSource = uniqueCode?.code ? ` ${normalize(line.query)} `.replace(` ${normalize(uniqueCode.code)} `, ' ') : line.query;
+      const requestedSizes = sizes(sizeSource);
       const wantsTester = asksForTester(line.query) && !/\b(non|no|not|senza|without)\s+(?:a\s+)?tester/i.test(line.query);
-      const eligible = all.filter(p => (!codes.length || codes.some(c => c.id === p.id)) && (isTester(p) === wantsTester || exactCodes.some(e => e.id === p.id)) && requestedSizes.every(size => (sizes(`${p.code} ${p.name}`).length ? sizes(`${p.code} ${p.name}`) : sizes(p.description)).includes(size)));
+      const eligible = all.filter(p => (!coded.length || coded.some(c => c.id === p.id)) && (isTester(p) === wantsTester || exactCodes.some(e => e.id === p.id)) && requestedSizes.every(size => (sizes(`${p.code} ${p.name}`).length ? sizes(`${p.code} ${p.name}`) : sizes(p.description)).includes(size)));
       const pa = aliases.aliases.filter(a => normalize(a.phrase) === normalize(line.query));
       const candidates = productCandidates(eligible).map(c => addAliases(c, pa.filter(a => a.productId === c.id).map(a => a.phrase)));
       pending.push({ field: `lines.${index}`, kind: 'product', query: line.query, candidates,
