@@ -38,22 +38,27 @@ const lastReply = (o: { replies: string[] }) => o.replies.at(-1) ?? '';
 export const acceptanceCases: ConversationCase[] = [
   ...scenarios.map(([id, messages, scripted, expected]) => ({ id, turns: messages.map(text => ({ text })), scripted, check: exactOutcome(expected) })),
   {
-    // Form-style wording already attached to a catalogue product: the draft must show that catalogue name, not only the scan.
+    // Fictional form reading reaches the draft through the attachment merge, not a model-written productId.
     id: 'form-line-shows-catalogue',
-    turns: [{ text: 'ordine dal modulo' }],
-    scripted: [draftSchema.parse({
-      clientQuery: 'Example Studio',
-      lines: [
-        { query: 'A1 SAP-MNT scanned label', productId: '101', quantity: 2 },
-        { query: 'unknown scanned row', quantity: 1 },
-      ],
-    })],
+    turns: [{
+      text: 'ordine dal modulo',
+      attachment: [
+        'Header: Customer: Example Studio',
+        'DEMO-A | A1 SAP-MNT scanned label | Qty: 2',
+        'unknown scanned row | Qty: 1',
+      ].join('\n'),
+    }],
+    scripted: [null],
     check: o => [
       ...expect(o.open?.status === 'suspended', `expected a draft still waiting, got ${o.open?.status ?? 'none'}`),
       ...expect(/2 × Pebble hand wash 250 ml/.test(lastReply(o)), 'matched line did not show the catalogue name'),
       ...expect(/€12,00/.test(lastReply(o)), 'matched line did not show the catalogue price'),
+      ...expect(!/\(A1 SAP-MNT scanned label\)/.test(lastReply(o)), 'matched line still parenthesized the source query'),
       ...expect(/unknown scanned row/.test(lastReply(o)), 'unmatched line lost the original wording'),
       ...expect(!/2 × A1 SAP-MNT scanned label/.test(lastReply(o)), 'matched line still led with the original form text'),
+      ...expect(o.open?.draft.lines.length === 2, `expected 2 attachment rows, got ${o.open?.draft.lines.length}`),
+      ...expect(o.open?.draft.lines[0]?.productId === '101', 'unique attachment code was not accepted'),
+      ...expect(!o.open?.draft.lines[1]?.productId, 'unknown row was given a catalogue id'),
     ],
   },
 ];

@@ -12,7 +12,7 @@ import { namedAlternatives } from '../src/domain/matching.js';
 import { prepareOrder } from '../src/domain/prepare.js';
 import { draftSchema, type ClientOrder } from '../src/domain/types.js';
 import { orderPreview } from '../src/channel/preview.js';
-import { config, draft, prepared } from './helpers.js';
+import { complete, config, draft, prepared } from './helpers.js';
 
 const tradeForm = { schemaVersion: 1, id: 'trade-list', name: 'Trade list', priceTier: 'trade', columns: [{ id: 'order', heading: 'Order', value: 'quantity' }], rows: [{ code: 'DEMO-A', label: 'Pebble', cells: { order: { productId: '101', netPrice: 15 } } }] };
 const tiered = (clientIds = [201]) => configSchema.parse({ ...structuredClone(example), priceTiers: [{ id: 'trade', name: 'Trade', clientIds }], orderForms: [tradeForm] });
@@ -28,13 +28,13 @@ describe('price tiers', () => {
     expect(other.ready && other.order.priceTier).toBeUndefined();
   });
   it('lets a stated price, or an explicit standard tier, win', async () => {
-    const stated = await prepare({ lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2, netPrice: 9 }] });
+    const stated = await prepare({ lines: [{ query: 'Pebble hand wash 250 ml', productId: '101', quantity: 2, netPrice: 9 }] });
     expect(stated.ready && stated.order.lines[0]?.netPrice).toBe(9);
     const standard = await prepare({ priceTier: 'standard' });
     expect(standard.ready && standard.order.lines[0]?.netPrice).toBe(12);
   });
   it('does not require template prices, but asks about explicitly requested unsupported price lists', async () => {
-    const missing = await prepare({ lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }, { query: 'Linen candle 200 g', quantity: 1 }] });
+    const missing = await prepare({ lines: [{ query: 'Pebble hand wash 250 ml', productId: '101', quantity: 2 }, { query: 'Linen candle 200 g', productId: '103', quantity: 1 }] });
     expect(missing.ready && missing.order.lines[1]?.netPrice).toBe(20);
     const unknown = await prepare({ priceTier: 'wholesale' });
     expect(!unknown.ready && unknown.issues.map(i => i.field)).toEqual(['priceTier']);
@@ -68,8 +68,8 @@ it('offers exactly the named products for an "A oppure B" line', async () => {
   const products = await new DemoConnector().listProducts();
   expect(namedAlternatives('da chiarire (A1, order): Pebble hand wash 250 ml oppure Linen candle 200 g', products).map(p => p.id)).toEqual(['101', '103']);
   expect(namedAlternatives('Pebble hand wash 250 ml or something else', products)).toEqual([]);
-  const result = await prepare({ lines: [{ query: 'Pebble hand wash 250 ml oppure Linen candle 200 g', quantity: 1 }] }, tiered([]));
-  expect(!result.ready && result.issues[0]?.candidates).toEqual([{ id: '101', label: 'Pebble hand wash 250 ml' }, { id: '103', label: 'Linen candle 200 g' }]);
+  const result = await complete({ ...draft(), lines: [{ query: 'Pebble hand wash 250 ml oppure Linen candle 200 g', quantity: 1 }] });
+  expect(!result.ready && result.issues.find(i => i.field === 'lines.0')?.candidates?.map(c => c.id)).toEqual(['101', '103']);
 });
 
 describe('previous orders', () => {
@@ -89,9 +89,10 @@ describe('previous orders', () => {
     const connector = new DemoConnector();
     const result = await prepareOrder(draftSchema.parse({
       clientQuery: 'Example Studio',
+      clientId: '201',
       lines: [
-        { query: 'Pebble hand wash 250 ml', quantity: 2 },
-        { query: 'Linen candle 200 g', quantity: 1 },
+        { query: 'Pebble hand wash 250 ml', productId: '101', quantity: 2 },
+        { query: 'Linen candle 200 g', productId: '103', quantity: 1 },
       ],
       shippingPrice: 8,
       discountPercent: 0,
@@ -124,9 +125,10 @@ describe('previous orders', () => {
     const connector = new DemoConnector();
     const result = await prepareOrder(draftSchema.parse({
       clientQuery: 'Example Studio',
+      clientId: '201',
       lines: [
-        { query: 'Pebble hand wash 250 ml', quantity: 2, netPrice: 9 },
-        { query: 'Linen candle 200 g', quantity: 1 },
+        { query: 'Pebble hand wash 250 ml', productId: '101', quantity: 2, netPrice: 9 },
+        { query: 'Linen candle 200 g', productId: '103', quantity: 1 },
       ],
       shippingPrice: 8,
       discountPercent: 0,

@@ -67,11 +67,17 @@ it.each(['on', 'shadow'] as const)('uses complete customer search in the shared 
     selectMany: async groups => groups.map(g => g.candidates.some(c => c.id === '600') ? answer('matched', '600') : answer('no-match')) });
   const input = { ...draft(), clientQuery: 'Rossy', lines: [] };
   const result = await resolver.resolve(input, { orderId: 'large-client-test', revision: 1, operatorText: 'Rossy' });
-  expect(result.issues).toEqual([]);
-  expect(result.decisions[0]).toMatchObject({ status: 'matched', selectedId: '600' });
   expect(result.decisions[0]?.searchGroups).toHaveLength(3);
-  if (mode === 'on') expect(result.draft.clientId).toBe('600');
-  else expect(result.draft).toEqual(input);
+  expect(result.decisions[0]?.selectedId).toBe('600');
+  if (mode === 'on') {
+    expect(result.draft.clientId).toBeUndefined();
+    expect(result.issues).toContainEqual(expect.objectContaining({ field: 'client', matchingStatus: 'ambiguous' }));
+    expect(result.decisions[0]?.status).toBe('ambiguous');
+  } else {
+    expect(result.issues).toEqual([]);
+    expect(result.decisions[0]).toMatchObject({ status: 'matched', selectedId: '600' });
+    expect(result.draft).toEqual(input);
+  }
 });
 
 it('offers no unrelated customers when a complete search finds no match', async () => {

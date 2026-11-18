@@ -39,6 +39,28 @@ export function testerQuery(line: { query: string; tester?: boolean }) {
   return `${query} tester`;
 }
 
+function testerContentTokens(query: string) {
+  return normalize(query).split(' ').filter(token => token && !token.startsWith('tester') && token !== 'sample' && token !== 'campion' && token !== 'prova');
+}
+
+/**
+ * True when two tester lines are the same source fact under different wording (a sale code plus tester flag vs
+ * an explicit tester query). Distinct quantities stay separate. Sale+tester is not this: the sale line does not want a tester.
+ */
+export function testerRestatementOf(
+  left: { query: string; quantity?: number; tester?: boolean },
+  right: { query: string; quantity?: number; tester?: boolean },
+) {
+  if (!lineWantsTester(left) || !lineWantsTester(right)) return false;
+  if (left.quantity !== undefined && right.quantity !== undefined && left.quantity !== right.quantity) return false;
+  if (normalize(testerQuery(left)) === normalize(testerQuery(right))) return true;
+  const a = testerContentTokens(testerQuery(left));
+  const b = testerContentTokens(testerQuery(right));
+  if (!a.length || !b.length) return false;
+  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
+  return shorter.every(token => longer.includes(token));
+}
+
 // Dropping a final vowel lets Italian singular and plural match (candele/candela, saponi/sapone).
 function tokens(query: string) {
   return normalize(query).split(' ').filter(Boolean).map(t => t.length > 4 ? t.replace(/[aeio]$/, '') : t);
@@ -384,6 +406,34 @@ export function clientPickLabel(client: { name: string; code?: string; city?: st
   const street = client.street?.trim() ?? '';
   if (street && addsDistinctivePlace(soFar, street)) extra.push(street);
   return [client.code, client.name, ...extra, client.city, client.country, client.vatNumber].filter(Boolean).join(' — ');
+}
+
+const SIZE_UNITS: Record<string, number> = { ml: 1, cl: 10, l: 1000, lt: 1000, litro: 1000, litri: 1000, g: 1, gr: 1, kg: 1000, mm: 1, cm: 10 };
+
+/** Normalised size tokens such as `volume:250`. Catalogue names write litres as "5lt"; documents as "5 L". */
+export function measureSizes(text: string) {
+  return [...text.toLowerCase().matchAll(/(\d+(?:[.,]\d+)?)\s*(ml|cl|kg|gr|cm|mm|litri|litro|lt|l|g)\b/g)]
+    .map(([, n, unit]) => `${['ml', 'cl', 'l', 'lt', 'litro', 'litri'].includes(unit!) ? 'volume' : ['mm', 'cm'].includes(unit!) ? 'length' : 'weight'}:${Number(n!.replace(',', '.')) * SIZE_UNITS[unit!]!}`);
+}
+
+/** Sizes that identify the catalogue record itself, not kit contents in a longer description. */
+export function productIdentitySizes(product: Pick<Product, 'code' | 'name'>) {
+  return measureSizes(`${product.code} ${product.name}`);
+}
+
+/**
+ * Operator-requested sizes for this line. Kit contents printed only in an attachment are not
+ * constraints. A size the operator typed is a constraint. A size that appears only in the model
+ * query, with no attachment source, is treated as an operator request so it cannot silently pass.
+ */
+export function explicitLineSizes(lineQuery: string, operatorWords: string, attachmentText = '') {
+  const wordSizes = new Set(measureSizes(operatorWords));
+  const attachSizes = new Set(measureSizes(attachmentText));
+  return [...new Set(measureSizes(lineQuery))].filter(size => {
+    if (wordSizes.has(size)) return true;
+    if (attachSizes.has(size)) return false;
+    return true;
+  });
 }
 
 /** "A oppure B" (or "A or B") naming catalogue products exactly, such as a doubtful value read from an order form; anything before a colon is a label. */

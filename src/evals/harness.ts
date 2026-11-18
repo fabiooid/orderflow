@@ -12,6 +12,8 @@ import { installTelegramChannel } from '../channels/telegram/adapter.js';
 import { TelegramController } from '../channel/controller.js';
 import { createConversationEngine, type Converse } from '../channel/engine.js';
 import { wireMatching } from '../matching/wire.js';
+import type { MatchingConfig } from '../matching/config.js';
+import type { SelectMany } from '../matching/resolver.js';
 import { TelegramStore, type Conversation } from '../channel/store.js';
 
 /**
@@ -43,14 +45,14 @@ export function scriptedTurns(drafts: ScriptedAct[]): Converse {
  * Replays turns as group messages through the real controller and engine, against the given (fictional) connector.
  * Without `converse` the configured model answers; nothing is saved and no Telegram message is sent.
  */
-export async function runConversation(config: AppConfig, connector: OrderConnector, turns: ConversationTurn[], options: { converse?: Converse; log?: (line: string) => void; onTurn?: (index: number, outcome: ConversationOutcome) => void; extraTurns?: (index: number, outcome: ConversationOutcome) => ConversationTurn[] | void } = {}): Promise<ConversationOutcome> {
+export async function runConversation(config: AppConfig, connector: OrderConnector, turns: ConversationTurn[], options: { converse?: Converse; log?: (line: string) => void; onTurn?: (index: number, outcome: ConversationOutcome) => void; extraTurns?: (index: number, outcome: ConversationOutcome) => ConversationTurn[] | void; matching?: { config?: MatchingConfig; selectMany?: SelectMany } } = {}): Promise<ConversationOutcome> {
   installTelegramChannel();
   // As the group is configured: every message is for the bot.
   config = { ...config, channel: { ...config.channel, respondToAllMessages: true } };
   const directory = await mkdtemp(join(tmpdir(), 'orderflow-conversation-'));
   const storage = new LibSQLStore({ id: 'conversation-eval', url: `file:${join(directory, 'memory.db')}` });
   const store = new TelegramStore(':memory:', 'eval');
-  const engine = createConversationEngine(config, connector, storage, { converse: options.converse, matching: wireMatching() });
+  const engine = createConversationEngine(config, connector, storage, { converse: options.converse, matching: options.matching ?? wireMatching() });
   const replies: string[] = [];
   const readings = new Map<string, string>();
   let messageId = 1000;

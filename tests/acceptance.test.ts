@@ -14,9 +14,9 @@ it('fails an incorrect customer even if all order lines and totals match', async
   expect(exactOutcome(expected)({ replies: [] })).toHaveLength(1);
 });
 
-it('shows the catalogue name after a form-style line is already matched', async () => {
+it('merges a fictional form attachment into the draft without a model-written product id', async () => {
   const scenario = acceptanceCases.find(c => c.id === 'form-line-shows-catalogue');
-  expect(scenario?.scripted).toBeTruthy();
+  expect(scenario?.scripted).toEqual([null]);
   const outcome = await runConversation(config(), new DemoConnector(), scenario!.turns, { converse: scriptedTurns(scenario!.scripted!) });
   expect(scenario!.check(outcome)).toEqual([]);
 });

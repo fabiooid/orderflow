@@ -33,15 +33,10 @@ it('judges the operator words, never trusts model-written IDs, and settles a pic
     expect(selectMany.mock.calls[0]![0].every(r => r.context === original)).toBe(true);
     const first = await store.order('u1');
     expect(first?.status).toBe('suspended');
-    expect(first?.draft.lines[0]?.productId).toBe('101');
-    await controller.handle(message(2, 'Make it two', 100));
-    const next = await store.order('u1');
-    expect(next?.status).toBe('ready');
-    expect(next?.prepared?.client.id).toBe('201');
-    expect(next?.matchingDecisions).toHaveLength(2);
-    expect(selectMany.mock.calls[1]![0][0]?.context).toContain('Make it two');
-    await controller.handle(press(3, 'pick:u1:2:lines.0:101', 101));
-    expect(converse).toHaveBeenCalledTimes(2);
+    expect(first?.draft.lines[0]?.productId).toBeUndefined();
+    expect(first?.issues?.some(i => i.field === 'lines.0' && i.candidates?.some(c => c.id === '101'))).toBe(true);
+    await controller.handle(press(2, 'pick:u1:1:lines.0:101', 100));
+    expect(converse).toHaveBeenCalledTimes(1);
     expect((await store.order('u1'))?.draft.lines[0]?.productId).toBe('101');
     expect((await store.order('u1'))?.matchingDecisions?.find(d => d.field === 'lines.0')?.source).toBe('operator');
   } finally { await engine.shutdown(); store.close(); await storage.close(); }

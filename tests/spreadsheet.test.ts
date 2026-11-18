@@ -216,8 +216,9 @@ describe('spreadsheet attachments in the document flow', () => {
   it('uses catalogue prices for spreadsheet lines until the operator confirms a file price', async () => {
     const prepared = await prepareOrder(draftSchema.parse({
       clientQuery: 'Example Studio',
+      clientId: '201',
       shippingPrice: 8,
-      lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }],
+      lines: [{ query: 'Pebble hand wash 250 ml', productId: '101', quantity: 2 }],
     }), config(), new DemoConnector(), '2026-01-15');
     expect(prepared.ready).toBe(true);
     if (!prepared.ready) return;

@@ -5,8 +5,11 @@ import example from '../config/example.json';
 installTelegramChannel();
 import { configSchema } from '../src/config/schema.js';
 import { DemoConnector } from '../src/connector/demo.js';
-import { draftSchema, type Client } from '../src/domain/types.js';
+import { draftSchema, type Client, type OrderDraft } from '../src/domain/types.js';
 import { prepareOrder } from '../src/domain/prepare.js';
+import { createDraftApi } from '../src/assistant/drafts.js';
+import { createIdentityResolver } from '../src/matching/resolver.js';
+import { matchingConfigSchema } from '../src/matching/config.js';
 import type { TurnInput, TurnOutput } from '../src/channel/controller.js';
 import type { Conversation } from '../src/channel/store.js';
 export const config = () => configSchema.parse(structuredClone(example));
@@ -63,12 +66,25 @@ export const sampleNameAccounts = (): { sample: Client; sampler: Client; east: C
   };
 };
 export const draft = () => draftSchema.parse({
-  clientQuery: 'Example Studio', lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 8, discountPercent: 10,
+  clientQuery: 'Example Studio', clientId: '201',
+  lines: [{ query: 'Pebble hand wash 250 ml', productId: '101', quantity: 2 }],
+  shippingPrice: 8, discountPercent: 10,
 });
 export async function prepared() {
   const result = await prepareOrder(draft(), config(), new DemoConnector(), '2026-01-15');
   if (!result.ready) throw new Error('Fixture did not prepare');
   return result.order;
+}
+
+/** Identity pass then commercial prepare. Use this when the fixture has queries rather than accepted ids. */
+export async function complete(input: OrderDraft, connector = new DemoConnector(), operatorText?: string) {
+  const matching = createIdentityResolver(config(), connector, { config: matchingConfigSchema.parse({ mode: 'off' }) });
+  const spoken = operatorText ?? [input.clientQuery, ...input.lines.map(line => line.query)].filter(Boolean).join(' ');
+  const result = await createDraftApi(config(), connector, matching).order(input, {
+    orderId: 'test', revision: 1, operatorText: spoken, operatorWords: spoken,
+  }, '2026-01-15');
+  if (result.status === 'ready') return { ready: true as const, order: result.order, draft: result.draft, issues: [] as const };
+  return { ready: false as const, issues: result.issues, draft: result.draft, clientId: result.client?.id };
 }
 
 /** Telegram updates as the group sends them: a message (optionally a reply) or a button press under a bot message. */

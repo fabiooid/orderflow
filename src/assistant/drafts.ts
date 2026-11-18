@@ -9,7 +9,6 @@ import { traceOperation } from './execution-trace.js';
 
 /** What the order API reports: a prepared order ready for confirmation, or what is still needed. */
 export type OrderResult = { kind: 'order'; draft: OrderDraft; decisions: Decision[]; client?: Client } & (
-  /** `discrepancies`: charged units that are not explained by the current catalogue. They never block saving. */
   | { status: 'ready'; order: PreparedOrder; totals: Totals; discrepancies: Discrepancy[]; catalogueIncreases: CatalogueIncrease }
   | { status: 'needs'; issues: Issue[] });
 /** What the customer API reports: a customer ready to create, an existing one, or what is still needed. */
@@ -19,62 +18,67 @@ export type CustomerResult = { kind: 'customer'; draft: OrderDraft; decisions: D
   | { status: 'needs'; issues: Issue[] });
 export type DraftResult = OrderResult | CustomerResult;
 
-/** Keep this request's product lines when a later draft only names the customer. A new request still starts empty. */
-export function preserveDraftLines(draft: OrderDraft, openLines?: OrderDraft['lines']): OrderDraft {
-  if (draft.lines.length || !openLines?.length) return draft;
-  return { ...draft, lines: structuredClone(openLines) };
+export const identityStatus = ['accepted', 'unconfirmed', 'ambiguous', 'unsupported', 'missing'] as const;
+export type IdentityStatus = (typeof identityStatus)[number];
+
+function mergeIssues(identity: Issue[], commercial: Issue[]) {
+  const fields = new Set(identity.map(issue => issue.field));
+  return [...identity, ...commercial.filter(issue => !fields.has(issue.field) && !identity.some(item => issue.field.startsWith(`${item.field}.`)))];
 }
 
-/** Keep this request's customer when a later draft only adds lines (a blank form header must not clear a name given in chat). */
-export function preserveDraftCustomer(draft: OrderDraft, open?: Partial<Pick<OrderDraft, 'clientQuery' | 'clientId' | 'newClient'>>): OrderDraft {
-  if (draft.clientQuery.trim() || draft.clientId || draft.newClient || !open) return draft;
-  const clientQuery = open.clientQuery?.trim() ? open.clientQuery : '';
-  if (!clientQuery && !open.clientId && !open.newClient) return draft;
-  return {
-    ...draft,
-    ...(clientQuery ? { clientQuery } : {}),
-    ...(open.clientId ? { clientId: open.clientId } : {}),
-    ...(open.newClient ? { newClient: structuredClone(open.newClient) } : {}),
-  };
+async function withLastPaid(issues: Issue[], draft: OrderDraft, connector: OrderConnector) {
+  const shipping = issues.find(issue => issue.field === 'shippingPrice');
+  if (!shipping || draft.clientId === undefined) return issues;
+  try {
+    const history = await connector.listClientOrders(draft.clientId, 5);
+    for (const order of history) {
+      const hit = order.lines.find(item => item.netPrice > 0 && (/deliver|spediz|shipping/i.test(`${item.name} ${item.code}`) || item.code === 'DELIVERY'));
+      if (hit) {
+        return issues.map(issue => issue.field === 'shippingPrice'
+          ? { ...issue, lastPaidPrice: hit.netPrice, message: `${issue.message}. Last paid ${hit.netPrice} on #${order.number}` }
+          : issue);
+      }
+    }
+  } catch { /* history is an offer, never a gate */ }
+  return issues;
 }
 
 /**
- * The order and customer APIs: validation only, never a write. Identities go through the resolver, which accepts an
- * ID only from exact evidence in the operator's words, a judged match or the operator's own button choice.
+ * The order and customer APIs: validation only, never a write. One identity pass, then commercial preparation.
  */
 export function createDraftApi(config: AppConfig, connector: OrderConnector, matching: IdentityResolver, validateVat?: ValidationLookup) {
   async function order(input: OrderDraft, context: ResolutionContext, date = new Date().toISOString().slice(0, 10)): Promise<OrderResult> {
-    const resolution = await traceOperation('Resolve identities', () => matching.resolve(input, context));
+    const resolution = await traceOperation('Resolve identities', () => matching.resolve(input, context), {
+      reasons: 'pending',
+    });
     const { draft, decisions } = resolution;
+    await traceOperation('Identity decisions', async () => decisions, {
+      fields: decisions.map(d => ({ field: d.field, status: d.status, source: d.source, reason: d.reason })),
+    });
     let products: Product[] = [], clients: Client[] = [];
-    if (resolution.issues.length) {
-      // The customer already identified is shown on the draft, so a wrong one is visible while other points are open.
-      const client = draft.clientId ? (await connector.listClients().catch(() => [])).find(c => c.id === draft.clientId) : undefined;
-      return { kind: 'order', status: 'needs', draft, decisions, issues: resolution.issues, ...(client ? { client } : {}) };
-    }
     const result = await traceOperation('Prepare order', () => prepareOrder(draft, config, {
       listProducts: async () => products = await connector.listProducts(),
       listClients: async () => clients = await connector.listClients(),
     }, date, validateVat, context.operatorText));
     const changed = matching.mode === 'on' ? changedIdentities(decisions, products, clients) : [];
-    if (changed.length) return { kind: 'order', status: 'needs', draft, decisions, issues: changed };
-    if (!result.ready) {
-      const client = clients.find(c => c.id === (result.clientId ?? draft.clientId));
-      return { kind: 'order', status: 'needs', draft: result.draft, decisions, issues: result.issues, ...(client ? { client } : {}) };
+    const issues = mergeIssues(changed, mergeIssues(resolution.issues, result.ready ? [] : result.issues));
+    if (changed.length || issues.length || !result.ready) {
+      const clientId = draft.clientId ?? (!result.ready ? result.clientId : undefined);
+      const client = clientId ? clients.find(c => c.id === clientId) : undefined;
+      const open = await withLastPaid(issues, result.draft, connector);
+      return { kind: 'order', status: 'needs', draft: result.draft, decisions, issues: open, ...(client ? { client } : {}) };
     }
     const id = result.order.client.id;
-    // Lookup failures only drop the price comparison.
     const [totals, history] = await Promise.all([connector.calculateTotals(result.order), id ? connector.listClientOrders(id, 5).catch(() => []) : []]);
     const compared = priceDiscrepancies(result.order, history, products);
     return { kind: 'order', status: 'ready', draft: result.draft, decisions, order: result.order, totals, discrepancies: compared.anomalies, catalogueIncreases: compared.catalogueIncreases, client: result.order.client };
   }
 
-  /** Matching still runs on a new customer, so a near-duplicate of an existing one is offered rather than recreated. */
   async function customer(input: OrderDraft, context: ResolutionContext): Promise<CustomerResult> {
     const resolution = await traceOperation('Resolve identities', () => matching.resolve({ ...input, lines: [] }, context));
     const { draft, decisions } = resolution;
     if (resolution.issues.length) return { kind: 'customer', status: 'needs', draft, decisions, issues: resolution.issues };
-    if (matching.mode === 'on' && draft.clientId) return { kind: 'customer', status: 'existing', draft, decisions, client: { id: draft.clientId, name: draft.clientQuery } };
+    if (draft.clientId) return { kind: 'customer', status: 'existing', draft, decisions, client: { id: draft.clientId, name: draft.clientQuery } };
     const details = customerDetails(draft, config);
     if (!details.client) return { kind: 'customer', status: 'needs', draft, decisions, issues: details.missing.map(field => ({ field: `client.${field}`, message: `Missing required customer field: ${field}` })) };
     return { kind: 'customer', status: 'ready', draft, decisions, customer: details.client };
@@ -84,26 +88,68 @@ export function createDraftApi(config: AppConfig, connector: OrderConnector, mat
 }
 export type DraftApi = ReturnType<typeof createDraftApi>;
 
-/** Open points as the agent reads them, in tool results and in the open request: names only, never record IDs. */
-export const issuesForAgent = (issues: Issue[]) => issues.map(i => ({ field: i.field, problem: i.message, ...(i.candidates?.length ? { candidates: i.candidates.map(c => c.label) } : {}) }));
+function fieldStatus(issues: Issue[] | undefined, field: string, accepted: boolean): IdentityStatus {
+  if (accepted) return 'accepted';
+  const issue = issues?.find(item => item.field === field);
+  if (!issue) return field === 'client' ? 'missing' : 'missing';
+  if (issue.matchingStatus === 'unavailable') return 'unsupported';
+  if (issue.matchingStatus === 'no-match' && !issue.candidates?.length) return 'unsupported';
+  if (issue.matchingStatus === 'ambiguous' || (issue.candidates?.length ?? 0) > 1) return 'ambiguous';
+  if (issue.candidates?.length) return 'unconfirmed';
+  return issue.matchingStatus === 'no-match' ? 'unsupported' : 'unconfirmed';
+}
 
-/** The part of a result the agent reads back: what to tell or ask the operator. Records stay with the application. */
-export function forAgent(result: DraftResult) {
+export const issuesForAgent = (issues: Issue[]) => issues.map(i => ({
+  field: i.field, problem: i.message,
+  ...(i.candidates?.length ? { candidates: i.candidates.map(c => c.label) } : {}),
+}));
+
+/** The part of a result the agent reads back. Record IDs stay with the application. */
+export function forAgent(result: DraftResult, revision?: number) {
+  const issues = result.status === 'needs' ? result.issues : undefined;
+  const customerStatus = fieldStatus(issues, 'client', result.kind === 'order' && !!result.client);
   const customer = result.kind === 'order' && result.client
-    ? { matched: true as const, name: result.client.name, ...(result.client.city ? { city: result.client.city } : {}), ...(result.client.vatNumber ? { vatNumber: result.client.vatNumber } : {}) }
+    ? { status: 'accepted' as const, name: result.client.name, ...(result.client.city ? { city: result.client.city } : {}), ...(result.client.vatNumber ? { vatNumber: result.client.vatNumber } : {}) }
     : result.draft.clientQuery.trim()
-      ? { matched: false as const, query: result.draft.clientQuery }
-      : undefined;
+      ? {
+        status: customerStatus,
+        query: result.draft.clientQuery,
+        ...(issues?.find(i => i.field === 'client')?.candidates?.length ? { candidates: issues.find(i => i.field === 'client')!.candidates!.map(c => c.label) } : {}),
+        action: customerStatus === 'accepted' ? undefined : 'Ask the operator to pick or type the legal name or VAT.',
+      }
+      : { status: 'missing' as const, action: 'Ask who the customer is.' };
   const lines = result.kind === 'order'
-    ? result.draft.lines.map(line => ({ query: line.query, quantity: line.quantity, matched: Boolean(line.productId), ...(line.tester ? { tester: true as const } : {}) }))
+    ? result.draft.lines.map((line, index) => {
+      const field = `lines.${index}`;
+      const status = fieldStatus(issues, field, Boolean(line.productId));
+      const issue = issues?.find(item => item.field === field);
+      return {
+        ref: line.ref ?? `L${index + 1}`,
+        query: line.query,
+        quantity: line.quantity,
+        ...(line.tester ? { tester: true as const } : {}),
+        status,
+        ...(status === 'accepted' ? {} : {
+          ...(issue?.candidates?.length ? { candidates: issue.candidates.map(c => c.label) } : {}),
+          action: status === 'unsupported' ? 'Look the catalogue up; do not send a different product as the requested item.' : 'Ask the operator to pick, or send a more specific code.',
+        }),
+      };
+    })
+    : undefined;
+  const shipping = result.kind === 'order'
+    ? result.draft.shippingPrice === undefined
+      ? { status: 'unknown' as const, action: 'Ask the delivery charge. Do not say it is 0 while status is unknown.' }
+      : { status: 'set' as const, amount: result.draft.shippingPrice }
     : undefined;
   return {
     status: result.status,
-    ...(customer ? { customer } : {}),
+    ...(revision !== undefined ? { revision } : {}),
+    customer,
     ...(lines ? { lines } : {}),
+    ...(shipping ? { shipping } : {}),
     ...(result.status === 'needs' ? { issues: issuesForAgent(result.issues) } : {}),
     note: result.status === 'needs'
-      ? 'Shown to the operator with these points. customer.matched and lines[].matched are the identities already selected; do not say a customer or product was missing when matched is true, and do not say it was found when matched is false. Settle what you can from the conversation or a lookup and call again; ask about the rest. For a product with no match, look the catalogue up. If no product has every requested detail, say that combination is not in the catalogue and list the real products that match each detail. Do not send a different product as if it were the requested item. Catalogue prices apply unless the operator stated a unit price; do not ask file versus catalogue when no documentPrice is pending.'
+      ? 'Shown to the operator with these points. Use customer.status, lines[].status and shipping.status: accepted is already selected; unconfirmed and ambiguous still need a pick or exact name; unsupported is not in the catalogue as requested. shipping.status unknown is not 0; amount 0 means no charge. Ask about the returned issues. Never say the draft is ready while status is needs.'
       : result.status === 'existing' ? 'This customer already exists; nothing will be created.'
       : 'Complete, and shown to the operator for review.',
   };

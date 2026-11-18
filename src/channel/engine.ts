@@ -1,4 +1,4 @@
-import { confirmedChoices } from '../matching/resolver.js';
+import { confirmedChoices, type PendingQuestion, type SearchEvidence } from '../matching/resolver.js';
 import { tracingContext, traceChannelTurn } from '../assistant/execution-trace.js';
 import { z } from 'zod';
 import { Mastra } from '@mastra/core';
@@ -9,9 +9,9 @@ import type { AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
 import { createOrderAgent, groupMemory } from '../assistant/agent.js';
 import { issuesForAgent, type DraftResult } from '../assistant/drafts.js';
-import { startTurn } from '../assistant/turn-context.js';
+import { startTurn, turnOf } from '../assistant/turn-context.js';
 import { reasoning } from '../assistant/reasoning.js';
-import { draftSchema, type OrderDraft } from '../domain/types.js';
+import { draftSchema, type Issue, type OrderDraft } from '../domain/types.js';
 import { productLinesFromReading } from '../documents/product-lines.js';
 import type { Choice, ConversationEngine, TurnInput } from './controller.js';
 import { appendSource, kindOf, type Conversation, type ReplyPlan } from './store.js';
@@ -24,31 +24,18 @@ import { documentTemplates } from './order-forms.js';
 import { createDocumentWorkflow, workflowTemplatePages } from '../documents/workflow.js';
 import { createVisionDocumentProvider } from '../documents/reader.js';
 import { omitMedia } from '../assistant/omit-media.js';
+import { labelledCustomerQuery, operatorAskedToCancel, operatorAskedToCreateOrder, statedLineQuantity, statedShipping } from '../assistant/intent.js';
 
-/**
- * Caption plus labelled product facts: persist those lines even when the agent skipped prepare-order.
- * Uncaptioned files still go through consent first. An open customer request is left alone.
- */
-async function seedAttachmentLines(
-  input: TurnInput,
-  current: DraftResult | undefined,
-  order: (draft: OrderDraft) => Promise<unknown>,
-) {
-  if (!input.operatorText?.trim() || input.text === input.operatorText) return;
-  if (current?.kind === 'customer') return;
-  if (current?.kind === 'order' && current.draft.lines.length) return;
-  const lines = productLinesFromReading(input.text);
-  if (!lines.length) return;
-  await order(draftSchema.parse({
-    ...(current?.kind === 'order' ? {
-      clientQuery: current.draft.clientQuery,
-      ...(current.draft.clientId ? { clientId: current.draft.clientId } : {}),
-      ...(current.draft.newClient ? { newClient: current.draft.newClient } : {}),
-      ...(current.draft.shippingPrice !== undefined ? { shippingPrice: current.draft.shippingPrice } : {}),
-      notes: current.draft.notes,
-    } : {}),
-    lines,
-  }));
+function pendingFromIssues(issues: Issue[] | undefined, revision: number): PendingQuestion | undefined {
+  const client = issues?.find(issue => issue.field === 'client' && issue.candidates?.length);
+  if (client?.candidates?.length) {
+    return { field: 'client', ids: client.candidates.map(c => c.id), revision, named: client.candidates[0]?.label };
+  }
+}
+
+function attachmentPart(text: string, operatorWords: string) {
+  if (!operatorWords.trim() || text === operatorWords) return '';
+  return text.slice(text.indexOf(operatorWords) === 0 ? operatorWords.length : 0).trim() || text.replace(operatorWords, '').trim();
 }
 
 /** What the model reads each turn, beside the shared group conversation. */
@@ -81,7 +68,7 @@ export function remembered(plan: Pick<ReplyPlan, 'texts' | 'agentText'>) {
 export const replySchema = (fallback: AppConfig['locale'], currency: AppConfig['currency']) => z.object({
   // Chosen before the reply is written, so the reply follows it.
   locale: z.enum(['it', 'en']).describe(`The language operatorWords are written in, unless the operator asked for another. Only words with no language of their own ("ok", a product name) keep the conversation's language; with no cue at all, ${fallback === 'it' ? 'Italian' : 'English'}.`),
-  reply: z.string().describe(`Your own words in that language, shown above any draft: short, no greeting or recap, or empty when the draft speaks for itself. Answer product questions by listing the matches yourself, one per line, "name — code — ${currency} net" (catalogue prices are net; a tester only when asked for). If no product has every requested detail, say that combination is not in the catalogue, then list the real products that match each detail; never present a product missing a requested detail as the requested item. Never write a draft or summary yourself.`),
+  reply: z.string().describe(`Your own words in that language, shown above any draft: short, no greeting or recap, or empty when the draft speaks for itself. Ask about the tool's actual issues. Never say the draft is ready while prepare-order status is needs. Answer product questions by listing matches, one per line, "name — code — ${currency} net". If no product has every requested detail, say that combination is not in the catalogue, then list related products; never present a related product as the requested item. Never write a draft or summary yourself.`),
 });
 
 /**
@@ -109,6 +96,7 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
     if (!await memory.getThreadById({threadId:shared.thread})) await memory.createThread({threadId:shared.thread,resourceId:shared.resource,title: options.threadTitle ?? 'OrderFlow conversation'});
   })().catch(error => { sharedThread = undefined; throw error; });
 
+  const lastProductSearchBySender = new Map<string, SearchEvidence>();
   const reply = replySchema(config.locale, config.currency);
   const converse: Converse = options.converse ?? (async (prompt, _act, requestContext) => {
     await ensureSharedThread();
@@ -123,8 +111,12 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
   /** The new revision of a request and its template, from what the order or customer API reported. */
   const render = async (result: DraftResult, previous: Conversation, locale: AppConfig['locale']): Promise<{ order: Conversation; text: string }> => {
     const it = locale === 'it';
-    const next: Conversation = { ...previous, locale, revision: previous.revision + 1, draft: result.draft, matchingDecisions: result.decisions,
-      confirmedChoices: confirmedChoices(result.decisions), prepared: undefined, totals: undefined, issues: undefined };
+    const revision = previous.revision + 1;
+    const issues = result.status === 'needs' ? result.issues : undefined;
+    const next: Conversation = { ...previous, locale, revision, draft: result.draft, matchingDecisions: result.decisions,
+      confirmedChoices: confirmedChoices(result.decisions, result.draft), prepared: undefined, totals: undefined, issues: undefined,
+      pendingQuestion: pendingFromIssues(issues, revision),
+    };
     if (result.kind === 'customer') {
       if (result.status === 'existing') return { order: { ...next, status: 'reviewed' }, text: existingCustomer(result.client, it) };
       if (result.status === 'ready') return { order: { ...next, status: 'ready' }, text: customerPreview(result.customer, it, [], config.tax?.italy) };
@@ -135,7 +127,7 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
         ...result.catalogueIncreases,
         context: config.pricing?.catalogueIncreaseContext,
       }) };
-    // Catalogue names and prices are already known; the draft template must not keep printing only the original wording.
+    // Matched lines print the catalogue name; unresolved lines keep the original wording.
     const catalogue = result.draft.lines.some(line => line.productId) ? await connector.listProducts().catch(() => []) : [];
     return { order: { ...next, status: 'suspended', issues: result.issues }, text: orderDraft(result.draft, result.issues, it, result.client, config.currency, catalogue) };
   };
@@ -144,11 +136,20 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
     const { request } = input;
     // Evidence for identity matching: this request's conversation so far and this message, kept as its source text.
     const evidence = appendSource(request?.sourceText, input.text);
+    const operatorWords = appendSource(request?.operatorWords, input.operatorText);
+    const attached = attachmentPart(input.text, input.operatorText);
+    const attachmentText = appendSource(request?.attachmentText, attached);
+    const attachmentLines = attached ? productLinesFromReading(input.text) : [];
     const requestContext = evalContext();
     const outcome = startTurn(requestContext, {
-      evidence, operatorWords: input.operatorText, senderId: input.senderId,
+      evidence, operatorWords, turnWords: input.operatorText, attachmentText, attachmentLines, senderId: input.senderId,
+      searchEvidence: request?.searchEvidence ?? [],
       knownPhrases: [request?.draft.clientQuery, ...request?.draft.lines.map(line => line.query) ?? []].filter((p): p is string => !!p),
-      ...(request ? { request: { kind: kindOf(request), orderId: request.orderId, revision: request.revision, confirmedChoices: request.confirmedChoices, lines: request.draft.lines, clientQuery: request.draft.clientQuery, ...(request.draft.clientId ? { clientId: request.draft.clientId } : {}), ...(request.draft.newClient ? { newClient: request.draft.newClient } : {}) } } : {}),
+      ...(request ? { request: {
+        kind: kindOf(request), orderId: request.orderId, revision: request.revision, confirmedChoices: request.confirmedChoices,
+        draft: request.draft, pendingQuestion: request.pendingQuestion, searchEvidence: request.searchEvidence,
+        operatorWords: request.operatorWords, attachmentText: request.attachmentText,
+      } } : {}),
       ...(input.locked ? { locked: input.locked } : {}),
     });
     const prompt: TurnPrompt = {
@@ -159,15 +160,46 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
     };
     const act: TurnActions = { order: draft => calls.order(draft, requestContext), customer: draft => calls.customer(draft, requestContext), cancel: () => calls.cancel(requestContext) };
     const { reply, locale } = await converse(prompt, act, requestContext);
+    if (!outcome.refused && !outcome.cancel && request && operatorAskedToCancel(input.operatorText)) {
+      calls.cancel(requestContext);
+    }
     if (outcome.cancel) return { text: reply, reply, locale, cancel: true };
-    if (!outcome.refused) {
-      await seedAttachmentLines(input, outcome.result, draft => calls.order(draft, requestContext));
+    const turnState = turnOf(requestContext);
+    const openKind = request ? kindOf(request) : undefined;
+    const clientSearch = [...(turnState?.searchEvidence ?? [])].reverse().find(item => item.kind === 'client');
+    const productSearch = [...(turnState?.searchEvidence ?? [])].reverse().find(item => item.kind === 'product');
+    const lastProduct = productSearch ?? lastProductSearchBySender.get(input.senderId);
+    const labelled = labelledCustomerQuery(input.operatorText);
+    const askedOrder = operatorAskedToCreateOrder(input.operatorText);
+    const quantity = statedLineQuantity(input.operatorText);
+    const customerDraft = outcome.result?.kind === 'customer' ? outcome.result.draft : openKind === 'customer' ? request?.draft : undefined;
+    if (productSearch?.ids.length) lastProductSearchBySender.set(input.senderId, productSearch);
+    if (!outcome.refused && askedOrder && outcome.result?.kind !== 'order' && (openKind === 'customer' || outcome.result?.kind === 'customer')) {
+      await calls.order(draftSchema.parse({
+        clientQuery: customerDraft?.newClient?.name ?? customerDraft?.clientQuery ?? '',
+        ...(customerDraft?.newClient ? { newClient: customerDraft.newClient } : {}),
+      }), requestContext);
+    } else if (!outcome.refused && !outcome.result && openKind === 'order') {
+      await calls.order(draftSchema.parse({ clientQuery: clientSearch?.query ?? labelled ?? '' }), requestContext);
+    } else if (!outcome.refused && !outcome.result && attachmentLines.length && openKind !== 'customer') {
+      await calls.order(draftSchema.parse({}), requestContext);
+    } else if (!outcome.refused && !outcome.result && (clientSearch || labelled)) {
+      await calls.order(draftSchema.parse({ clientQuery: clientSearch?.query ?? labelled ?? '' }), requestContext);
+    } else if (!outcome.refused && !outcome.result && !request && askedOrder && lastProduct?.ids.length === 1 && quantity) {
+      const products = await connector.listProducts().catch(() => []);
+      const product = products.find(item => item.id === lastProduct.ids[0]);
+      await calls.order(draftSchema.parse({
+        lines: [{ query: product?.name ?? lastProduct.query, quantity }],
+      }), requestContext);
     }
     const { result } = outcome;
     if (!result) return { text: reply, reply, locale, ...(outcome.refused ? { blocked: true } : {}) };
-    // A request of the other kind replaces the open one, keeping its conversation so far.
     const replaced = request && result.kind !== kindOf(request) ? request : undefined;
-    const rendered = await render(result, { ...(replaced || !request ? input.fresh(result.kind) : request), sourceText: evidence }, locale);
+    const rendered = await render(result, {
+      ...(replaced || !request ? input.fresh(result.kind) : request),
+      sourceText: evidence, operatorWords, attachmentText,
+      searchEvidence: turnOf(requestContext)?.searchEvidence,
+    }, locale);
     return { text: [reply.trim(), rendered.text].filter(Boolean).join('\n\n'), reply, locale, order: rendered.order, ...(replaced ? { replaced } : {}) };
   };
 
@@ -180,7 +212,13 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
     const line = choice && lineIndex(choice.field);
     if (line !== undefined && draft.lines[line]) draft.lines[line]!.productId = choice!.id;
     if (choice?.field === 'client') { draft.clientId = choice.id; delete draft.newClient; }
-    const context = { orderId: previous.orderId, revision: previous.revision + 1, operatorText: previous.sourceText ?? '', confirmedChoices: previous.confirmedChoices, choice };
+    const stated = statedShipping(previous.operatorWords ?? '');
+    if (stated !== undefined) draft.shippingPrice = stated;
+    const context = {
+      orderId: previous.orderId, revision: previous.revision + 1,
+      operatorText: previous.sourceText ?? '', operatorWords: previous.operatorWords, attachmentText: previous.attachmentText,
+      confirmedChoices: previous.confirmedChoices, pendingQuestion: previous.pendingQuestion, searchEvidence: previous.searchEvidence, choice,
+    };
     const result = kindOf(previous) === 'customer' ? await drafts.customer(draft, context) : await drafts.order(draft, context);
     return render(result, previous, previous.locale ?? config.locale);
   };

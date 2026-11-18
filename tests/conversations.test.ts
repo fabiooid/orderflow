@@ -90,9 +90,9 @@ function notesConverse(scenario: (typeof conversationCases)[number]): Converse {
   const draft = asOrderDraft(scenario.scripted![0]);
   const prompt = systemPrompt(config().invoicing.label);
   const notes = orderDraftInput.shape.notes.description ?? '';
-  const followsRule = /only the instruction the operator asked to write/.test(prompt)
+  const followsRule = /notes empty unless they stated them this request/.test(prompt)
     && /Do not summarise an attached message/.test(notes)
-    && /Leave notes empty when they did not ask for a note/.test(prompt);
+    && /only a note the operator asked to write/.test(notes);
   return async (turn, act) => {
     const next = structuredClone(draft);
     if (!followsRule) {

@@ -19,7 +19,7 @@ it('persists order API, FIC and delivery spans under one native Mastra turn trac
   try {
     await traceChannelTurn(observability.getDefaultInstance(), 41, async () => {
       traceId = tracingContext().currentSpan!.traceId;
-      expect((await drafts.order(draft(), { orderId: 'test', revision: 1, operatorText: 'Two soaps for Example Studio' }, '2026-01-15')).status).toBe('ready');
+      expect((await drafts.order(draft(), { orderId: 'test', revision: 1, operatorText: 'Example Studio: 2 Pebble hand wash 250 ml' }, '2026-01-15')).status).toBe('ready');
       await traceOperation('Telegram deliver text', async () => ({ message_id: 1 }));
       await expect(traceOperation('Simulated failure', async () => { throw new Error('SECRET-SDK-HEADER'); })).rejects.toThrow();
       return { orderId: 'test', state: 'ready' };
