@@ -426,7 +426,7 @@ export const conversationCases: ConversationCase[] = [
         text: 'Yes, prepare an order from this.',
         attachment: [
           'Letterhead (supplier, not the customer): Northwind Supplies Ltd, Harbour Lane 1, Example City, IT, P.IVA IT000111222, orders@northwind-supplies.invalid',
-          'SKU-100 | Hand cream 100 ml | Qty: 2',
+          '2 x Pebble hand wash 250 ml',
         ].join('\n'),
       },
     ],
@@ -437,11 +437,11 @@ export const conversationCases: ConversationCase[] = [
         shippingPrice: 8,
       }),
       'cancel',
-      draftSchema.parse({ lines: [{ query: 'Hand cream 100 ml SKU-100', quantity: 2 }] }),
+      draftSchema.parse({ lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }] }),
     ],
     check: all(neverGaveUp, unnamedAfterEarlierChat, o => [
       ...expect(!/northwind supplies/i.test(o.open?.draft.clientQuery ?? ''), `used letterhead as customer: ${o.open?.draft.clientQuery}`),
-      ...expect(!!o.open?.draft.lines.some(l => /SKU-100|hand cream/i.test(l.query) && l.quantity === 2), 'the filled cream line was lost'),
+      ...expect(!!o.open?.draft.lines.some(l => /pebble/i.test(l.query) && l.quantity === 2), 'the attached hand wash was lost'),
     ]),
   },
   {
