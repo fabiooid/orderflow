@@ -21,11 +21,14 @@ it('gives the agent the order and customer APIs and lookups, and no way to save'
     expect(tools.searchClients?.description).toContain('exact name or VAT');
     expect(tools.searchClients?.description).toContain('candidates, not as a lock');
     expect(tools.searchClients?.description).toContain('Search does not change the draft');
+    expect(tools.searchClients?.description).toContain('Search only a name or VAT given in this request');
+    expect(tools.searchClients?.description).toContain('Do not search a customer from earlier messages');
     expect(tools.searchProducts?.description).toContain('not in the catalogue');
     expect(tools.searchProducts?.description).toContain('found=catalogue is not identity evidence');
     expect(tools.searchProducts?.description).toContain('do not paste the whole catalogue');
     expect(tools.cancelRequest?.description).toContain('lascia stare');
     expect(tools.prepareOrder?.description).toContain('Empty lines keep rows already on this request');
+    expect(tools.prepareOrder?.description).toContain('Empty clientQuery when this request did not name a customer');
     expect(tools.prepareOrder?.description).toContain('Search does not open or change a draft');
     expect(tools.prepareCustomer?.description).toContain('Missing email or VAT');
     expect(tools.prepareOrder?.description).toContain('unique SKUs/testers');
@@ -44,6 +47,9 @@ it('keeps business rules in the prompt and field rules in the API schema, with n
   expect(prompt).toContain('# How to work');
   expect(prompt).toContain('exact legal name or VAT');
   expect(prompt).toContain('"Yes, prepare this file" does not confirm a customer');
+  expect(prompt).toContain('leave the customer blank and ask who it is');
+  expect(prompt).toContain('Do not offer, confirm, use or keep a customer from earlier messages');
+  expect(replySchema(config().locale, config().currency).shape.reply.description).toContain('If customer.status is missing, ask who the customer is');
   expect(prompt).toContain('A single fuzzy search hit is not a lock');
   expect(prompt).toContain('do not invent or append catalogue codes');
   expect(prompt).toContain('Search-products only when');
@@ -66,7 +72,8 @@ it('keeps business rules in the prompt and field rules in the API schema, with n
   expect(fields.newClient.description).toContain('operator says the customer is new');
   expect(fields.notes.description).toContain('only a note the operator asked to write');
   expect(fields.delivery.description).toContain("other than the customer's own address");
-  expect(fields.clientQuery.description).toContain('Do not copy a cancelled request');
+  expect(fields.clientQuery.description).toContain('Empty when this request did not name a customer');
+  expect(fields.clientQuery.description).toContain('Do not copy earlier messages, a previous or cancelled request, or letterhead');
   expect(fields.clientQuery.description).toContain('Letterhead is not a customer');
   expect(fields.lines.element.shape.documentPrice.description).toContain('Null when none is pending');
   expect(fields.clientId.description).toContain('yes-prepare-this-file is not an id');

@@ -117,7 +117,7 @@ export function forAgent(result: DraftResult, revision?: number) {
         ...(issues?.find(i => i.field === 'client')?.candidates?.length ? { candidates: issues.find(i => i.field === 'client')!.candidates!.map(c => c.label) } : {}),
         action: customerStatus === 'accepted' ? undefined : 'Ask the operator to pick or type the legal name or VAT.',
       }
-      : { status: 'missing' as const, action: 'Ask who the customer is.' };
+      : { status: 'missing' as const, action: 'Ask who the customer is. Do not offer a name from earlier messages, a previous request, or letterhead.' };
   const lines = result.kind === 'order'
     ? result.draft.lines.map((line, index) => {
       const field = `lines.${index}`;

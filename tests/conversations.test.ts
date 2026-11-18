@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { conversationCases, evalConnector, northwind } from '../src/evals/conversations.js';
 import { runConversation, scriptedTurns, type ScriptedAct } from '../src/evals/harness.js';
-import type { OrderDraft } from '../src/domain/types.js';
+import { draftSchema, type OrderDraft } from '../src/domain/types.js';
 import { orderDraftInput } from '../src/assistant/draft-schema.js';
 import { systemPrompt } from '../src/assistant/system-prompt.js';
 import { DemoConnector } from '../src/connector/demo.js';
@@ -9,7 +9,7 @@ import { WriteJournal } from '../src/storage/write-journal.js';
 import { orderCreator } from '../src/channel/order.js';
 import { TelegramController } from '../src/channel/controller.js';
 import { loadConversation, TelegramStore } from '../src/channel/store.js';
-import { createConversationEngine, type Converse } from '../src/channel/engine.js';
+import { createConversationEngine, replySchema, type Converse } from '../src/channel/engine.js';
 import { LibSQLStore } from '@mastra/libsql';
 import { config, message, press } from './helpers.js';
 
@@ -23,6 +23,7 @@ const scriptedIds = [
   'spreadsheet-create-order-persists-without-tools',
   'spreadsheet-letterhead-is-not-customer',
   'spreadsheet-header-names-customer',
+  'new-file-does-not-reuse-previous-chat-customer',
 ];
 
 function asOrderDraft(act: ScriptedAct | undefined): OrderDraft {
@@ -112,6 +113,49 @@ it.each(['requested-note-only-from-attachment', 'requested-english-note-only', '
     expect(scenario!.check(outcome)).toEqual([]);
   },
 );
+
+/**
+ * Scripted stand-in for the model. If the don't-guess customer rules are present, a later unnamed
+ * file leaves the customer blank and asks who it is. If they are missing, it offers the earlier
+ * chat's customer, matching the live bug this case guards.
+ */
+function previousChatCustomerConverse(scenario: (typeof conversationCases)[number]): Converse {
+  const drafts = scenario.scripted!;
+  const prompt = systemPrompt(config().invoicing.label);
+  const clientQuery = orderDraftInput.shape.clientQuery.description ?? '';
+  const reply = replySchema(config().locale, config().currency).shape.reply.description ?? '';
+  const followsRule = /leave the customer blank and ask who it is/.test(prompt)
+    && /Do not offer, confirm, use or keep a customer from earlier messages/.test(prompt)
+    && /Empty when this request did not name a customer/.test(clientQuery)
+    && /If customer.status is missing, ask who the customer is/.test(reply);
+  let turn = 0;
+  return async (_prompt, act) => {
+    const next = drafts[turn++];
+    if (next === 'cancel') {
+      act.cancel();
+      return { reply: '', locale: 'en' };
+    }
+    if (turn === drafts.length) {
+      if (followsRule) {
+        await act.order(asOrderDraft(next));
+        return { reply: 'Who is the customer?', locale: 'en' };
+      }
+      await act.order(draftSchema.parse({ ...asOrderDraft(next), clientQuery: 'Example Studio' }));
+      return { reply: 'Confirm Example Studio from earlier?', locale: 'en' };
+    }
+    if (next) await act.order(asOrderDraft(next));
+    return { reply: '', locale: 'it' };
+  };
+}
+
+it('does not offer a previous-chat customer on a new unnamed file request', async () => {
+  const scenario = conversationCases.find(c => c.id === 'new-file-does-not-reuse-previous-chat-customer');
+  expect(scenario?.scripted).toHaveLength(3);
+  const outcome = await runConversation(config(), evalConnector(), scenario!.turns, { converse: previousChatCustomerConverse(scenario!) });
+  expect(scenario!.check(outcome)).toEqual([]);
+  expect(outcome.replies.at(-1)).toMatch(/Who is the customer\?/);
+  expect(outcome.replies.at(-1)).not.toMatch(/Example Studio/);
+});
 
 it('still saves when the operator presses confirm-and-save on a ready draft', async () => {
   const c = config();

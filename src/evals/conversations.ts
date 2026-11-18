@@ -378,6 +378,43 @@ export const conversationCases: ConversationCase[] = [
     ]),
   },
   {
+    id: 'new-file-does-not-reuse-previous-chat-customer',
+    // Earlier turn used Example Studio; a later unnamed file is a new request. Do not offer that customer.
+    turns: [
+      { text: 'ordine per Example Studio: 2 Pebble hand wash 250 ml, spedizione 8 euro' },
+      { text: 'lascia stare, non serve più' },
+      {
+        text: 'Yes, prepare an order from this.',
+        attachment: [
+          'Letterhead (supplier, not the customer): Northwind Supplies Ltd, Harbour Lane 1, Example City, IT, P.IVA IT000111222, orders@northwind-supplies.invalid',
+          'SKU-100 | Hand cream 100 ml | Qty: 2',
+        ].join('\n'),
+      },
+    ],
+    scripted: [
+      draftSchema.parse({
+        clientQuery: 'Example Studio',
+        lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }],
+        shippingPrice: 8,
+      }),
+      'cancel',
+      draftSchema.parse({ lines: [{ query: 'Hand cream 100 ml SKU-100', quantity: 2 }] }),
+    ],
+    check: all(neverGaveUp, o => {
+      const text = last(o);
+      const askedWho = /\?|\b(?:dimmi|indica|indicami|specifica|quale|tell me|which|specify|who)\b/i.test(text) || /🏪 ❓/.test(text);
+      return [
+        ...expect(!!o.open, 'no open request'),
+        ...expect(!o.open?.draft.clientId && !o.open?.draft.newClient && !/example studio/i.test(o.open?.draft.clientQuery ?? ''),
+          `took a customer from an earlier request: ${o.open?.draft.newClient?.name ?? o.open?.draft.clientQuery ?? o.open?.draft.clientId}`),
+        ...expect(!/northwind supplies/i.test(o.open?.draft.clientQuery ?? ''), `used letterhead as customer: ${o.open?.draft.clientQuery}`),
+        ...expect(!!o.open?.draft.lines.some(l => /SKU-100|hand cream/i.test(l.query) && l.quantity === 2), 'the filled cream line was lost'),
+        ...expect(!/example studio/i.test(text), `asked to confirm or use a previous-chat customer: ${text.split('\n')[0]}`),
+        ...expect(askedWho, 'did not ask who the customer is'),
+      ];
+    }),
+  },
+  {
     id: 'english-request',
     turns: [{ text: 'Prepare an order for Northwind Bistro: 3 Linen candle 200 g, delivery 8 euros' }],
     check: all(neverGaveUp, orderFor(northwind.id), o => expect(last(o).includes('📦 Order preview'), 'no English order preview')),

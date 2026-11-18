@@ -276,6 +276,26 @@ it('does not duplicate attachment rows when the model sends the same facts again
   expect(again.lines.map(line => line.ref)).toEqual(['L1', 'L2']);
 });
 
+it('drops a model-guessed customer on a new file-consent request with no named header', () => {
+  const merged = mergeOrderDraft({
+    incoming: draftSchema.parse({
+      clientQuery: 'Example Studio',
+      lines: [{ query: 'Hand cream 100 ml SKU-100', quantity: 2 }],
+    }),
+    attachmentLines: [{ query: 'Hand cream 100 ml SKU-100', quantity: 2 }],
+    operatorWords: 'Yes, prepare an order from this.',
+    attachmentText: [
+      'Letterhead (supplier, not the customer): Northwind Supplies Ltd, Harbour Lane 1, Example City, IT, P.IVA IT000111222, orders@northwind-supplies.invalid',
+      'SKU-100 | Hand cream 100 ml | Qty: 2',
+    ].join('\n'),
+    isNewRequest: true,
+  });
+  expect(merged.clientQuery).toBe('');
+  expect(merged.clientId).toBeUndefined();
+  expect(merged.newClient).toBeUndefined();
+  expect(merged.lines[0]).toMatchObject({ query: 'Hand cream 100 ml SKU-100', quantity: 2 });
+});
+
 it('cancels customer and shipping context with the request; a later request starts empty', async () => {
   const outcome = await runConversation(config(), new DemoConnector(), [
     { text: 'ordine per Example Studio: 2 Pebble hand wash 250 ml, spedizione 0 euro' },

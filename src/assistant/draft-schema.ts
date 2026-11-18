@@ -25,7 +25,7 @@ const nullableClient = z.object(Object.fromEntries(Object.entries(clientSchema.o
 export const identityStatusSchema = z.enum(['accepted', 'unconfirmed', 'ambiguous', 'unsupported', 'missing']);
 
 export const orderDraftInput = z.object({
-  clientQuery: z.string().describe('The customer name or VAT as the operator wrote it this request. Empty when unknown. Do not copy a cancelled request. Letterhead is not a customer. A unique search hit is not a lock.'),
+  clientQuery: z.string().describe('The customer name or VAT as the operator wrote it this request. Empty when this request did not name a customer. Do not copy earlier messages, a previous or cancelled request, or letterhead. Letterhead is not a customer. A unique search hit is not a lock.'),
   clientId: z.string().min(1).nullable().describe('Always null for a new lock. Keep only an id already on the open draft after a pick or exact typed name. A search result, alias, or yes-prepare-this-file is not an id.'),
   newClient: nullableClient.nullable().describe('Only when the operator says the customer is new or types billing details themselves. Attached names go in clientQuery.'),
   manualVatCheck: z.object({ country: z.string().regex(/^[A-Z]{2}$/), vatNumber: z.string().min(1), status: z.enum(['valid', 'invalid']) }).strict().nullable()
