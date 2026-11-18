@@ -155,7 +155,7 @@ export function forAgent(result: DraftResult, revision?: number) {
     ...(shipping ? { shipping } : {}),
     ...(result.status === 'needs' ? { issues: issuesForAgent(result.issues, result.draft) } : {}),
     note: result.status === 'needs'
-      ? 'Shown to the operator. Status missing or unknown is already on the draft. Unconfirmed, ambiguous and unsupported identities still need a pick or exact name. shipping.status unknown is not 0; amount 0 means no charge. Never say the draft is ready while status is needs.'
+      ? 'Shown to the operator. Do not mention status missing or unknown. Unconfirmed, ambiguous and unsupported identities still need a pick or exact name. shipping.status unknown is not 0; amount 0 means no charge. Never say the draft is ready while status is needs.'
       : result.status === 'existing' ? 'This customer already exists; nothing will be created.'
       : 'Complete, and shown to the operator for review.',
   };

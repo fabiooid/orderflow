@@ -69,7 +69,7 @@ it('keeps blank customer and shipping on status, not as issues or ask-actions', 
   expect(forAgent(needs).customer).toEqual({ status: 'missing' });
   expect(forAgent(needs).shipping).toEqual({ status: 'unknown' });
   expect(forAgent(needs).issues?.some(i => i.field === 'client' || i.field === 'shippingPrice')).toBe(false);
-  expect(forAgent(needs).note).toContain('Status missing or unknown is already on the draft');
+  expect(forAgent(needs).note).toContain('Do not mention status missing or unknown');
   expect(forAgent(needs).note).not.toContain('Ask about issues that still need a pick');
   expect(JSON.stringify(forAgent(needs))).not.toMatch(/catalogue default/i);
   expect(JSON.stringify(forAgent(needs))).not.toMatch(/Do not ask who it is/);
