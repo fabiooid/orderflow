@@ -19,6 +19,9 @@
   "shipping": {
     "discountByDefault": false
   },
+  "pricing": {
+    "catalogueIncreaseContext": "List increased; the current catalogue is the list."
+  },
   "clients": {
     "requiredFields": [
       "email",

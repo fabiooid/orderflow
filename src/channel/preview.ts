@@ -1,5 +1,5 @@
 import type { Client, Issue, NewCustomer, OrderDraft, PreparedOrder, Product, Totals } from '../domain/types.js';
-import type { Discrepancy } from '../domain/history.js';
+import type { CatalogueIncrease, Discrepancy } from '../domain/history.js';
 import { copy, type CopyKey, type CopyVars } from './locales/index.js';
 
 /** Name and net price from the live catalogue, looked up by the product id already on the draft. */
@@ -144,8 +144,20 @@ function day(date: string, it: boolean) {
   return y && m && d ? (it ? `${d}/${m}/${y}` : date) : date;
 }
 
-/** A complete order ready to confirm. Price differences from earlier orders are shown to check; they never block saving. */
-export function orderPreview(order: PreparedOrder, totals: Totals, it: boolean, discrepancies: Discrepancy[] = [], currency = 'EUR') {
+function increaseOrders(orders: CatalogueIncrease['orders']) {
+  const seen = new Set<string>();
+  return orders.filter(order => seen.has(order.number) ? false : (seen.add(order.number), true)).map(order => `#${order.number}`).join(', ');
+}
+
+/** A complete order ready to confirm. Catalogue increases are grouped; unexplained units are shown to check and never block saving. */
+export function orderPreview(
+  order: PreparedOrder,
+  totals: Totals,
+  it: boolean,
+  discrepancies: Discrepancy[] = [],
+  currency = 'EUR',
+  catalogueIncrease?: CatalogueIncrease & { context?: string },
+) {
   const goods = order.lines.filter(line => !line.shipping);
   const shipping = order.lines.filter(line => line.shipping);
   const rates = [...new Set(order.lines.map(line => `${line.vatRate}%${line.nature ? ` ${line.nature}` : ''}`))];
@@ -158,6 +170,11 @@ export function orderPreview(order: PreparedOrder, totals: Totals, it: boolean, 
   }
   lines.push('', say(it, 'totalsTitle'), `${say(it, 'totalNet')} ${money(totals.net, it, currency)}`, `${say(it, 'totalVat')} ${rates.join(', ')} ${money(totals.vat, it, currency)}`, `${say(it, 'totalGross')} ${money(totals.gross, it, currency)}`);
   if (order.notes.trim()) lines.push('', say(it, 'draftNotes'), order.notes.trim());
+  if (catalogueIncrease && catalogueIncrease.count > 0) {
+    lines.push('', say(it, 'catalogueIncrease', { count: catalogueIncrease.count, orders: increaseOrders(catalogueIncrease.orders) }));
+    const context = catalogueIncrease.context?.trim();
+    if (context) lines.push(context);
+  }
   const checks = discrepancies.map(d => say(it, 'priceNow', {
     name: d.name, now: money(d.now, it, currency), before: money(d.before, it, currency), number: d.order.number, date: day(d.order.date, it),
   }));

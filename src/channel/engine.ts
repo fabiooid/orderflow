@@ -131,7 +131,10 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
       return { order: { ...next, status: 'suspended', issues: result.issues }, text: customerPreview(result.draft.newClient ?? {}, it, result.issues.map(i => i.field.replace(/^client\./, '')), config.tax?.italy) };
     }
     if (result.status === 'ready') return { order: { ...next, status: 'ready', prepared: result.order, totals: result.totals },
-      text: orderPreview(result.order, result.totals, it, result.discrepancies, config.currency) };
+      text: orderPreview(result.order, result.totals, it, result.discrepancies, config.currency, {
+        ...result.catalogueIncreases,
+        context: config.pricing?.catalogueIncreaseContext,
+      }) };
     // Catalogue names and prices are already known; the draft template must not keep printing only the original wording.
     const catalogue = result.draft.lines.some(line => line.productId) ? await connector.listProducts().catch(() => []) : [];
     return { order: { ...next, status: 'suspended', issues: result.issues }, text: orderDraft(result.draft, result.issues, it, result.client, config.currency, catalogue) };
