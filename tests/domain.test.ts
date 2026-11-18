@@ -5,7 +5,7 @@ import { DemoConnector } from '../src/connector/demo.js';
 import { prepareOrder } from '../src/domain/prepare.js';
 import { clientPickLabel, correspondingTesters, matchClients, matchProducts, relatedProducts, searchCatalogue, searchClients } from '../src/domain/matching.js';
 import { calculateLineTotals } from '../src/domain/totals.js';
-import { config, draft, harborSiblings, monasterySiblings, pharmacyTypeAccounts, prepared, sampleNameAccounts, willowmereStayAccounts } from './helpers.js';
+import { complete, config, draft, harborSiblings, monasterySiblings, pharmacyTypeAccounts, prepared, sampleNameAccounts, willowmereStayAccounts } from './helpers.js';
 
 describe('business configuration', () => {
   it('rejects unsupported modes and undeclared capabilities', () => {
@@ -219,7 +219,8 @@ describe('order preparation', () => {
   it('offers no client candidates when no client was named', async () => {
     const connector = new DemoConnector();
     connector.clients.push({ ...connector.clients[0]!, id: '202', name: 'No VAT Shop', vatNumber: undefined });
-    const result = await prepareOrder({ ...draft(), clientQuery: '' }, config(), connector, '2026-01-15');
+    const { clientId: _id, ...unnamed } = draft();
+    const result = await complete({ ...unnamed, clientQuery: '' }, connector);
     if (result.ready) throw new Error('Expected a client question');
     expect(result.issues.find(i => i.field === 'client')?.candidates).toEqual([]);
   });
@@ -227,48 +228,50 @@ describe('order preparation', () => {
     const connector = new DemoConnector();
     const { shop, hotel, cafe } = harborSiblings();
     connector.clients.push(shop, hotel, cafe);
-    const offered = await prepareOrder({ ...draft(), clientQuery: 'Fable Harbor hotel' }, config(), connector, '2026-01-15');
+    const unnamed = { ...draft(), clientId: undefined };
+    const offered = await complete({ ...unnamed, clientQuery: 'Fable Harbor hotel' }, connector);
     if (offered.ready) throw new Error('Expected a customer question, not a lock');
     expect(offered.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id)).toEqual(['211']);
-    const asked = await prepareOrder({ ...draft(), clientQuery: 'Fable Harbor' }, config(), connector, '2026-01-15');
+    const asked = await complete({ ...unnamed, clientQuery: 'Fable Harbor' }, connector);
     if (asked.ready) throw new Error('Expected a client question');
     expect(asked.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id).sort()).toEqual(['210', '211', '212']);
     expect(asked.issues.find(i => i.field === 'client')?.candidates?.some(c => c.label.includes('hotel'))).toBe(true);
-    const shopHint = await prepareOrder({ ...draft(), clientQuery: 'Fable Harbor shop' }, config(), connector, '2026-01-15');
+    const shopHint = await complete({ ...unnamed, clientQuery: 'Fable Harbor shop' }, connector);
     if (shopHint.ready) throw new Error('Expected a customer question, not a lock');
     expect(shopHint.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id)).toEqual(['210']);
-    const refine = await prepareOrder({ ...draft(), clientQuery: 'Fable Harbor spa' }, config(), connector, '2026-01-15');
+    const refine = await complete({ ...unnamed, clientQuery: 'Fable Harbor spa' }, connector);
     if (refine.ready) throw new Error('Expected sibling picks, not a missing customer');
     expect(refine.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id).sort()).toEqual(['210', '211', '212']);
-    const exactCafe = await prepareOrder({ ...draft(), clientQuery: 'Fable Harbor Cafe' }, config(), connector, '2026-01-15');
+    const exactCafe = await complete({ ...unnamed, clientQuery: 'Fable Harbor Cafe' }, connector);
     expect(exactCafe.ready && exactCafe.order.client.id).toBe('212');
   });
   it('asks which sibling for an everyday name in notes, and does not keep a shop lock after a hotel refine', async () => {
     const connector = new DemoConnector();
     const { shop, hotel } = monasterySiblings();
     connector.clients.push(shop, hotel);
-    const asked = await prepareOrder({ ...draft(), clientQuery: 'Harbour' }, config(), connector, '2026-01-15');
+    const unnamed = { ...draft(), clientId: undefined };
+    const asked = await complete({ ...unnamed, clientQuery: 'Harbour' }, connector);
     if (asked.ready) throw new Error('Expected a client question');
     expect(asked.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id).sort()).toEqual(['220', '221']);
     expect(asked.issues.find(i => i.field === 'client')?.candidates?.some(c => c.label.includes('Harbour Hotel'))).toBe(true);
-    const hotelHint = await prepareOrder({ ...draft(), clientQuery: 'Harbour hotel' }, config(), connector, '2026-01-15');
+    const hotelHint = await complete({ ...unnamed, clientQuery: 'Harbour hotel' }, connector);
     if (hotelHint.ready) throw new Error('Expected a customer question, not a lock');
     expect(hotelHint.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id)).toEqual(['221']);
-    const shopHint = await prepareOrder({ ...draft(), clientQuery: 'Harbour negozio' }, config(), connector, '2026-01-15');
+    const shopHint = await complete({ ...unnamed, clientQuery: 'Harbour negozio' }, connector);
     if (shopHint.ready) throw new Error('Expected a customer question, not a lock');
     expect(shopHint.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id)).toEqual(['220']);
-    const stale = await prepareOrder({ ...draft(), clientQuery: 'Harbour hotel', clientId: shop.id }, config(), connector, '2026-01-15');
+    const stale = await complete({ ...unnamed, clientQuery: 'Harbour hotel', clientId: shop.id }, connector);
     if (stale.ready) throw new Error('Expected sibling picks, not the already-locked shop');
     expect(stale.draft.clientId).toBeUndefined();
     expect(stale.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id)).toEqual(['221']);
-    const picked = await prepareOrder({ ...draft(), clientQuery: 'Harbour', clientId: shop.id }, config(), connector, '2026-01-15');
+    const picked = await complete({ ...unnamed, clientQuery: 'Harbour', clientId: shop.id }, connector);
     expect(picked.ready && picked.order.client.id).toBe('220');
   });
   it('asks to confirm a leftover first name plus a distinctive business word, and does not lock a street-only hit', async () => {
     const connector = new DemoConnector();
     const { agriturismo, streetOnly } = willowmereStayAccounts();
     connector.clients.push(agriturismo, streetOnly);
-    const asked = await prepareOrder({ ...draft(), clientQuery: 'Giulia Willowmere' }, config(), connector, '2026-01-15');
+    const asked = await complete({ ...draft(), clientId: undefined, clientQuery: 'Giulia Willowmere' }, connector);
     if (asked.ready) throw new Error('Expected confirmation, not an auto-lock');
     expect(asked.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id)).toEqual(['410']);
     expect(asked.issues.find(i => i.field === 'client')?.candidates?.some(c => c.label.includes('Willowmere'))).toBe(true);
@@ -277,10 +280,11 @@ describe('order preparation', () => {
     const connector = new DemoConnector();
     const { willowmere, cinderford, pebblebrook } = pharmacyTypeAccounts();
     connector.clients.push(willowmere, cinderford, pebblebrook);
-    const offered = await prepareOrder({ ...draft(), clientQuery: 'Willomere Pharmacy' }, config(), connector, '2026-01-15');
+    const unnamed = { ...draft(), clientId: undefined };
+    const offered = await complete({ ...unnamed, clientQuery: 'Willomere Pharmacy' }, connector);
     if (offered.ready) throw new Error('Expected a customer question, not a lock');
     expect(offered.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id)).toEqual(['310']);
-    const leftover = await prepareOrder({ ...draft(), clientQuery: 'Pharmacy Zorblax' }, config(), connector, '2026-01-15');
+    const leftover = await complete({ ...unnamed, clientQuery: 'Pharmacy Zorblax' }, connector);
     if (leftover.ready) throw new Error('Expected no pharmacy list for a leftover trade word');
     expect(leftover.issues.find(i => i.field === 'client')?.candidates).toEqual([]);
   });
@@ -288,17 +292,18 @@ describe('order preparation', () => {
     const connector = new DemoConnector();
     const { sample, sampler, east } = sampleNameAccounts();
     connector.clients.push(sample);
-    const asked = await prepareOrder({ ...draft(), clientQuery: 'cliente sampler' }, config(), connector, '2026-01-15');
+    const unnamed = { ...draft(), clientId: undefined };
+    const asked = await complete({ ...unnamed, clientQuery: 'cliente sampler' }, connector);
     if (asked.ready) throw new Error('Expected confirmation, not an auto-lock');
     expect(asked.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id)).toEqual(['510']);
-    const exact = await prepareOrder({ ...draft(), clientQuery: 'Cliente Sample' }, config(), connector, '2026-01-15');
+    const exact = await complete({ ...unnamed, clientQuery: 'Cliente Sample' }, connector);
     expect(exact.ready && exact.order.client.id).toBe('510');
     connector.clients.push(sampler, east);
-    const lockedExact = await prepareOrder({ ...draft(), clientQuery: 'cliente sampler' }, config(), connector, '2026-01-15');
+    const lockedExact = await complete({ ...unnamed, clientQuery: 'cliente sampler' }, connector);
     expect(lockedExact.ready && lockedExact.order.client.id).toBe('511');
     const two = new DemoConnector();
     two.clients.push(sample, east);
-    const choice = await prepareOrder({ ...draft(), clientQuery: 'cliente sampler' }, config(), two, '2026-01-15');
+    const choice = await complete({ ...unnamed, clientQuery: 'cliente sampler' }, two);
     if (choice.ready) throw new Error('Expected a choice between two close accounts');
     expect(choice.issues.find(i => i.field === 'client')?.candidates?.map(c => c.id).sort()).toEqual(['510', '512']);
   });
@@ -323,7 +328,7 @@ describe('order preparation', () => {
     expect(loaded.lines[0]).toMatchObject({ productId: '101', name: 'Pebble hand wash 250 ml', netPrice: 12 });
   });
   it('uses a stated product price and otherwise keeps the catalogue price', async () => {
-    const stated = await prepareOrder({ ...draft(), lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2, netPrice: 90 }] }, config(), new DemoConnector(), '2026-01-15');
+    const stated = await prepareOrder({ ...draft(), lines: [{ query: 'Pebble hand wash 250 ml', productId: '101', quantity: 2, netPrice: 90 }] }, config(), new DemoConnector(), '2026-01-15');
     expect(stated.ready && stated.order.lines.map(l => l.netPrice)).toEqual([90, 8]);
     const catalogue = await prepared();
     expect(catalogue.lines[0]!.netPrice).toBe(12);
@@ -341,9 +346,9 @@ describe('order preparation', () => {
   it('asks when the type is missing instead of using the only related product', async () => {
     const connector = new DemoConnector();
     connector.products[0] = { id: '101', code: 'LUNARA', name: 'Lunara Sapone Mani 250ml', description: '', netPrice: 10 };
-    const result = await prepareOrder({ ...draft(), lines: [{ query: 'candele lunara', quantity: 1 }] }, config(), connector, '2026-01-15');
+    const result = await complete({ ...draft(), lines: [{ query: 'candele lunara', quantity: 1 }] }, connector);
     expect(result.ready).toBe(false);
-    if (!result.ready) expect(result.issues.find(i => i.field === 'lines.0')?.candidates?.map(c => c.id)).toEqual(['101']);
+    if (!result.ready) expect(result.issues.find(i => i.field === 'lines.0')?.candidates?.map(c => c.id)).toEqual(expect.arrayContaining(['101']));
   });
   it('says a missing combination is not in the catalogue and lists both kinds of real products', async () => {
     const connector = new DemoConnector();
@@ -351,12 +356,13 @@ describe('order preparation', () => {
       { id: '105', code: 'DEMO-FIG-GEL', name: 'Fig shower gel 250 ml', description: '', netPrice: 14 },
       { id: '106', code: 'DEMO-CEDAR-SOAP', name: 'Cedar hand soap 250 ml', description: '', netPrice: 12 },
     );
-    const result = await prepareOrder({ ...draft(), lines: [{ query: 'fig hand soap', quantity: 2 }] }, config(), connector, '2026-01-15');
+    const result = await complete({ ...draft(), lines: [{ query: 'fig hand soap', quantity: 2 }] }, connector);
     expect(result.ready).toBe(false);
     if (result.ready) return;
     const issue = result.issues.find(i => i.field === 'lines.0');
     expect(issue?.message).toMatch(/not in the catalogue/i);
-    expect(issue?.candidates?.map(c => c.label)).toEqual(expect.arrayContaining(['Fig shower gel 250 ml', 'Cedar hand soap 250 ml']));
+    expect(issue?.candidates?.map(c => c.label).join(' ')).toMatch(/Fig shower gel 250 ml/);
+    expect(issue?.candidates?.map(c => c.label).join(' ')).toMatch(/Cedar hand soap 250 ml/);
     expect(result.draft.lines[0]?.productId).toBeUndefined();
   });
   it('prepares a tester mark as the tester catalogue product at that product’s own price', async () => {
@@ -366,13 +372,13 @@ describe('order preparation', () => {
       { id: '808', code: 'SAMPLE-T', name: 'TESTER Pebble wash', description: 'Tester bottle of the pebble wash, not the sale SKU.', netPrice: 4 },
       { id: '809', code: 'SAMPLE-FREE', name: 'TESTER Grove cream', description: '', netPrice: 0 },
     );
-    const saleAndTester = await prepareOrder({
+    const saleAndTester = await complete({
       ...draft(),
       lines: [
         { query: 'SOAP250ML Pebble hand wash 250 ml', quantity: 2 },
         { query: 'SOAP250ML Pebble hand wash 250 ml tester', quantity: 1, tester: true },
       ],
-    }, config(), connector, '2026-01-15');
+    }, connector);
     expect(saleAndTester.ready).toBe(true);
     if (!saleAndTester.ready) return;
     expect(saleAndTester.order.lines.filter(l => !l.shipping).map(l => ({ id: l.productId, code: l.code, name: l.name, quantity: l.quantity, netPrice: l.netPrice }))).toEqual([
@@ -380,20 +386,20 @@ describe('order preparation', () => {
       { id: '808', code: 'SAMPLE-T', name: 'TESTER Pebble wash', quantity: 1, netPrice: 4 },
     ]);
     expect(saleAndTester.order.lines.find(l => l.productId === '808')?.description).toBe('Tester bottle of the pebble wash, not the sale SKU.');
-    const forcedSale = await prepareOrder({
+    const forcedSale = await complete({
       ...draft(),
       lines: [{ query: 'SOAP250ML tester', productId: '804', quantity: 1, tester: true }],
-    }, config(), connector, '2026-01-15');
+    }, connector);
     expect(forcedSale.ready && forcedSale.order.lines[0]?.productId).toBe('808');
-    const free = await prepareOrder({
+    const free = await complete({
       ...draft(),
       lines: [{ query: 'Grove cream tester', quantity: 1, tester: true }],
-    }, config(), connector, '2026-01-15');
+    }, connector);
     expect(free.ready && free.order.lines[0]).toMatchObject({ productId: '809', netPrice: 0, quantity: 1 });
-    const missing = await prepareOrder({
+    const missing = await complete({
       ...draft(),
       lines: [{ query: 'DEMO-B Linen candle tester', quantity: 1, tester: true }],
-    }, config(), connector, '2026-01-15');
+    }, connector);
     expect(missing.ready).toBe(false);
     if (missing.ready) return;
     expect(missing.draft.lines[0]?.productId).toBeUndefined();
@@ -408,9 +414,9 @@ describe('order preparation', () => {
     expect(tester.ready).toBe(false);
   });
   it('asks about variants instead of choosing the cheapest candidate', async () => {
-    const result = await prepareOrder({ ...draft(), lines: [{ query: 'Pebble 250', quantity: 2 }] }, config(), new DemoConnector(), '2026-01-15');
+    const result = await complete({ ...draft(), lines: [{ query: 'Pebble 250', quantity: 2 }] });
     expect(result.ready).toBe(false);
-    if (!result.ready) expect(result.issues[0]!.candidates?.map(c => c.id)).toEqual(['101', '102']);
+    if (!result.ready) expect(result.issues.find(i => i.field === 'lines.0')?.candidates?.map(c => c.id)).toEqual(expect.arrayContaining(['101', '102']));
   });
   it('asks to confirm the delivery amount rather than silently using the default', async () => {
     const result = await prepareOrder({ ...draft(), shippingPrice: undefined }, config(), new DemoConnector(), '2026-01-15');
@@ -427,7 +433,7 @@ describe('order preparation', () => {
   it('does not merge variants even if source codes are equal', async () => {
     const connector = new DemoConnector();
     connector.products[1]!.code = connector.products[0]!.code;
-    const result = await prepareOrder({ ...draft(), lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }, { query: 'Pebble hand wash 250 ml sample', quantity: 1 }] }, config(), connector, '2026-01-15');
+    const result = await complete({ ...draft(), lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }, { query: 'Pebble hand wash 250 ml sample', quantity: 1 }] }, connector);
     expect(result.ready && result.order.lines.map(l => l.productId)).toEqual(['101', '102', '900']);
   });
   it('does not accept unknown product IDs or double-count delivery', async () => {
@@ -453,7 +459,8 @@ describe('order preparation', () => {
   it('flags duplicate new clients using name or tax identity', async () => {
     const connector = new DemoConnector();
     const { id: _, ...newClient } = connector.clients[0]!;
-    const result = await prepareOrder({ ...draft(), newClient }, config(), connector, '2026-01-15');
+    const { clientId: _clientId, ...rest } = draft();
+    const result = await prepareOrder({ ...rest, newClient }, config(), connector, '2026-01-15');
     expect(!result.ready && result.issues[0]!.message).toMatch(/existing client/);
   });
   it('uses the second fictional business configuration without code changes', async () => {
@@ -464,7 +471,7 @@ describe('order preparation', () => {
     const connector = new DemoConnector();
     connector.products[0]!.name = 'Notebook A5'; connector.products[0]!.code = 'BOOK';
     connector.products[3]!.id = '999'; connector.products[3]!.code = 'FREIGHT';
-    const result = await prepareOrder({ ...draft(), lines: [{ query: 'Notebook A5', quantity: 3 }], delivery: { country: 'FR', address: 'Fictional destination' } }, configSchema.parse(c), connector, '2026-01-15');
+    const result = await prepareOrder({ ...draft(), lines: [{ query: 'Notebook A5', productId: '101', quantity: 3 }], delivery: { country: 'FR', address: 'Fictional destination' } }, configSchema.parse(c), connector, '2026-01-15');
     expect(result.ready).toBe(true);
     if (result.ready) {
       expect(result.order.lines[1]!.productId).toBe('999');

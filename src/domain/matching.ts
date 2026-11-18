@@ -386,6 +386,34 @@ export function clientPickLabel(client: { name: string; code?: string; city?: st
   return [client.code, client.name, ...extra, client.city, client.country, client.vatNumber].filter(Boolean).join(' — ');
 }
 
+const SIZE_UNITS: Record<string, number> = { ml: 1, cl: 10, l: 1000, lt: 1000, litro: 1000, litri: 1000, g: 1, gr: 1, kg: 1000, mm: 1, cm: 10 };
+
+/** Normalised size tokens such as `volume:250`. Catalogue names write litres as "5lt"; documents as "5 L". */
+export function measureSizes(text: string) {
+  return [...text.toLowerCase().matchAll(/(\d+(?:[.,]\d+)?)\s*(ml|cl|kg|gr|cm|mm|litri|litro|lt|l|g)\b/g)]
+    .map(([, n, unit]) => `${['ml', 'cl', 'l', 'lt', 'litro', 'litri'].includes(unit!) ? 'volume' : ['mm', 'cm'].includes(unit!) ? 'length' : 'weight'}:${Number(n!.replace(',', '.')) * SIZE_UNITS[unit!]!}`);
+}
+
+/** Sizes that identify the catalogue record itself, not kit contents in a longer description. */
+export function productIdentitySizes(product: Pick<Product, 'code' | 'name'>) {
+  return measureSizes(`${product.code} ${product.name}`);
+}
+
+/**
+ * Operator-requested sizes for this line. Kit contents printed only in an attachment are not
+ * constraints. A size the operator typed is a constraint. A size that appears only in the model
+ * query, with no attachment source, is treated as an operator request so it cannot silently pass.
+ */
+export function explicitLineSizes(lineQuery: string, operatorWords: string, attachmentText = '') {
+  const wordSizes = new Set(measureSizes(operatorWords));
+  const attachSizes = new Set(measureSizes(attachmentText));
+  return [...new Set(measureSizes(lineQuery))].filter(size => {
+    if (wordSizes.has(size)) return true;
+    if (attachSizes.has(size)) return false;
+    return true;
+  });
+}
+
 /** "A oppure B" (or "A or B") naming catalogue products exactly, such as a doubtful value read from an order form; anything before a colon is a label. */
 export function namedAlternatives(query: string, products: Product[]): Product[] {
   const parts = query.replace(/^[^:]*:\s*/, '').split(/\s+(?:oppure|or)\s+/i);

@@ -183,7 +183,7 @@ it('lets an order take over the open new-customer request, carrying the customer
     .mockImplementationOnce(async (_prompt, act) => { await act.customer(draftSchema.parse({ newClient: customer })); return { reply: '', locale: 'it' }; })
     .mockImplementationOnce(async (prompt, act) => {
       expect(prompt.openRequest).toMatchObject({ kind: 'customer', draft: { newClient: customer } });
-      await act.order(draftSchema.parse({ newClient: prompt.openRequest!.draft.newClient, lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 8 }));
+      await act.order(draftSchema.parse({ newClient: prompt.openRequest!.draft.newClient, lines: [{ query: 'Pebble hand wash 250 ml', productId: '101', quantity: 2 }], shippingPrice: 8 }));
       return { reply: '', locale: 'it' };
     });
   try {
@@ -195,9 +195,12 @@ it('lets an order take over the open new-customer request, carrying the customer
     await controller.handle(message(2, 'ok crea ordine'));
     expect((await store.order('u1'))?.status).toBe('cancelled');
     const order = await store.order('u2');
-    expect(order).toMatchObject({ status: 'ready', draft: { newClient: { name: 'Marco Esempio' } } });
     expect(order?.kind).toBeUndefined();
-    expect(send.mock.calls[1]![0]).toContain('📦 Anteprima ordine');
+    expect(order?.draft.newClient).toMatchObject({ name: 'Marco Esempio' });
+    expect(order?.draft.shippingPrice).toBeUndefined();
+    expect(order?.status).toBe('suspended');
+    expect(order?.issues?.some(i => i.field === 'shippingPrice')).toBe(true);
+    expect(send.mock.calls[1]![0]).not.toContain('📦 Anteprima ordine');
   } finally { store.close(); await storage.close(); }
 });
 it('lists the request that blocks a new one instead of saying none is open', async () => {

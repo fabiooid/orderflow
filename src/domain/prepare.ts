@@ -2,41 +2,30 @@ import type { AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
 import { clientSchema, draftSchema, preparedOrderSchema, type Client, type Issue, type OrderDraft, type OrderLine, type PreparedOrder, type Product, type VatValidation } from './types.js';
 import { missingCustomerFields } from './customer.js';
-import { clientPickLabel, exactClients, isTester, lineWantsTester, matchClients, matchProducts, nameInText, namedAlternatives, normalize, relatedProducts, sameClient, searchClients, testerQuery } from './matching.js';
+import { isTester, lineWantsTester, normalize, sameClient } from './matching.js';
 
 /** `draft` is the draft as preparation read it, for example without a delivery address equal to the billing one. */
 export type Preparation = { ready: false; issues: Issue[]; draft: OrderDraft; clientId?: string } | { ready: true; order: PreparedOrder; draft: OrderDraft };
 export type ValidationLookup = (country: string, vatNumber: string) => Promise<VatValidation>;
-const toCandidates = (clients: Client[]) => clients.filter(c => c.id).map(c => ({ id: c.id!, label: clientPickLabel(c) }));
 
-export async function prepareOrder(input: OrderDraft, config: AppConfig, connector: Pick<OrderConnector, 'listProducts' | 'listClients'>, date: string, validateVat?: ValidationLookup, operatorText = ''): Promise<Preparation> {
+/**
+ * Commercial completeness: prices, VAT, delivery, quantities. Identities must already be accepted
+ * or left open by the resolver; this function does not rematch products or customers.
+ */
+export async function prepareOrder(input: OrderDraft, config: AppConfig, connector: Pick<OrderConnector, 'listProducts' | 'listClients'>, date: string, validateVat?: ValidationLookup, _operatorText = ''): Promise<Preparation> {
   const draft = draftSchema.parse(input);
   const [products, clients] = await Promise.all([connector.listProducts(), connector.listClients()]);
   const issues: Issue[] = [];
-  const query = draft.clientQuery.trim();
-  const exact = query ? exactClients(query, clients) : [];
-  const typedExact = !operatorText.trim() ? exact : exact.filter(c => [c.name, c.vatNumber ?? ''].some(value => nameInText(operatorText, value)));
   const locked = draft.clientId ? clients.find(c => c.id === draft.clientId) : undefined;
-  // A refine such as "hotel" after a shop lock must not keep that shop. Keep the id only when
-  // this query still fits that record (a button pick, or the same customer restated).
-  const lockedFitsQuery = !query || (locked ? matchClients(query, [locked]).length === 1 : false);
-  if (locked && !lockedFitsQuery) delete draft.clientId;
-  const matches = locked && lockedFitsQuery
-    ? [locked]
-    : typedExact;
-  const uniqueMatch = matches.length === 1 && (Boolean(draft.clientId) || typedExact.length === 1);
-  let client: Partial<Client> | undefined = draft.newClient ?? (uniqueMatch ? matches[0] : undefined);
-  if (!draft.newClient && uniqueMatch && matches[0]?.id) draft.clientId = matches[0].id;
+  let client: Partial<Client> | undefined = draft.newClient ?? locked;
   if (draft.newClient) {
     const duplicates = clients.filter(c => sameClient(c, draft.newClient!));
     if (duplicates.length) {
-      issues.push({ field: 'client', message: 'Possible existing client: choose the record before creating another', candidates: toCandidates(duplicates) });
+      issues.push({ field: 'client', message: 'Possible existing client: choose the record before creating another', candidates: duplicates.filter(c => c.id).map(c => ({ id: c.id!, label: c.name })) });
       client = undefined;
     }
   } else if (!client) {
-    const suggested = query ? searchClients(query, clients) : [];
-    const offered = suggested.length ? suggested : matchClients(query, clients);
-    issues.push({ field: 'client', message: 'Choose an existing client or supply complete new-client details', candidates: toCandidates(offered) });
+    issues.push({ field: 'client', message: 'Choose an existing client or supply complete new-client details' });
   }
   if (client) {
     const valid = clientSchema.safeParse(client);
@@ -48,7 +37,6 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
   if (!shipping) throw new Error('Configured shipping product does not exist');
 
   if (!draft.lines.length) issues.push({ field: 'lines', message: 'Add at least one product and quantity' });
-  const catalogue = products.filter(p => p.id !== shipping.id);
   const selected: { product: Product; quantity: number; netPrice?: number; index: number }[] = [];
   for (const [index, line] of draft.lines.entries()) {
     const field = `lines.${index}`;
@@ -62,35 +50,26 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
       continue;
     }
     const wantsTester = lineWantsTester(line);
-    const lookup = testerQuery(line);
-    const accepted = pick && (wantsTester ? isTester(pick) : (!isTester(pick) || nameInText(line.query, pick.code) || normalize(pick.code) === normalize(line.query) || normalize(pick.name) === normalize(line.query))) ? pick : undefined;
-    const matches = accepted || (line.productId !== undefined && !wantsTester) ? [] : matchProducts(lookup, catalogue);
-    const chosen = accepted ?? (matches.length === 1 ? matches[0] : undefined);
-    if (chosen) {
-      line.productId = chosen.id;
-      const documentPrice = line.documentPrice;
-      let netPrice = line.netPrice;
-      if (documentPrice) {
-        const same = documentPrice.basis === 'net' && documentPrice.amount === chosen.netPrice;
-        if (documentPrice.decision === 'catalogue' || (documentPrice.decision === 'pending' && same)) {
-          netPrice = undefined;
-        } else if (documentPrice.decision === 'document' && documentPrice.basis === 'net') {
-          netPrice = documentPrice.amount;
-        } else {
-          issues.push({ field: `${field}.documentPrice`, message: `Document: ${documentPrice.amount} ${config.currency} (${documentPrice.basis}); catalogue: ${chosen.netPrice} ${config.currency} net. Choose catalogue prices or explicitly confirm a net document price.`, priceComparison: { document: documentPrice.amount, catalogue: chosen.netPrice, basis: documentPrice.basis } });
-        }
-      }
-      selected.push({ product: chosen, quantity: line.quantity, netPrice, index });
+    const accepted = pick && (wantsTester ? isTester(pick) : (!isTester(pick) || normalize(pick.code) === normalize(line.query) || normalize(pick.name) === normalize(line.query))) ? pick : undefined;
+    if (!accepted) {
+      issues.push({ field, message: 'Choose the exact product or variant' });
       continue;
     }
-    const named = matches.length ? [] : namedAlternatives(lookup, catalogue);
-    const candidates = matches.length ? matches : named.length ? named : relatedProducts(lookup, catalogue);
-    const message = matches.length || named.length ? 'Choose the exact product or variant' : candidates.length ? 'This combination is not in the catalogue. Related products that match part of the request are listed; none of them is the requested item.' : 'No matching product; clarify the name and size';
-    issues.push({ field, message, candidates: candidates.map(p => ({ id: p.id, label: p.name })) });
+    const documentPrice = line.documentPrice;
+    let netPrice = line.netPrice;
+    if (documentPrice) {
+      const same = documentPrice.basis === 'net' && documentPrice.amount === accepted.netPrice;
+      if (documentPrice.decision === 'catalogue' || (documentPrice.decision === 'pending' && same)) {
+        netPrice = undefined;
+      } else if (documentPrice.decision === 'document' && documentPrice.basis === 'net') {
+        netPrice = documentPrice.amount;
+      } else {
+        issues.push({ field: `${field}.documentPrice`, message: `Document: ${documentPrice.amount} ${config.currency} (${documentPrice.basis}); catalogue: ${accepted.netPrice} ${config.currency} net. Choose catalogue prices or explicitly confirm a net document price.`, priceComparison: { document: documentPrice.amount, catalogue: accepted.netPrice, basis: documentPrice.basis } });
+      }
+    }
+    selected.push({ product: accepted, quantity: line.quantity, netPrice, index });
   }
 
-  // Legacy template prices are not a live price list. Always use fresh API prices
-  // unless this order explicitly supplies a unit price.
   if (draft.priceTier && draft.priceTier !== 'standard') issues.push({ field: 'priceTier', message: 'Automatic price lists are not supported. Confirm standard API prices or supply explicit unit prices and clear the price-list selection.' });
 
   const delivery = draft.delivery ?? (client ? { country: client.country ?? '', address: [client.street, client.postalCode, client.city, client.country].join(', ') } : undefined);
@@ -106,10 +85,8 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
     if (status !== 'valid') issues.push({ field: 'vat', message: `VAT validation is ${status}. Confirm a manual VIES check for ${client.country} ${client.vatNumber ?? "(missing VAT number)"}; N3.2 requires a valid result.` });
   }
   const shippingPrice = draft.shippingPrice;
-  // Delivery is just another line: ask about it only once everything else is settled, never as an opening gate.
   if (!issues.length && shippingPrice === undefined) issues.push({ field: 'shippingPrice', message: `Confirm the delivery charge (catalogue default ${shipping.netPrice} ${config.currency} excluding VAT) or remove it`, defaultPrice: shipping.netPrice });
-  // Report the existing customer already identified, so questions can show who the order is for.
-  const existing = !draft.newClient && matches.length === 1 ? matches[0]!.id : undefined;
+  const existing = locked?.id;
   const binding = rule ? config.invoicing.vat.find(item => item.ruleId === rule.id) : undefined;
   if (rule && !binding) issues.push({ field: 'vat', message: 'No provider VAT binding matches this rule; review required' });
   if (issues.length || !client || !delivery || !rule || !binding || shippingPrice === undefined) return { ready: false, issues, draft, ...(existing ? { clientId: existing } : {}) };

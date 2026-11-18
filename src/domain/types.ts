@@ -43,6 +43,8 @@ export const draftSchema = z.object({
   clientId: z.string().min(1).optional(),
   newClient: clientSchema.omit({ id: true }).partial().optional(),
   lines: z.array(z.object({
+    /** Stable within one request. Absent on drafts stored before line refs existed. */
+    ref: z.string().min(1).max(64).optional(),
     query: z.string().min(1),
     productId: z.string().min(1).optional(),
     quantity: z.number().finite().positive().max(100000).optional(),
@@ -105,4 +107,13 @@ export type SavedOrder = { id: string; number: string; url?: string };
 /** A client's earlier order, read only to point out differences. */
 export type ClientOrder = { id: string; number: string; date: string; lines: { productId?: string; code: string; name: string; quantity: number; netPrice: number; discountPercent: number }[] };
 export type VatValidation = 'valid' | 'invalid' | 'unavailable' | 'unchecked';
-export type Issue = { matchingStatus?: 'ambiguous' | 'no-match' | 'unavailable'; field: string; message: string; candidates?: { id: string; label: string }[]; priceComparison?: { document: number; catalogue: number; basis: 'net' | 'gross' | 'unclear' }; defaultPrice?: number };
+export type Issue = {
+  matchingStatus?: 'ambiguous' | 'no-match' | 'unavailable';
+  field: string;
+  message: string;
+  candidates?: { id: string; label: string }[];
+  priceComparison?: { document: number; catalogue: number; basis: 'net' | 'gross' | 'unclear' };
+  defaultPrice?: number;
+  /** Last charged delivery on an earlier order for this customer. Offered, never applied. */
+  lastPaidPrice?: number;
+};

@@ -1,6 +1,6 @@
 import { createClient, type Client } from '@libsql/client';
 import type { Issue, OrderDraft, PreparedOrder, Totals, SavedOrder } from '../domain/types.js';
-import type { ConfirmedChoice, Decision } from '../matching/resolver.js';
+import type { ConfirmedChoice, Decision, PendingQuestion, SearchEvidence } from '../matching/resolver.js';
 import type { MessageEvent, OrderLink } from './contract.js';
 import type { AppConfig } from '../config/schema.js';
 import type { ConnectorMode } from '../config/load.js';
@@ -9,7 +9,13 @@ export const kindOf = (c: Pick<Conversation, 'kind'>) => c.kind ?? 'order';
 /** A request's conversation so far, the evidence identity matching reads; bounded so long requests stay usable. */
 export const appendSource = (source: string | undefined, text: string) => [source, text].filter(Boolean).join('\n').slice(-12000);
 /** One order or customer request. `issues` are what the order or customer API last reported as still needed. */
-export type Conversation = { confirmedChoices?: ConfirmedChoice[]; sourceText?: string; matchingDecisions?: Decision[]; locale?: AppConfig['locale']; orderId: string; startedBy?: string; startedAt?: string; kind?: 'customer'; revision: number; status: 'new' | 'suspended' | 'ready' | 'reviewed' | 'saving' | 'saved' | 'cancelled'; prepared?: PreparedOrder; totals?: Totals; savedOrder?: SavedOrder; draft: OrderDraft; issues?: Issue[]; policy: string };
+export type Conversation = {
+  confirmedChoices?: ConfirmedChoice[]; sourceText?: string; operatorWords?: string; attachmentText?: string;
+  pendingQuestion?: PendingQuestion; searchEvidence?: SearchEvidence[];
+  matchingDecisions?: Decision[]; locale?: AppConfig['locale']; orderId: string; startedBy?: string; startedAt?: string;
+  kind?: 'customer'; revision: number; status: 'new' | 'suspended' | 'ready' | 'reviewed' | 'saving' | 'saved' | 'cancelled';
+  prepared?: PreparedOrder; totals?: Totals; savedOrder?: SavedOrder; draft: OrderDraft; issues?: Issue[]; policy: string;
+};
 /**
  * A stored request as the current code expects it. Requests saved before ids became opaque strings hold numeric
  * product and customer ids; they load as the same ids in string form, so an open request survives the upgrade.
@@ -19,7 +25,7 @@ export function loadConversation(state: string): Conversation {
   const id = <T>(value: T) => (typeof value === 'number' ? String(value) : value);
   return {
     ...c,
-    draft: { ...c.draft, clientId: id(c.draft.clientId), lines: c.draft.lines.map(line => ({ ...line, productId: id(line.productId) })) },
+    draft: { ...c.draft, clientId: id(c.draft.clientId), lines: c.draft.lines.map((line, index) => ({ ...line, productId: id(line.productId), ref: line.ref ?? `L${index + 1}` })) },
     ...(c.prepared ? { prepared: { ...c.prepared, client: { ...c.prepared.client, id: id(c.prepared.client.id) }, lines: c.prepared.lines.map(line => ({ ...line, productId: id(line.productId) })) } } : {}),
     ...(c.savedOrder ? { savedOrder: { ...c.savedOrder, id: id(c.savedOrder.id) } } : {}),
     ...(c.confirmedChoices ? { confirmedChoices: c.confirmedChoices.map(choice => ({ ...choice, id: id(choice.id) })) } : {}),

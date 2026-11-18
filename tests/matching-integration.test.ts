@@ -18,26 +18,39 @@ it('requires an installed matcher when matching is enabled', () => {
   expect(() => createIdentityResolver(config(), new DemoConnector(), { config: on })).toThrow(/selectMany/);
 });
 
-it('replaces model IDs with application-validated decisions and preserves price/quantity data', async () => {
+it('replaces model IDs with application-validated decisions and does not lock a matcher proposal', async () => {
   const input = { ...draft(), clientId: '202', lines: [{ query: 'small pebble wash', productId: '102', quantity: 3, netPrice: 9 }] };
   const resolved = await resolver().resolve(input, context);
-  expect(resolved.issues).toEqual([]);
-  expect(resolved.draft).toMatchObject({ clientId: '201', lines: [{ productId: '101', quantity: 3, netPrice: 9 }] });
   expect(input.clientId).toBe('202');
-  expect(resolved.decisions).toHaveLength(2);
-  expect(resolved.decisions[1]).toMatchObject({ source: 'jev', model: 'test-model', selectedId: '101' });
-});
-
-it.each(['ambiguous', 'no-match', 'unavailable'] as const)('never falls through to lexical matching on %s', async status => {
-  const resolved = await resolver(new DemoConnector(), async requests => requests.map(() => result(status))).resolve({ ...draft(), clientId: '201', lines: [{ query: 'Pebble hand wash 250 ml', productId: '101', quantity: 2 }] }, context);
-  expect(resolved.issues).toHaveLength(2);
   expect(resolved.draft.clientId).toBeUndefined();
   expect(resolved.draft.lines[0]?.productId).toBeUndefined();
+  expect(resolved.draft.lines[0]).toMatchObject({ quantity: 3, netPrice: 9 });
+  expect(resolved.issues.some(i => i.field === 'client' && i.candidates?.length)).toBe(true);
+  expect(resolved.issues.some(i => i.field === 'lines.0' && i.candidates?.length)).toBe(true);
+  expect(resolved.decisions).toHaveLength(2);
+  expect(resolved.decisions.every(d => d.status !== 'matched')).toBe(true);
+});
+
+it.each(['ambiguous', 'no-match', 'unavailable'] as const)('never locks identities on matcher %s, and keeps usable candidates', async status => {
+  const resolved = await resolver(new DemoConnector(), async requests => requests.map(() => result(status))).resolve({ ...draft(), clientId: '201', lines: [{ query: 'Pebble hand wash 250 ml', productId: '101', quantity: 2 }] }, context);
+  expect(resolved.draft.clientId).toBeUndefined();
+  expect(resolved.draft.lines[0]?.productId).toBeUndefined();
+  expect(resolved.issues.some(i => i.field === 'client')).toBe(true);
+  expect(resolved.issues.some(i => i.field === 'lines.0')).toBe(true);
+  if (status === 'no-match') {
+    expect(resolved.issues.find(i => i.field === 'client')?.candidates?.length).toBeGreaterThan(0);
+    expect(resolved.issues.find(i => i.field === 'lines.0')?.message).not.toMatch(/catalogue absent/i);
+  }
 });
 
 it('rejects an ID outside the eligible candidate set even from an injected selector', async () => {
-  const resolved = await resolver(new DemoConnector(), async requests => requests.map(() => result('matched', '900'))).resolve(draft(), context);
-  expect(resolved.issues.every(i => i.matchingStatus === 'unavailable')).toBe(true);
+  const resolved = await resolver(new DemoConnector(), async requests => requests.map(() => result('matched', '900'))).resolve(
+    { ...draft(), clientId: undefined, lines: [{ query: 'small pebble wash', quantity: 2 }] },
+    { ...context, operatorText: 'small pebble wash' },
+  );
+  expect(resolved.draft.clientId).toBeUndefined();
+  expect(resolved.draft.lines[0]?.productId).toBeUndefined();
+  expect(resolved.issues.some(i => i.candidates?.some(c => c.id === '900'))).toBe(false);
 });
 
 it('shadow records judgments without changing any draft fields or adding blocking issues', async () => {
@@ -48,10 +61,23 @@ it('shadow records judgments without changing any draft fields or adding blockin
   expect(resolved.decisions.some(d => d.selectedId === '101')).toBe(true);
 });
 
-it('off mode performs no extra reads, alias retrieval or Jev requests', async () => {
-  const connector = new DemoConnector(); const read = vi.spyOn(connector, 'listProducts'); const select = vi.fn(successful);
-  expect(await resolver(connector, select, 'off').resolve(draft(), context)).toEqual({ draft: draft(), issues: [], decisions: [] });
-  expect(read).not.toHaveBeenCalled(); expect(select).not.toHaveBeenCalled();
+it('off mode reads the catalogue for exact identities and never calls the matcher', async () => {
+  const connector = new DemoConnector(); const select = vi.fn(successful);
+  const exact = await resolver(connector, select, 'off').resolve(
+    { ...draft(), clientId: undefined, lines: [{ query: 'DEMO-A', quantity: 2 }] },
+    { ...context, operatorText: 'Example Studio DEMO-A', operatorWords: 'Example Studio DEMO-A' },
+  );
+  expect(exact.draft.clientId).toBe('201');
+  expect(exact.draft.lines[0]?.productId).toBe('101');
+  expect(select).not.toHaveBeenCalled();
+  const fuzzy = await resolver(connector, select, 'off').resolve(
+    { ...draft(), clientId: undefined, lines: [{ query: 'small pebble', quantity: 2 }] },
+    { ...context, operatorText: 'small pebble for the studio', operatorWords: 'small pebble for the studio' },
+  );
+  expect(fuzzy.draft.clientId).toBeUndefined();
+  expect(fuzzy.draft.lines[0]?.productId).toBeUndefined();
+  expect(fuzzy.issues.length).toBeGreaterThan(0);
+  expect(select).not.toHaveBeenCalled();
 });
 
 it('uses exact codes and canonical form names without a model ID bypass', async () => {
@@ -60,7 +86,7 @@ it('uses exact codes and canonical form names without a model ID bypass', async 
   const resolved = await resolver(connector, select).resolve({ ...draft(), lines: [{ query: p.code, productId: '999', quantity: 2 }] }, { ...context, operatorText: `Example Studio: ${p.code}` });
   expect(resolved.draft.lines[0]?.productId).toBe('101');
   expect(resolved.decisions[1]?.source).toBe('exact');
-  expect(select.mock.calls[0]?.[0]).toHaveLength(0);
+  expect(select).not.toHaveBeenCalled();
 });
 
 it('treats a unique code in a spreadsheet line as exact and ignores a model-written product id', async () => {
@@ -74,7 +100,7 @@ it('treats a unique code in a spreadsheet line as exact and ignores a model-writ
   const first = await resolver(connector, select).resolve({ ...draft(), lines: [{ query, quantity: 2 }] }, { ...context, operatorText });
   expect(first.draft.lines[0]?.productId).toBe('c1');
   expect(first.decisions.find(d => d.field === 'lines.0')).toMatchObject({ source: 'exact', selectedId: 'c1' });
-  expect(select.mock.calls[0]?.[0].some(r => r.kind === 'product')).toBe(false);
+  expect(select.mock.calls.some(call => call[0].some(r => r.kind === 'product'))).toBe(false);
   const second = await resolver(connector, select).resolve(
     { ...first.draft, lines: [{ query, productId: '101', quantity: 2 }] },
     { ...context, revision: 2, operatorText },
@@ -88,12 +114,14 @@ it('filters shipping, testers and contradictory sizes before semantic selection'
   const products = await connector.listProducts();
   vi.spyOn(connector, 'listProducts').mockResolvedValue([...products,
     { id: '991', code: 'T', name: 'TESTER Pebble wash 250 ml', description: '', netPrice: 3 },
-    { id: '992', code: 'BIG', name: 'Pebble wash 1 l', description: '', netPrice: 30 }]);
+    { id: '992', code: 'BIG', name: 'Pebble wash 1 l', description: '', netPrice: 30 },
+    { id: '993', code: 'PEB250B', name: 'Pebble wash 250 ml bottle', description: '', netPrice: 11 }]);
   const select = vi.fn(successful);
-  await resolver(connector, select).resolve({ ...draft(), lines: [{ query: 'pebble wash 250 ml', quantity: 2 }] }, context);
-  const candidates = select.mock.calls[0]![0].find(r => r.kind === 'product')!.candidates;
-  expect(candidates.map(c => c.id)).not.toEqual(expect.arrayContaining(['900']));
-  expect(candidates.some(c => ['900', '991', '992'].includes(c.id))).toBe(false);
+  const resolved = await resolver(connector, select).resolve({ ...draft(), clientId: undefined, lines: [{ query: 'pebble wash 250 ml', quantity: 2 }] }, { ...context, operatorText: 'pebble wash 250 ml' });
+  const offered = resolved.issues.find(i => i.field === 'lines.0')?.candidates?.map(c => c.id) ?? [];
+  expect(offered).not.toEqual(expect.arrayContaining(['900', '991', '992']));
+  expect(offered).toEqual(expect.arrayContaining(['101', '993']));
+  expect(resolved.draft.lines[0]?.productId).toBeUndefined();
 });
 
 it('keeps conflicting aliases ambiguous without letting a confident judgment resolve them', async () => {
@@ -109,7 +137,9 @@ it('refreshes identities and evidence on every revision; price changes never ent
   const products = await connector.listProducts();
   read.mockResolvedValue(products.filter(p => p.id !== '101'));
   const next = await r.resolve(first.draft, { ...context, revision: 2, operatorText: 'Make it three' });
-  expect(next.issues).toContainEqual(expect.objectContaining({ field: 'lines.0', matchingStatus: 'unavailable' }));
+  expect(next.draft.lines[0]?.productId).toBeUndefined();
+  expect(next.issues).toContainEqual(expect.objectContaining({ field: 'lines.0' }));
+  expect(next.issues.find(i => i.field === 'lines.0')?.candidates?.some(c => c.id === '101')).toBe(false);
   expect(next.decisions[1]?.inputHash).not.toBe(first.decisions[1]?.inputHash);
   expect(next.decisions[1]?.candidateHash).not.toBe(first.decisions[1]?.candidateHash);
 });
@@ -150,27 +180,37 @@ it('oversized complete sets fail closed rather than silently using a top-15 shor
 it('new clients require a complete no-match; semantic duplicate or outage prevents preparation', async () => {
   const connector = new DemoConnector(); const [client] = await connector.listClients();
   const { id, ...newClient } = client!;
-  const input = { ...draft(), clientQuery: 'New trading name', newClient, lines: [] };
-  const resolved = await resolver(connector).resolve(input, context);
+  const duplicate = { ...draft(), clientId: undefined, clientQuery: 'Example Studio', newClient, lines: [] };
+  const resolved = await resolver(connector).resolve(duplicate, { ...context, operatorText: 'Example Studio', operatorWords: 'Example Studio' });
   expect(resolved.issues[0]).toMatchObject({ field: 'client', matchingStatus: 'ambiguous' });
-  const missing = await resolver(connector, async requests => requests.map(() => result('no-match'))).resolve(input, context);
+  const missing = await resolver(connector, async requests => requests.map(() => result('no-match'))).resolve(
+    { ...draft(), clientId: undefined, clientQuery: 'New trading name', newClient: { ...newClient, name: 'New trading name' }, lines: [] },
+    { ...context, operatorText: 'New trading name', operatorWords: 'New trading name' },
+  );
   expect(missing.issues).toEqual([]);
 });
 
 it('the order API re-resolves every call and never calculates totals for unresolved identities', async () => {
   const connector = new DemoConnector(); const totals = vi.spyOn(connector, 'calculateTotals');
-  const select = vi.fn<SelectMany>().mockImplementationOnce(async requests => requests.map(() => result('ambiguous'))).mockImplementation(successful);
+  const select = vi.fn<SelectMany>(successful);
   const drafts = createDraftApi(config(), connector, resolver(connector, select));
   const first = await drafts.order({ ...draft(), clientId: '202' }, context, '2026-10-08');
   expect(first.status).toBe('needs'); expect(totals).not.toHaveBeenCalled();
-  const next = await drafts.order({ ...draft(), clientId: '202' }, { ...context, operatorText: 'Use the small pebble wash for the example shop', revision: 2 }, '2026-10-08');
+  const fuzzy = await drafts.order({ ...draft(), clientId: '202' }, { ...context, operatorText: 'Use the small pebble wash for the example shop', revision: 2 }, '2026-10-08');
+  expect(fuzzy.status).toBe('needs'); expect(totals).not.toHaveBeenCalled();
+  const spoken = 'Example Studio: 2 Pebble hand wash 250 ml. Delivery eight.';
+  const next = await drafts.order(
+    { ...draft(), clientId: undefined, lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }] },
+    { ...context, operatorText: spoken, operatorWords: spoken, revision: 3 },
+    '2026-10-08',
+  );
   expect(next.status).toBe('ready');
   if (next.status === 'ready') {
     expect(next.order.client.id).toBe('201');
     expect(next.order.lines[0]?.productId).toBe('101');
     expect(next.decisions).toHaveLength(2);
   }
-  expect(select).toHaveBeenCalledTimes(2); expect(connector.createCalls).toBe(0);
+  expect(connector.createCalls).toBe(0);
 });
 
 it('operator button choices bypass the model but remain limited to current records', async () => {
@@ -250,10 +290,18 @@ it('an explicit code cannot silently turn into a different size or a tester', as
   vi.spyOn(connector, 'listProducts').mockResolvedValue([...products, { id: '991', code: 'T', name: 'TESTER Pebble wash 250 ml', description: '', netPrice: 3 }]);
   const select = vi.fn(successful);
   const r = resolver(connector, select);
-  await r.resolve({ ...draft(), lines: [{ query: `${p.code} 500 ml`, quantity: 2 }] }, context);
-  expect(select.mock.calls[0]![0].find(r => r.kind === 'product')!.candidates).toEqual([]);
-  await r.resolve({ ...draft(), lines: [{ query: 'wash 250 ml, non tester', quantity: 2 }] }, context);
-  expect(select.mock.calls[1]![0].find(r => r.kind === 'product')!.candidates.some(c => c.id === '991')).toBe(false);
+  const conflict = await r.resolve(
+    { ...draft(), clientId: undefined, lines: [{ query: `${p.code} 500 ml`, quantity: 2 }] },
+    { ...context, operatorText: `${p.code} 500 ml`, operatorWords: `${p.code} 500 ml` },
+  );
+  expect(conflict.draft.lines[0]?.productId).toBeUndefined();
+  expect(conflict.issues).toContainEqual(expect.objectContaining({ field: 'lines.0', matchingStatus: 'ambiguous' }));
+  expect(conflict.issues.find(i => i.field === 'lines.0')?.message).toMatch(/size or variant/i);
+  const denied = await r.resolve(
+    { ...draft(), clientId: undefined, lines: [{ query: 'wash 250 ml, non tester', quantity: 2 }] },
+    { ...context, operatorText: 'wash 250 ml, non tester', operatorWords: 'wash 250 ml, non tester' },
+  );
+  expect(denied.issues.find(i => i.field === 'lines.0')?.candidates?.some(c => c.id === '991')).toBe(false);
 });
 
 it('keeps explicit choices stable through quantity/price changes and invalidates changed identity data', async () => {
@@ -265,10 +313,10 @@ it('keeps explicit choices stable through quantity/price changes and invalidates
   const next = await r.resolve({ ...first.draft, lines: [{ ...first.draft.lines[0]!, quantity: 3 }] }, { ...context, revision: 2, operatorText: 'Make it three', confirmedChoices: choices });
   expect(next.draft.lines[0]).toMatchObject({ productId: '101', quantity: 3 });
   expect(next.decisions[1]?.source).toBe('operator');
-  expect(select.mock.calls.at(-1)![0].some(r => r.kind === 'product')).toBe(false);
+  expect(select.mock.calls.some(call => call[0].some(r => r.kind === 'product'))).toBe(false);
   connector.products[0]!.name = 'Different product';
-  await r.resolve(first.draft, { ...context, revision: 3, confirmedChoices: choices });
-  expect(select.mock.calls.at(-1)![0].some(r => r.kind === 'product')).toBe(true);
+  const changed = await r.resolve(first.draft, { ...context, revision: 3, confirmedChoices: choices });
+  expect(changed.draft.lines[0]?.productId).toBeUndefined();
 });
 
 it('does not calculate totals when fresh preparation data differs from the judged snapshot', async () => {
@@ -294,8 +342,8 @@ it('excludes a matching VAT record when its city contradicts the requested catal
     { ...base, id: '202', name: 'Rossi', city: 'Roma', vatNumber: 'IT00000000002' });
   const select = vi.fn<SelectMany>(async requests => requests.map(r => r.candidates.length ? result('matched', r.candidates[0]!.id) : result('no-match')));
   const query = 'Rossi Milano con partita IVA IT00000000002';
-  const resolved = await resolver(connector, select).resolve({ ...draft(), clientQuery: query, lines: [] }, { ...context, operatorText: query });
-  expect(select.mock.calls[0]![0][0]!.candidates).toEqual([]);
+  const resolved = await resolver(connector, select).resolve({ ...draft(), clientId: undefined, clientQuery: query, lines: [] }, { ...context, operatorText: query, operatorWords: query });
+  expect(select.mock.calls.some(call => call[0].some(req => req.kind === 'client'))).toBe(false);
   expect(resolved.decisions[0]?.status).toBe('no-match');
   expect(resolved.draft.clientId).toBeUndefined();
 });
@@ -305,13 +353,11 @@ it('lets the named customer replace a different company read from a document, li
   connector.clients.push({ id: '300', name: 'Harbor Goods Srl', country: 'IT', street: 'Example Wharf 4', city: 'Example City', postalCode: '00000', vatNumber: 'IT00000000999', notes: '' });
   const selectMany = vi.fn<SelectMany>(async requests => requests.map(r => result('matched', r.kind === 'client' ? '201' : '101')));
   const harbor = { name: 'Harbor Goods Srl', country: 'IT', street: 'Example Wharf 4', city: 'Example City', postalCode: '00000', vatNumber: 'IT00000000999' };
-  const input = { ...draft(), clientQuery: 'Example Studio', newClient: harbor, lines: [] };
-  const resolved = await resolver(connector, selectMany).resolve(input, { ...context, operatorText: 'Order for Example Studio\n[Content read from attachments]\nHarbor Goods Srl P.IVA IT00000000999' });
-  expect(resolved.issues).toEqual([]);
+  const input = { ...draft(), clientId: undefined, clientQuery: 'Example Studio', newClient: harbor, lines: [] };
+  const resolved = await resolver(connector, selectMany).resolve(input, { ...context, operatorText: 'Order for Example Studio\n[Content read from attachments]\nHarbor Goods Srl P.IVA IT00000000999', operatorWords: 'Order for Example Studio' });
   expect(resolved.draft.clientId).toBe('201');
   expect(resolved.draft.newClient).toBeUndefined();
-  // The same company under a shorter name keeps its document details.
-  const same = await resolver(connector, selectMany).resolve({ ...input, clientQuery: 'Harbor Goods' }, { ...context, operatorText: 'Order for Harbor Goods' });
+  const same = await resolver(connector, selectMany).resolve({ ...input, clientQuery: 'Harbor Goods' }, { ...context, operatorText: 'Order for Harbor Goods', operatorWords: 'Order for Harbor Goods' });
   expect(same.draft.newClient?.vatNumber).toBe('IT00000000999');
 });
 
@@ -327,12 +373,10 @@ it('asks which sibling when only the everyday place name is given, and can lock 
   expect(brand.issues[0]?.candidates?.map(c => c.id).sort()).toEqual(['210', '211', '212']);
   expect(brand.issues[0]?.candidates?.some(c => c.label.includes('hotel'))).toBe(true);
   expect(select.mock.calls.some(call => call[0].some(req => req.kind === 'client'))).toBe(false);
-  const hinted = await r.resolve({ ...draft(), clientQuery: 'Fable Harbor hotel', lines: [] }, { ...context, operatorText: 'no è per l hotel' });
-  expect(hinted.decisions[0]?.status).toBe('matched');
-  expect(hinted.draft.clientId).toBe('211');
-  const clientQuestion = select.mock.calls.at(-1)![0].find(req => req.kind === 'client');
-  expect(clientQuestion?.candidates.map(c => c.id)).toEqual(['211']);
-  expect(clientQuestion?.candidates[0]?.aliases).toContain('hotel');
+  const hinted = await r.resolve({ ...draft(), clientId: undefined, clientQuery: 'Fable Harbor hotel', lines: [] }, { ...context, operatorText: 'no è per l hotel', operatorWords: 'no è per l hotel' });
+  expect(hinted.decisions[0]?.status).toBe('ambiguous');
+  expect(hinted.draft.clientId).toBeUndefined();
+  expect(hinted.issues[0]?.candidates?.map(c => c.id)).toEqual(['211']);
   const missed = await r.resolve({ ...draft(), clientQuery: 'Fable Harbor spa', lines: [] }, { ...context, operatorText: 'fable harbor spa' });
   expect(missed.decisions[0]?.status).toBe('ambiguous');
   expect(missed.issues[0]?.candidates?.map(c => c.id).sort()).toEqual(['210', '211', '212']);
@@ -349,12 +393,14 @@ it('asks which sibling when the everyday name lives only in notes, and a store h
   expect(brand.draft.clientId).toBeUndefined();
   expect(brand.issues[0]?.candidates?.map(c => c.id).sort()).toEqual(['220', '221']);
   expect(brand.issues[0]?.candidates?.some(c => c.label.includes('Harbour Hotel'))).toBe(true);
-  const hinted = await r.resolve({ ...draft(), clientQuery: 'Harbour hotel', lines: [] }, { ...context, operatorText: 'no è per l hotel' });
-  expect(hinted.decisions[0]?.status).toBe('matched');
-  expect(hinted.draft.clientId).toBe('221');
-  const shopHint = await r.resolve({ ...draft(), clientQuery: 'Harbour negozio', lines: [] }, { ...context, operatorText: 'harbour negozio' });
-  expect(shopHint.decisions[0]?.status).toBe('matched');
-  expect(shopHint.draft.clientId).toBe('220');
+  const hinted = await r.resolve({ ...draft(), clientId: undefined, clientQuery: 'Harbour hotel', lines: [] }, { ...context, operatorText: 'no è per l hotel', operatorWords: 'no è per l hotel' });
+  expect(hinted.decisions[0]?.status).toBe('ambiguous');
+  expect(hinted.draft.clientId).toBeUndefined();
+  expect(hinted.issues[0]?.candidates?.map(c => c.id)).toEqual(['221']);
+  const shopHint = await r.resolve({ ...draft(), clientId: undefined, clientQuery: 'Harbour negozio', lines: [] }, { ...context, operatorText: 'harbour negozio', operatorWords: 'harbour negozio' });
+  expect(shopHint.decisions[0]?.status).toBe('ambiguous');
+  expect(shopHint.draft.clientId).toBeUndefined();
+  expect(shopHint.issues[0]?.candidates?.map(c => c.id)).toEqual(['220']);
 });
 
 it('locks a one-letter slip on a distinctive name, and does not ask which pharmacy when only the trade word matches', async () => {
@@ -363,11 +409,10 @@ it('locks a one-letter slip on a distinctive name, and does not ask which pharma
   connector.clients.push(willowmere, cinderford, pebblebrook);
   const select = vi.fn<SelectMany>(async requests => requests.map(r => r.candidates.length ? result('matched', r.candidates[0]!.id) : result('no-match')));
   const r = resolver(connector, select);
-  const slipped = await r.resolve({ ...draft(), clientQuery: 'Willomere Pharmacy', lines: [] }, { ...context, operatorText: 'crea ordine per willomere pharmacy' });
-  expect(slipped.decisions[0]?.status).toBe('matched');
-  expect(slipped.draft.clientId).toBe('310');
-  const clientQuestion = select.mock.calls.at(-1)![0].find(req => req.kind === 'client');
-  expect(clientQuestion?.candidates.map(c => c.id)).toEqual(['310']);
+  const slipped = await r.resolve({ ...draft(), clientId: undefined, clientQuery: 'Willomere Pharmacy', lines: [] }, { ...context, operatorText: 'crea ordine per willomere pharmacy', operatorWords: 'crea ordine per willomere pharmacy' });
+  expect(slipped.decisions[0]?.status).toBe('ambiguous');
+  expect(slipped.draft.clientId).toBeUndefined();
+  expect(slipped.issues[0]?.candidates?.map(c => c.id)).toEqual(['310']);
   select.mockClear();
   const leftover = await r.resolve({ ...draft(), clientQuery: 'Pharmacy Zorblax', lines: [] }, { ...context, operatorText: 'crea ordine per pharmacy zorblax' });
   expect(leftover.decisions[0]?.status).not.toBe('ambiguous');
@@ -422,7 +467,10 @@ it('reads catalogue litres written as "5lt" so a "5 L" request keeps them as can
   connector.products.push({ id: '500', code: 'DEMO-5L', name: 'Cedar wash 5lt', description: '', netPrice: 18 },
     { id: '501', code: 'DEMO-500', name: 'Cedar wash 500ml', description: '', netPrice: 8 });
   const selectMany = vi.fn<SelectMany>(async requests => requests.map(r => result('matched', r.kind === 'client' ? '201' : '500')));
-  await resolver(connector, selectMany).resolve({ ...draft(), clientId: '201', lines: [{ query: 'Refill 5 L Cedar wash', quantity: 1 }] }, context);
-  const product = selectMany.mock.calls[0]![0].find(r => r.kind === 'product')!;
-  expect(product.candidates.map(c => c.id)).toEqual(['500']);
+  const resolved = await resolver(connector, selectMany).resolve(
+    { ...draft(), clientId: undefined, lines: [{ query: 'Refill 5 L Cedar wash', quantity: 1 }] },
+    { ...context, operatorText: 'Refill 5 L Cedar wash', operatorWords: 'Refill 5 L Cedar wash' },
+  );
+  expect(resolved.draft.lines[0]?.productId).toBeUndefined();
+  expect(resolved.issues.find(i => i.field === 'lines.0')?.candidates?.map(c => c.id)).toEqual(['500']);
 });

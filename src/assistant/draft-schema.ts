@@ -1,10 +1,6 @@
 import { z } from 'zod';
 import { clientSchema, draftSchema } from '../domain/types.js';
 
-/**
- * The order and customer APIs as the agent sees them. The business rules for each field live in its description, so
- * the schema tells the agent what is needed; the application validates every call and reports what is still missing.
- */
 const clientFields: Record<string, string> = {
   name: 'The business name as given, without a leading role word such as customer or cliente.',
   country: 'ISO 3166 alpha-2 code such as IT, also when the address makes it clear (an Italian CAP with a province such as BG). null only when the address leaves it open.',
@@ -19,52 +15,83 @@ const clientFields: Record<string, string> = {
   contactPerson: 'Contact person at the business, only when the operator or the record gives one. Never invent a person.',
   notes: 'Only a note the operator explicitly asks for.',
 };
-// OpenAI strict structured outputs require explicit nulls for unknown fields.
 const nullableClient = z.object(Object.fromEntries(Object.entries(clientSchema.omit({ id: true }).shape).map(([key, field]) => {
   let schema: z.ZodType = field;
   while (schema instanceof z.ZodOptional || schema instanceof z.ZodDefault) schema = schema.unwrap() as z.ZodType;
-  // Countries are checked after parsing: one blank or unknown country must not reject the whole draft.
   const nullable = key === 'country' ? z.string().nullable() : schema.nullable();
   return [key, clientFields[key] ? nullable.describe(clientFields[key]) : nullable];
 }))).strict();
 
+export const identityStatusSchema = z.enum(['accepted', 'unconfirmed', 'ambiguous', 'unsupported', 'missing']);
+
 export const orderDraftInput = z.object({
-  clientQuery: z.string().describe('The customer name or VAT number the operator gave, as written, or the matched business name from search-clients. Include hint words they gave (hotel, albergo, shop, store, negozio, a city). When they name a customer with a role word (customer, cliente, buyer), put the business name here, not the role word. When they clarify, replace this with the refined name. A short customer name typed against an open draft is a new search, not a request to save: put those words here. When the operator names the customer, that name wins over any company named in attached content. If attached content names a customer and the operator did not, use that header name. Supplier letterhead is not a customer name. Keep the name already on this request when the attachment header is blank. Empty when no customer is known yet.'),
-  clientId: z.string().min(1).nullable().describe('Keep the clientId already in the open draft only when it is still the same customer. Send an id only when search-clients matched the exact name or VAT the operator just typed. A single close or related account is a question: leave this null so the application can show a pick. If the operator named a different customer, typed a short customer name, or added a hint (hotel, albergo, shop, store, negozio), search-clients again and do not keep the old id. Otherwise null: the application resolves clientQuery against current records.'),
-  newClient: nullableClient.nullable().describe('Only when the operator says the customer is new or types its billing details themselves. A customer named, signed or printed in an attached email or document only identifies it: put its name in clientQuery and leave this null.'),
+  clientQuery: z.string().describe('The customer name or VAT as the operator wrote it this request. Empty when unknown. Do not copy a cancelled request. Letterhead is not a customer. A unique search hit is not a lock.'),
+  clientId: z.string().min(1).nullable().describe('Always null for a new lock. Keep only an id already on the open draft after a pick or exact typed name. A search result, alias, or yes-prepare-this-file is not an id.'),
+  newClient: nullableClient.nullable().describe('Only when the operator says the customer is new or types billing details themselves. Attached names go in clientQuery.'),
   manualVatCheck: z.object({ country: z.string().regex(/^[A-Z]{2}$/), vatNumber: z.string().min(1), status: z.enum(['valid', 'invalid']) }).strict().nullable()
-    .describe('Only after the operator explicitly confirms a completed VIES check and its result, bound to that exact country and VAT number. Never inferred from a name, number format or location.'),
+    .describe('Only after the operator explicitly confirms a completed VIES check. Never inferred.'),
   lines: z.array(z.object({
-    query: z.string().min(1).describe("The product the operator means, without quantity or price, keeping every size, scent, tester or code they give. Keep a catalogue code from an attachment or search result in this query so the application can match it. Extra column labels from a spreadsheet are not part of the product name. A tester mark still keeps the printed sale code here; set tester true on this line rather than substituting a guessed tester code. Operators use short names, synonyms, plurals, typos and other languages: when their words share none with the catalogue, write it in the catalogue's terms as you understand it (\"saponi\" to \"hand wash\"). The application checks it against their message and asks when it is unsure."),
-    productId: z.string().min(1).nullable().describe('Keep the productId already in the open draft, or copy the id from an order-form [productId …] marker. Otherwise null: the application resolves query against the catalogue and offers choices when several fit. Never put an ordinary sale product id on a tester line.'),
-    quantity: z.number().positive().nullable().describe('Count of items ("5 x", "5 pezzi"), or the tester count when this line is a tester mark. A size or volume such as "5 litri" is part of the product, not the quantity. null when no count is written.'),
-    tester: z.boolean().nullable().describe('True when this line is a tester or sample the operator or attachment asked for, including a mark next to an ordinary sale code. False or null for an ordinary merchandise line. A sale quantity and a tester mark on the same row are two lines. Never set true unless a tester was requested.'),
-    netPrice: z.number().nonnegative().nullable().describe('Net unit price the operator states for this order, including later corrections. null otherwise: catalogue prices apply. Never a price read from a document or spreadsheet, never learned for future orders.'),
+    ref: z.string().min(1).max(64).nullable().optional().describe('Stable line id from the open draft (L1, L2, …). Null to add a line. Send op=delete with a ref to remove one. Omitted lines are kept.'),
+    op: z.enum(['add', 'edit', 'replace', 'delete']).nullable().optional().describe('add/edit/replace/delete against ref. Null with no refs replaces the whole list only when the rows actually changed.'),
+    query: z.string().min(1).describe('Product wording, keeping printed codes, sizes, scents. Tester marks keep the printed sale code here and set tester true.'),
+    productId: z.string().min(1).nullable().describe('A proposal only. The application accepts a unique supported SKU or unique tester; it does not lock a fuzzy singleton. Never put a sale id on a tester line.'),
+    quantity: z.number().positive().nullable().describe('Count of items, or the tester count on a tester line. A size is not a quantity. null when unknown.'),
+    tester: z.boolean().nullable().describe('True only for a requested tester/sample line. A sale quantity and a tester mark are two lines.'),
+    netPrice: z.number().nonnegative().nullable().describe('Net unit the operator stated. null: catalogue prices. Never a price read from a file.'),
     documentPrice: z.object({ amount: z.number().nonnegative(), basis: z.enum(['net', 'gross', 'unclear']), decision: z.enum(['pending', 'catalogue', 'document']) }).strict().nullable().default(null)
-      .describe('A price printed or handwritten in a document, kept as evidence with its basis and decision pending. Leave null when none is pending: catalogue prices apply, and you must not ask file versus catalogue. Set catalogue or document only after the operator answers that price question; document needs an explicitly confirmed net amount. Reset to pending when the amount or product changes.'),
-  }).strict()).describe('Every product line of the order, kept from the open draft unless the operator changes it. If you send none while the open draft has lines, they stay. A new request starts with no lines. Do not copy products from earlier messages, other customers, leftover conversation, or group history unless this request names them, an attachment lists them, a short follow-up clearly refers to what was just discussed, or the operator asks to repeat this customer\'s last order.'),
-  shippingPrice: z.number().nonnegative().nullable().describe('Delivery charge, net. null unless the operator states or confirms it; 0 when they say there is no charge.'),
+      .describe('A price printed in a document, pending until the operator answers. Null when none is pending.'),
+  }).strict()).describe('Changes to lines. Empty keeps the open draft, including attachment rows already merged. A new request starts empty. Do not copy cancelled orders.'),
+  shippingPrice: z.number().nonnegative().nullable().describe('Delivery charge, net. null unless the operator states or confirms it this request; 0 when they say there is no charge. Do not copy a cancelled request. An explicit 0 already on this request stays.'),
   discountPercent: z.number().min(0).max(100).describe('Order discount the operator states, otherwise 0.'),
   discountShipping: z.boolean().nullable().describe('Whether the discount also applies to delivery, only when the operator says so.'),
   delivery: z.object({ country: z.string().nullable(), address: z.string().min(1) }).strict().nullable()
-    .describe("Only when the operator asks to ship somewhere other than the customer's own address. A signature or letterhead address is never a delivery address."),
-  notes: z.string().describe('Printed on the order: only a note the operator explicitly asks to write, or a delivery instruction they clearly wanted on the order. Do not summarise an attached message or repeat product lines already on the draft. Empty when they did not ask for a note. The operator sees it in the draft. Write it in the same language as the operator\'s messages in this request: Italian when they write in Italian, English when they write in English. Keep catalogue product names as they appear; do not translate them. Never prices, VAT codes, discounts or your own remarks.'),
-  priceTier: z.string().regex(/^[a-z0-9-]+$/).nullable().describe('Always null: named price lists are not connected. Ask for explicit unit prices instead.'),
+    .describe("Only when the operator asks to ship somewhere other than the customer's own address."),
+  notes: z.string().describe("Printed on the order: only a note the operator asked to write. Empty when they did not. Do not summarise an attached message. Same language as the operator; do not translate catalogue names."),
+  priceTier: z.string().regex(/^[a-z0-9-]+$/).nullable().describe('Always null: named price lists are not connected.'),
 }).strict();
 
 export const customerDraftInput = z.object({
-  newClient: nullableClient.describe('The new customer. Only the name is required to create it; an order for it later also needs the full billing address. Keep every detail already in the open draft unless corrected.'),
+  newClient: nullableClient.describe('The new customer. Only the name is required to create it; an order later also needs the billing address.'),
 });
 
-// Model output uses null for unknown fields; drafts leave them out.
+export const draftOutput = z.object({
+  status: z.enum(['ready', 'needs', 'existing', 'blocked', 'invalid']),
+  revision: z.number().int().nonnegative().optional(),
+  customer: z.object({
+    status: identityStatusSchema,
+    query: z.string().optional(),
+    name: z.string().optional(),
+    city: z.string().optional(),
+    vatNumber: z.string().optional(),
+    candidates: z.array(z.string()).optional(),
+    action: z.string().optional(),
+  }).optional(),
+  lines: z.array(z.object({
+    ref: z.string(),
+    query: z.string(),
+    quantity: z.number().optional(),
+    tester: z.literal(true).optional(),
+    status: identityStatusSchema,
+    candidates: z.array(z.string()).optional(),
+    action: z.string().optional(),
+  })).optional(),
+  issues: z.array(z.object({ field: z.string(), problem: z.string(), candidates: z.array(z.string()).optional() })).optional(),
+  note: z.string(),
+});
+
 const strip = (v: unknown): unknown => Array.isArray(v) ? v.map(strip) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).filter(([, x]) => x !== null).map(([k, x]) => [k, strip(x)])) : v;
-// A country that is not an ISO code (often "" for an address without one) is unknown, not invalid.
 const iso = (country: unknown) => typeof country === 'string' && /^[A-Z]{2}$/.test(country.trim().toUpperCase()) ? country.trim().toUpperCase() : null;
 const withIsoCountry = (value: Record<string, unknown> | null) => value && { ...value, country: iso(value.country) };
 
 export function parseDraft(value: unknown) {
   const parsed = orderDraftInput.parse(value);
-  return draftSchema.parse(strip({ ...parsed, newClient: withIsoCountry(parsed.newClient), delivery: withIsoCountry(parsed.delivery) }));
+  const lines = parsed.lines.map(({ op: _op, ...line }) => line);
+  return draftSchema.parse(strip({ ...parsed, lines, newClient: withIsoCountry(parsed.newClient), delivery: withIsoCountry(parsed.delivery) }));
+}
+
+/** Line edits including op/ref, used by the canonical merge. */
+export function parseLinePatches(value: unknown) {
+  return orderDraftInput.parse(value).lines.map(line => strip(line) as { ref?: string; op?: 'add' | 'edit' | 'replace' | 'delete'; query: string; productId?: string; quantity?: number; tester?: boolean; netPrice?: number });
 }
 
 /** A customer request is a draft with only its new customer. */

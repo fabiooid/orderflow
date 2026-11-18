@@ -26,9 +26,9 @@ it('reports a ready order with its totals, or exactly what is still needed', asy
   // The agent reads the problems and candidate names; record IDs stay with the application.
   expect(forAgent(needs)).toMatchObject({
     status: 'needs',
-    customer: { matched: true, name: 'Example Studio' },
-    lines: [{ query: 'Pebble 250', quantity: 2, matched: false }],
-    issues: [{ field: 'lines.0', candidates: expect.arrayContaining(['Pebble hand wash 250 ml']) }],
+    customer: { status: 'accepted', name: 'Example Studio' },
+    lines: [{ query: 'Pebble 250', quantity: 2, status: expect.stringMatching(/unconfirmed|ambiguous|unsupported/) }],
+    issues: [{ field: 'lines.0', candidates: expect.arrayContaining([expect.stringMatching(/Pebble hand wash 250 ml/)]) }],
   });
   expect(JSON.stringify(forAgent(needs))).not.toContain('101');
 });
@@ -44,37 +44,40 @@ it('rereads a tester mark so a later turn cannot treat it as the sale SKU', asyn
   }), context, '2026-01-15');
   expect(needs.status).toBe('needs');
   expect(forAgent(needs).lines).toEqual(expect.arrayContaining([
-    expect.objectContaining({ query: expect.stringMatching(/SOAP250ML/), quantity: 2, matched: false }),
-    expect.objectContaining({ query: expect.stringMatching(/tester/i), quantity: 1, tester: true, matched: false }),
+    expect.objectContaining({ query: expect.stringMatching(/SOAP250ML/), quantity: 2, status: expect.stringMatching(/unconfirmed|ambiguous|unsupported|missing/) }),
+    expect.objectContaining({ query: expect.stringMatching(/tester/i), quantity: 1, tester: true, status: expect.stringMatching(/unconfirmed|ambiguous|unsupported|missing/) }),
   ]));
 });
 
 it('shows an unmatched customer query so the agent cannot contradict the preview', async () => {
   const api = createDraftApi(config(), new DemoConnector(), off);
+  const spoken = 'Northwind Supplies Ltd: 2 Pebble hand wash 250 ml';
   const needs = await api.order(draftSchema.parse({
     clientQuery: 'Northwind Supplies Ltd',
     lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }],
-  }), context, '2026-01-15');
+  }), { ...context, operatorText: spoken, operatorWords: spoken }, '2026-01-15');
   expect(needs.status).toBe('needs');
   expect(forAgent(needs)).toMatchObject({
     status: 'needs',
-    customer: { matched: false, query: 'Northwind Supplies Ltd' },
-    lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2, matched: true }],
+    customer: { status: expect.stringMatching(/unconfirmed|ambiguous|unsupported|missing/), query: 'Northwind Supplies Ltd' },
+    lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2, status: 'accepted' }],
   });
-  expect(JSON.stringify(forAgent(needs))).not.toContain('"matched":true,"name"');
+  expect(JSON.stringify(forAgent(needs))).not.toContain('"status":"accepted","name"');
 });
 
-it('never trusts a model-written identity: matching replaces it with the judged one', async () => {
+it('never trusts a model-written identity: matcher proposals stay unconfirmed until an exact identity or pick', async () => {
   const judge: SelectMany = async requests => requests.map(r => ({ status: 'matched', selectedId: r.kind === 'client' ? '201' : '101', evidence: { requestHash: 't', promptVersion: 't', retrieval: r.retrieval, elapsedMs: 0 } } satisfies SelectionResult));
   const connector = new DemoConnector();
   const on = createIdentityResolver(config(), connector, { config: matchingConfigSchema.parse({ mode: 'on' }), selectMany: judge });
-  const result = await createDraftApi(config(), connector, on).order({ ...draft(), clientId: '999', lines: [{ query: 'the small pebble wash', productId: '102', quantity: 2 }] }, { ...context, operatorText: 'the small pebble wash for the studio' }, '2026-01-15');
-  expect(result.status).toBe('ready');
-  expect(result.draft.clientId).toBe('201');
-  expect(result.draft.lines[0]?.productId).toBe('101');
+  const spoken = 'the small pebble wash for the studio';
+  const result = await createDraftApi(config(), connector, on).order({ ...draft(), clientId: '999', lines: [{ query: 'the small pebble wash', productId: '102', quantity: 2 }] }, { ...context, operatorText: spoken, operatorWords: spoken }, '2026-01-15');
+  expect(result.status).toBe('needs');
+  expect(result.draft.clientId).toBeUndefined();
+  expect(result.draft.lines[0]?.productId).toBeUndefined();
+  if (result.status === 'needs') expect(result.issues.some(i => i.field === 'client' && i.candidates?.length)).toBe(true);
   // An operator's button pick is the one identity that comes from outside the resolver.
-  const picked = await createDraftApi(config(), connector, on).order(result.draft, { ...context, choice: { field: 'lines.0', id: '102' } }, '2026-01-15');
-  expect(picked.draft.lines[0]?.productId).toBe('102');
+  const picked = await createDraftApi(config(), connector, on).order(result.draft, { ...context, operatorText: spoken, operatorWords: spoken, choice: { field: 'lines.0', id: '101' } }, '2026-01-15');
+  expect(picked.draft.lines[0]?.productId).toBe('101');
 });
 
 it('drafts a new customer and lists the deployment\'s missing fields', async () => {
@@ -94,7 +97,7 @@ it('does not open an empty order card when prepare is called with no customer an
     const outcome = startTurn(context, { evidence: 'crea un nuovo ordine per Northwind Bistro', operatorWords: 'crea un nuovo ordine per Northwind Bistro', senderId: '5', knownPhrases: [] });
     expect(await calls.order(draftSchema.parse({}), context)).toMatchObject({
       status: 'needs',
-      issues: [{ field: 'client', problem: expect.stringContaining('search-clients') }],
+      issues: [{ field: 'client', problem: expect.stringContaining('Name a customer') }],
       note: expect.stringContaining('Nothing was shown'),
     });
     expect(outcome.result).toBeUndefined();
@@ -120,7 +123,7 @@ it('keeps this request\'s customer when a later draft only adds product lines', 
     const context = new RequestContext();
     const outcome = startTurn(context, {
       evidence: 'cliente Example Studio', operatorWords: 'cliente Example Studio', senderId: '5', knownPhrases: ['Example Studio'],
-      request: { kind: 'order', orderId: 'u1', revision: 1, clientQuery: 'Example Studio', clientId: '201' },
+      request: { kind: 'order', orderId: 'u1', revision: 1, draft: draftSchema.parse({ clientQuery: 'Example Studio', clientId: '201' }) },
     });
     const result = await calls.order(draftSchema.parse({
       lines: [
@@ -151,7 +154,7 @@ it('keeps this request\'s product lines when a later draft only locks the custom
     const context = new RequestContext();
     const outcome = startTurn(context, {
       evidence: 'cliente Northwind Bistro', operatorWords: 'cliente Northwind Bistro', senderId: '5', knownPhrases: ['Pebble hand wash 250 ml'],
-      request: { kind: 'order', orderId: 'u1', revision: 1, lines },
+      request: { kind: 'order', orderId: 'u1', revision: 1, draft: draftSchema.parse({ lines }) },
     });
     const result = await calls.order(draftSchema.parse({ clientQuery: 'Northwind Bistro' }), context);
     expect(result).toMatchObject({ status: 'needs' });
@@ -180,9 +183,9 @@ it('replaces an open request of the other kind, and is blocked only by a request
   const storage = new LibSQLStore({ id: 'tools', url: ':memory:' });
   try {
     const { calls } = createOrderAgent(config(), new DemoConnector(), storage);
-    const turn = { evidence: '', operatorWords: '', senderId: '5', knownPhrases: [] };
+    const turn = { evidence: 'Example Studio: 2 Pebble hand wash 250 ml, delivery 8', operatorWords: 'Example Studio: 2 Pebble hand wash 250 ml, delivery 8', senderId: '5', knownPhrases: [] };
     const replacing = new RequestContext();
-    const replaced = startTurn(replacing, { ...turn, request: { kind: 'customer', orderId: 'u1', revision: 1 } });
+    const replaced = startTurn(replacing, { ...turn, request: { kind: 'customer', orderId: 'u1', revision: 1, draft: draftSchema.parse({ newClient: { name: 'Other' } }) } });
     expect(await calls.order(draft(), replacing)).toMatchObject({ status: 'ready' });
     expect(replaced.result).toMatchObject({ kind: 'order' });
     const locked = new RequestContext();

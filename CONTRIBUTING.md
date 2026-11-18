@@ -7,6 +7,7 @@ The project is in foundation development and is licensed under the [MIT License]
 - Do not add invoice, email, or document-transformation capabilities to this orders-only V1.
 - Use fictional examples. Never commit credentials, account exports, PDFs, recordings, customer records, traces, or local databases. Product names, SKUs, prices and VAT numbers in tests must be obviously fictional.
 - Test changes with `npm run check` and `npm test`. Add meaningful regression cases for behavior changes, especially tax selection, identity matching, duplicate writes, and order isolation.
+- Keep one stored draft per request and one identity-resolution pass. `prepare-order` merges attachment facts and model edits into that draft, then the resolver accepts supported exact identities or keeps real candidates. `prepareOrder` is commercial completeness only: it must not rematch products or customers. The matcher ranks or proposes; it never silently confirms a fuzzy singleton. Unique SKUs need current-request evidence plus a real catalogue row. Tester marks select the tester catalogue product, never the sale SKU.
 - Keep model benchmarks separate from deterministic fixtures. Do not report scripted extraction as LLM accuracy.
 - Declare unsupported configurations explicitly. Do not silently introduce business-specific fallbacks.
 
@@ -34,7 +35,7 @@ Photos, voice notes, PDFs and spreadsheets are generic inputs. They become text 
 
 1. Admit the file at the channel boundary (`src/channels/<name>/`) by MIME type and filename so it is not dropped before reading. Files that still cannot be mapped must return `unusableAttachment: true`, not `null`. Core folders must not import the adapter.
 2. Decode bytes in `src/documents` by content, not by a shop layout, sheet name or column heading. Return page text or labelled facts (product code, quantity, tester marks, a customer name found in a header). Supplier letterhead is not a customer. Do not resolve catalogue IDs or write orders here.
-3. Reuse `createMediaReader`: wrap the reading in the same attachment block as photos and PDFs, keep it apart from `operatorWords`, and let `prepare-order` match products and customers as today. Catalogue prices apply until the operator confirms a price from the file.
+3. Reuse `createMediaReader`: wrap the reading in the same attachment block as photos and PDFs, keep it apart from `operatorWords`, and let the canonical merge plus the identity pass consume the decoded lines. Empty `prepare-order` lines keep rows already on this request, including attachment facts. Catalogue prices apply until the operator confirms a price from the file. Printed kit-content sizes in an attachment are not variant constraints.
 4. Cover it with fictional fixtures only. Add a short note here and in the README when a new input type is accepted. Use `npm run check`, `npm test` and `npm run boundaries`.
 
 ## How to add a matcher

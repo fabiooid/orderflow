@@ -26,12 +26,26 @@ async function main() {
       lines: [{ query: fixture.request.kind === 'product' ? query : 'Pebble hand wash 250 ml', quantity: 2 }], shippingPrice: 8 });
     const text = `Prepare an order for ${draft.clientQuery}: ${draft.lines[0]!.query}, two pieces; delivery eight euros.`;
     const drafts = createDraftApi(app, connector, createIdentityResolver(app, connector, { config: matching, selectMany: wireMatching().selectMany }));
-    const outcome = await drafts.order(draft, { orderId: `eval-${fixture.name}`, revision: 1, operatorText: text }, '2026-10-08');
+    const outcome = await drafts.order(draft, { orderId: `eval-${fixture.name}`, revision: 1, operatorText: text, operatorWords: text }, '2026-10-08');
     const field = fixture.request.kind === 'client' ? 'client' : 'lines.0';
-    const actual: string = outcome.status === 'ready'
-      ? fixture.request.kind === 'client' ? outcome.order.client.id ?? 'missing-client' : outcome.order.lines[0]!.productId
-      : outcome.decisions.find(d => d.field === field)?.status ?? 'missing-decision';
-    const ok = actual === fixture.expected && connector.createCalls === 0;
+    const decision = outcome.decisions.find(d => d.field === field);
+    const lockedId = outcome.status === 'ready'
+      ? (fixture.request.kind === 'client' ? outcome.order.client.id ?? 'missing-client' : outcome.order.lines[0]!.productId)
+      : undefined;
+    // Application locks only exact identities (unique supported SKU/tester, typed legal name or VAT). Matcher proposals stay unconfirmed.
+    const exactLocks = new Set(['exact-code', 'tester', 'client-vat']);
+    let actual: string;
+    let expected: string = String(fixture.expected);
+    if (exactLocks.has(fixture.name)) {
+      actual = lockedId ?? decision?.status ?? 'missing-decision';
+    } else if (fixture.expected === 'ambiguous' || fixture.expected === 'no-match') {
+      actual = lockedId ? `locked:${lockedId}` : (decision?.status ?? 'missing-decision');
+    } else {
+      expected = 'unconfirmed';
+      const offered = outcome.status === 'needs' ? outcome.issues.find(i => i.field === field)?.candidates?.some(c => c.id === fixture.expected) : false;
+      actual = lockedId ? `locked:${lockedId}` : (offered || decision?.selectedId === fixture.expected || decision?.status === 'ambiguous' ? 'unconfirmed' : (decision?.status ?? 'missing-decision'));
+    }
+    const ok = actual === expected && connector.createCalls === 0;
     passed += Number(ok);
     console.log(JSON.stringify({ case: fixture.name, expected: fixture.expected, actual, passed: ok }));
   }

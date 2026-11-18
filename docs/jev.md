@@ -4,7 +4,9 @@ JEV is integrated into product and customer resolution in the shared Telegram/St
 order workflow. GPT interprets requests; application code validates JEV’s selections
 before preparing prices, taxes and totals. Writes still require the existing latest
 preview confirmation. `MATCHER_MODE=off` remains the default (`JEV_MODE` is a deprecated
-alias); no deployment is activated by installing this integration.
+alias); no deployment is activated by installing this integration. Off mode still
+reads the catalogue for exact identities (typed legal name or VAT, unique
+supported SKU, unique tester). It does not call a vendor matcher.
 
 ## Run the evaluation
 
@@ -34,16 +36,21 @@ Prefer the `MATCHER_*` names. Each `JEV_*` name below is a deprecated alias: if 
 are set, `MATCHER_*` wins. The stored decision source stays `jev`.
 
 - `MATCHER_MODE` (`JEV_MODE`): `off` (default), `shadow`, or `on`. These values configure
-  Telegram, Studio and the standalone selector. `off` uses legacy matching; `shadow`
-  records decisions without changing draft identities or blocking preparation; `on`
-  makes application-validated JEV selections authoritative.
+  Telegram, Studio and the standalone selector. `off` uses deterministic exact
+  identities without a matcher; `shadow` records matcher judgments without changing
+  draft identities or blocking preparation; `on` lets the matcher rank or propose
+  among 2–253 candidates. A matcher `matched` result is a proposal, not a lock. The
+  application accepts only supported exact identities (or an operator pick / yes on
+  the active named candidate) and otherwise keeps the real candidates.
 - `MATCHER_MODEL` (`JEV_MODEL`): defaults to `jev-1.13.0`; the response records the actual model.
 - `MATCHER_TIMEOUT_MS` (`JEV_TIMEOUT_MS`): total request budget including retries, default 15000.
 - `MATCHER_MAX_RETRIES` (`JEV_MAX_RETRIES`): SDK retries after the first attempt, default 1, maximum 2.
 
 The adapter returns `matched`, `ambiguous`, `no-match`, or `unavailable`. A matched
-ID is always copied from a supplied candidate. It is a judgment, not permission to
-apply a draft change, save a document, or remember an alias. Workflow evidence records order/revision/input and candidate hashes, selected IDs,
+ID is always copied from a supplied candidate. It is a ranking or proposal, not
+permission to lock a draft identity, save a document, or remember an alias. Matcher
+`no-match` must not erase known candidates or claim the catalogue is absent.
+Workflow evidence records order/revision/input and candidate hashes, selected IDs,
 source, model, prompt version and distributions separately from model output.
 The integration does not invent a confidence threshold: calibrate rollout on held-out
 realistic cases before enabling `on` in a live deployment.
@@ -69,12 +76,17 @@ identity must not silently select a price.
 
 ## Workflow behavior
 
-`prepare-order` runs a native `resolve-identities` step before preparation. Resuming
-clarification re-runs resolution, so an edited draft cannot bypass it. Every revision
-reads current catalogue/customer records. Operator choices are retained only while
-the field query and record identity hashes match; other decisions are re-resolved.
-Preparation checks its fresh identity snapshot again before calculating totals. The extraction model’s IDs are ignored in `on` mode;
-failed or ambiguous judgments never fall through to lexical selection.
+`prepare-order` merges this turn into the one stored draft, then runs a native
+`resolve-identities` step before commercial preparation. There is no second
+identity resolver inside `prepareOrder`. Resuming clarification re-runs resolution,
+so an edited draft cannot bypass it. Every revision reads current catalogue/customer
+records. Operator choices are retained only while the field query (and line ref when
+present) and record identity hashes match; other decisions are re-resolved.
+Preparation checks its fresh identity snapshot again before calculating totals.
+Model-written IDs are proposals. Unique SKUs must appear in this request’s evidence
+and in the live catalogue. A single fuzzy search hit is not an exact identity.
+Customers lock from the exact legal name or VAT typed in this request, a pick, or a
+yes bound to the active named candidate — not from “yes, prepare this file”.
 
 Original operator messages survive Telegram routing paraphrases. Exact current
 codes/canonical names and deliberate choices such as `line 1: 101` or `client: 201`

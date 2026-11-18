@@ -4,8 +4,7 @@ import { DemoConnector } from '../src/connector/demo.js';
 import { conversationCases, evalConnector, maplePine } from '../src/evals/conversations.js';
 import { runConversation, scriptedTurns } from '../src/evals/harness.js';
 import type { Converse } from '../src/channel/engine.js';
-import { prepareOrder } from '../src/domain/prepare.js';
-import { config, draft, monasterySiblings } from './helpers.js';
+import { complete, config, draft, monasterySiblings } from './helpers.js';
 
 const productsAndNote = {
   lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }],
@@ -77,18 +76,19 @@ it('still selects an exact customer name the operator just typed', async () => {
 
 it('does not treat a unique close account as already chosen when preparing an order', async () => {
   const demo = withMaple();
-  const weak = await prepareOrder({ ...draft(), clientQuery: 'Maple' }, config(), demo, '2026-01-15');
+  const unnamed = { ...draft(), clientId: undefined };
+  const weak = await complete({ ...unnamed, clientQuery: 'Maple' }, demo, 'ordine per Maple');
   expect(weak.ready).toBe(false);
   if (weak.ready) return;
   expect(weak.draft.clientId).toBeUndefined();
   expect(weak.clientId).toBeUndefined();
   expect(weak.issues.find(issue => issue.field === 'client')?.candidates?.map(c => c.id)).toEqual([maplePine.id]);
-  const rewritten = await prepareOrder({ ...draft(), clientQuery: maplePine.name }, config(), demo, '2026-01-15', undefined, 'ordine per Maple');
+  const rewritten = await complete({ ...unnamed, clientQuery: maplePine.name }, demo, 'ordine per Maple');
   expect(rewritten.ready).toBe(false);
   if (!rewritten.ready) expect(rewritten.issues.find(issue => issue.field === 'client')?.candidates?.map(c => c.id)).toEqual([maplePine.id]);
-  const exact = await prepareOrder({ ...draft(), clientQuery: maplePine.name }, config(), demo, '2026-01-15', undefined, 'ordine per Maple & Pine Trading Ltd');
+  const exact = await complete({ ...unnamed, clientQuery: maplePine.name }, demo, 'ordine per Maple & Pine Trading Ltd');
   expect(exact.ready && exact.order.client.id).toBe(maplePine.id);
-  const picked = await prepareOrder({ ...draft(), clientQuery: 'Maple', clientId: maplePine.id }, config(), demo, '2026-01-15');
+  const picked = await complete({ ...unnamed, clientQuery: 'Maple', clientId: maplePine.id }, demo, 'ordine per Maple');
   expect(picked.ready && picked.order.client.id).toBe(maplePine.id);
 });
 
