@@ -68,7 +68,7 @@ export function remembered(plan: Pick<ReplyPlan, 'texts' | 'agentText'>) {
 export const replySchema = (fallback: AppConfig['locale'], currency: AppConfig['currency']) => z.object({
   // Chosen before the reply is written, so the reply follows it.
   locale: z.enum(['it', 'en']).describe(`The language operatorWords are written in, unless the operator asked for another. Only words with no language of their own ("ok", a product name) keep the conversation's language; with no cue at all, ${fallback === 'it' ? 'Italian' : 'English'}.`),
-  reply: z.string().describe(`Your own words in that language, shown above any draft: short, no greeting or recap, or empty when the draft speaks for itself. Ask about issues that still need a pick or exact name. Do not ask the operator to confirm an instruction they just gave. Do not restate unchanged fields. If customer.status is missing, the draft already shows a blank client: do not ask who the customer is, and do not offer a customer from earlier messages, a previous request, or letterhead. If shipping.status is unknown and this request did not name a charge, do not ask them to confirm shipping or propose 0, a list price, last paid, or an earlier-chat amount. Never say the draft is ready while prepare-order status is needs. Answer product questions by listing matches, one per line, "name — code — ${currency} net". If no product has every requested detail, say that combination is not in the catalogue, then list related products; never present a related product as the requested item. Never write a draft or summary yourself.`),
+  reply: z.string().describe(`Your own words in that language, shown above any draft. Be concise by default. When a draft preview is shown, let it speak for itself: empty is allowed. Do not repeat its contents or ask about missing fields it already displays. Add text only to answer a direct question, explain a problem, or resolve an ambiguity that the preview and available buttons cannot handle. Never say the draft is ready while prepare-order status is needs. Answer product questions by listing matches, one per line, "name — code — ${currency} net". If no product has every requested detail, say that combination is not in the catalogue, then list related products; never present a related product as the requested item. Never write a draft or summary yourself.`),
 });
 
 /**
@@ -155,7 +155,7 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
     const prompt: TurnPrompt = {
       speaker: { id: input.senderId, role: 'operator' }, operatorWords: input.operatorText,
       ...(input.text !== input.operatorText ? { messageWithAttachments: input.text } : {}),
-      openRequest: request ? { kind: kindOf(request), status: request.status, draft: request.draft, openIssues: issuesForAgent(request.issues ?? []) } : null,
+      openRequest: request ? { kind: kindOf(request), status: request.status, draft: request.draft, openIssues: issuesForAgent(request.issues ?? [], request.draft) } : null,
       ...(input.locked ? { otherOpenRequest: input.locked } : {}),
     };
     const act: TurnActions = { order: draft => calls.order(draft, requestContext), customer: draft => calls.customer(draft, requestContext), cancel: () => calls.cancel(requestContext) };

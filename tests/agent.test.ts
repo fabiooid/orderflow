@@ -33,7 +33,8 @@ it('gives the agent the order and customer APIs and lookups, and no way to save'
     expect(tools.prepareOrder?.description).toContain('Do not search first for a previous-chat name');
     expect(tools.prepareOrder?.description).toContain('Search does not open or change a draft');
     expect(tools.prepareOrder?.description).toContain('clear draft edit');
-    expect(tools.prepareOrder?.description).toContain('Do not wait for them to confirm that instruction');
+    expect(tools.prepareOrder?.description).toContain('The operator already sees that draft');
+    expect(tools.prepareOrder?.description).toContain('your reply may be empty');
     expect(tools.prepareCustomer?.description).toContain('Missing email or VAT');
     expect(tools.prepareOrder?.description).toContain('unique SKUs/testers');
     expect(tools.prepareOrder?.description).toContain('Do not claim ready while the result status is needs');
@@ -53,10 +54,18 @@ it('keeps business rules in the prompt and field rules in the API schema, with n
   expect(prompt).toContain('"Yes, prepare this file" does not confirm a customer');
   expect(prompt).toContain('leave the customer blank');
   expect(prompt).toContain('Do not offer, search for, confirm, use or keep a customer from earlier messages');
-  expect(prompt).toContain('draft already shows a blank client');
-  expect(replySchema(config().locale, config().currency).shape.reply.description).toContain('the draft already shows a blank client');
-  expect(replySchema(config().locale, config().currency).shape.reply.description).toContain('do not ask who the customer is');
-  expect(replySchema(config().locale, config().currency).shape.reply.description).toContain('do not ask them to confirm shipping');
+  expect(prompt).toContain('Be concise by default');
+  expect(prompt).toContain('let it speak for itself');
+  expect(prompt).toContain('Do not repeat its contents or ask about missing fields it already displays');
+  expect(prompt).toContain('Add text only to answer a direct question');
+  expect(prompt).not.toContain('ask only about issues the tools return');
+  expect(prompt).not.toContain('Ask about issues that still need a pick');
+  const reply = replySchema(config().locale, config().currency).shape.reply.description ?? '';
+  expect(reply).toContain('let it speak for itself');
+  expect(reply).toContain('Do not repeat its contents or ask about missing fields it already displays');
+  expect(reply).toContain('Add text only to answer a direct question');
+  expect(reply).not.toContain('Ask about issues that still need a pick');
+  expect(reply).not.toContain('do not ask who the customer is');
   expect(prompt).toContain('A single fuzzy search hit is not a lock');
   expect(prompt).toContain('do not invent or append catalogue codes');
   expect(prompt).toContain('Search-products only when');
@@ -74,15 +83,13 @@ it('keeps business rules in the prompt and field rules in the API schema, with n
   expect(prompt).toContain('Missing customer email or VAT does not block starting an order');
   expect(prompt).toContain('An explicit shipping 0 already on this request stays');
   expect(prompt).toContain('apply a clear instruction');
-  expect(prompt).toContain('Do not ask them to confirm the instruction they just gave');
-  expect(prompt).toContain('Do not restate or re-confirm unchanged fields');
   expect(prompt).not.toContain('propose changes');
-  expect(replySchema(config().locale, config().currency).shape.reply.description).toContain('Do not ask the operator to confirm an instruction they just gave');
   expect(prompt).not.toContain('always call search-clients');
   expect(prompt).not.toMatch(/\/(?:ordine|cliente|annulla|confermaordine|confermacliente)\b/);
   const fields = orderDraftInput.shape;
   expect(fields.newClient.description).toContain('operator says the customer is new');
-  expect(fields.notes.description).toContain('only a note the operator asked to write');
+  expect(fields.notes.description).toContain('only the wording the operator asked to write');
+  expect(fields.notes.description).toContain('without a leading role word');
   expect(fields.delivery.description).toContain("other than the customer's own address");
   expect(fields.clientQuery.description).toContain('Empty when this request did not name a customer');
   expect(fields.clientQuery.description).toContain('Do not copy earlier messages, a previous or cancelled request, or letterhead');
@@ -107,21 +114,22 @@ it('tells the agent to put only the requested instruction in order notes', () =>
   const prompt = systemPrompt(config().invoicing.label);
   const notes = orderDraftInput.shape.notes.description ?? '';
   expect(prompt).toContain('Leave shipping, discounts and notes empty unless they stated them this request');
-  expect(notes).toContain('only a note the operator asked to write');
+  expect(notes).toContain('only the wording the operator asked to write');
+  expect(notes).toContain('without a leading role word');
   expect(notes).toContain('Empty when they did not');
   expect(notes).toContain('send it this turn');
   expect(notes).not.toContain("customer's message");
 });
 
-it('tells the agent to apply a clear draft edit instead of asking to confirm it', () => {
+it('tells the agent to apply a clear draft edit and let the preview speak', () => {
   const prompt = systemPrompt(config().invoicing.label);
   const reply = replySchema(config().locale, config().currency).shape.reply.description ?? '';
   expect(prompt).toContain('A clear instruction on an open draft');
-  expect(prompt).toContain('Ask only if they asked to change a field without naming the new value');
-  expect(prompt).toContain('Do not mention shipping unless this turn changed it');
-  expect(prompt).toContain('do not propose 0, a list price, last paid, or an earlier-chat amount');
-  expect(reply).toContain('Do not ask the operator to confirm an instruction they just gave');
-  expect(reply).toContain('Do not restate unchanged fields');
+  expect(prompt).toContain('Be concise by default');
+  expect(prompt).toContain('let it speak for itself');
+  expect(prompt).toContain('do not send 0, a list price, last paid, or an earlier-chat amount');
+  expect(reply).toContain('Add text only to answer a direct question');
+  expect(reply).toContain('let it speak for itself');
 });
 
 /**

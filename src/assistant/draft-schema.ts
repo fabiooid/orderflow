@@ -46,7 +46,7 @@ export const orderDraftInput = z.object({
   discountShipping: z.boolean().nullable().describe('Whether the discount also applies to delivery, only when the operator says so.'),
   delivery: z.object({ country: z.string().nullable(), address: z.string().min(1) }).strict().nullable()
     .describe("Only when the operator asks to ship somewhere other than the customer's own address."),
-  notes: z.string().describe("Printed on the order: only a note the operator asked to write. Empty when they did not. When they ask to write one on an open draft, send it this turn. Do not summarise an attached message. Same language as the operator; do not translate catalogue names."),
+  notes: z.string().describe("Printed on the order: only the wording the operator asked to write, without a leading role word such as note or nota. Empty when they did not. When they ask to write one on an open draft, send it this turn. Do not summarise an attached message. Same language as the operator; do not translate catalogue names."),
   priceTier: z.string().regex(/^[a-z0-9-]+$/).nullable().describe('Always null: named price lists are not connected.'),
 }).strict();
 
