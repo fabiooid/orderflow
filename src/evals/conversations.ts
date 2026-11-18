@@ -90,6 +90,15 @@ const readyCustomerCorrection = all(neverGaveUp, keptReadyLines, switchedCustome
 // Customer identity from an attachment is checked; leftover recap notes are not, except in the dedicated FAB-56 cases below.
 const attachmentOrderFor = (id: string) => all(neverGaveUp, keptAttachmentLines, orderFor(id));
 const recapNote = /Prepared from attached conversation/i;
+const previewHeading = /Anteprima ordine|Bozza ordine|📦 Order preview|📝 Draft order|📝 Bozza ordine/;
+/** Agent words above the application preview, or the whole reply when no preview was shown. */
+const agentLead = (text: string) => {
+  const at = text.search(previewHeading);
+  return at >= 0 ? text.slice(0, at) : text;
+};
+/** The live bug: asking to apply a clear instruction, keep unchanged shipping, or make other edits before save. */
+const askedToConfirmGivenInstruction = (text: string) =>
+  /vuoi aggiungere|want (?:me )?to add|should I add|vuoi (?:applicare|cambiare)|want (?:me )?to (?:apply|change)|keep (?:the )?(?:existing )?(?:shipping|delivery)|mantenere (?:le )?spese|altre modifiche prima di salvare|other changes before (?:you )?save/i.test(agentLead(text));
 /** The printed note is only the instruction the operator asked for, in their language, with no recap of the draft. */
 const onlyRequestedNote = (expected: string): Check => o => {
   const notes = o.open?.draft.notes ?? '';
@@ -536,5 +545,67 @@ export const conversationCases: ConversationCase[] = [
       shippingPrice: 8,
     })],
     check: all(neverGaveUp, namedFor('201', /example studio/i), notesStayEmpty),
+  },
+  {
+    id: 'apply-clear-note-on-ready-draft',
+    // Ready draft already has a customer and shipping 0; a clear note is applied, not asked.
+    turns: [
+      { text: 'ordine per Example Studio: 2 Pebble hand wash 250 ml, spedizione 0 euro' },
+      { text: 'nota: lasciare al banco' },
+    ],
+    scripted: [
+      draftSchema.parse({
+        clientQuery: 'Example Studio',
+        lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }],
+        shippingPrice: 0,
+      }),
+      draftSchema.parse({
+        clientQuery: 'Example Studio',
+        lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }],
+        shippingPrice: 0,
+        notes: 'lasciare al banco',
+      }),
+    ],
+    check: all(neverGaveUp, namedFor('201', /example studio/i), onlyRequestedNote('lasciare al banco'), o => {
+      const text = last(o);
+      return [
+        ...expect(o.open?.draft.shippingPrice === 0, `shipping changed to ${o.open?.draft.shippingPrice}`),
+        ...expect(o.open?.status !== 'saved' && o.open?.status !== 'saving', `saved without confirm (${o.open?.status ?? 'none'})`),
+        ...expect(!askedToConfirmGivenInstruction(text), `asked to confirm an instruction already given: ${agentLead(text).split('\n')[0]}`),
+        ...expect(previewHeading.test(text), 'the updated preview was not shown'),
+        ...expect(/lasciare al banco/i.test(text), 'the updated preview did not show the note'),
+      ];
+    }),
+  },
+  {
+    id: 'apply-clear-quantity-on-ready-draft',
+    // Same rule in English for another clear draft edit: apply the quantity, do not re-confirm shipping.
+    turns: [
+      { text: 'Prepare an order for Example Studio: 2 Pebble hand wash 250 ml, delivery 0 euros' },
+      { text: 'change the quantity to 5' },
+    ],
+    scripted: [
+      draftSchema.parse({
+        clientQuery: 'Example Studio',
+        lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }],
+        shippingPrice: 0,
+      }),
+      draftSchema.parse({
+        clientQuery: 'Example Studio',
+        lines: [{ query: 'Pebble hand wash 250 ml', quantity: 5 }],
+        shippingPrice: 0,
+      }),
+    ],
+    check: all(neverGaveUp, namedFor('201', /example studio/i), notesStayEmpty, o => {
+      const text = last(o);
+      const line = o.open?.draft.lines.find(l => l.productId === '101' || /pebble/i.test(l.query));
+      return [
+        ...expect(line?.quantity === 5, `quantity is ${line?.quantity ?? 'missing'}, expected 5`),
+        ...expect(o.open?.draft.shippingPrice === 0, `shipping changed to ${o.open?.draft.shippingPrice}`),
+        ...expect(o.open?.status !== 'saved' && o.open?.status !== 'saving', `saved without confirm (${o.open?.status ?? 'none'})`),
+        ...expect(!askedToConfirmGivenInstruction(text), `asked to confirm an instruction already given: ${agentLead(text).split('\n')[0]}`),
+        ...expect(previewHeading.test(text), 'the updated preview was not shown'),
+      ];
+    }),
   },
 ];

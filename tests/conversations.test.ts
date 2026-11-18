@@ -115,6 +115,51 @@ it.each(['requested-note-only-from-attachment', 'requested-english-note-only', '
 );
 
 /**
+ * Scripted stand-in for the model. If the apply-immediately rules are present, it writes the clear
+ * draft edit and lets the preview speak. If they are missing, it asks whether to apply the change
+ * and keep shipping, matching the live bug this case guards.
+ */
+function applyClearEditConverse(scenario: (typeof conversationCases)[number]): Converse {
+  const drafts = scenario.scripted!;
+  const prompt = systemPrompt(config().invoicing.label);
+  const reply = replySchema(config().locale, config().currency).shape.reply.description ?? '';
+  const followsRule = /apply a clear instruction/.test(prompt)
+    && /Do not ask them to confirm the instruction they just gave/.test(prompt)
+    && /Do not restate or re-confirm unchanged fields/.test(prompt)
+    && /Do not ask the operator to confirm an instruction they just gave/.test(reply);
+  let turn = 0;
+  return async (message, act) => {
+    const next = drafts[turn++];
+    const english = /Prepare an order|change the quantity|note: /i.test(message.operatorWords);
+    if (turn < drafts.length) {
+      await act.order(asOrderDraft(next));
+      return { reply: '', locale: english ? 'en' : 'it' };
+    }
+    if (followsRule) {
+      await act.order(asOrderDraft(next));
+      return { reply: '', locale: english ? 'en' : 'it' };
+    }
+    await act.order(asOrderDraft(drafts[0]));
+    return {
+      reply: english
+        ? 'Do you want me to apply that to the draft and keep shipping at 0.00? Any other changes before saving?'
+        : 'Vuoi aggiungere la nota «lasciare al banco» al draft e mantenere le spese di consegna a 0,00 EUR? Vuoi apportare altre modifiche prima di salvare?',
+      locale: english ? 'en' : 'it',
+    };
+  };
+}
+
+it.each(['apply-clear-note-on-ready-draft', 'apply-clear-quantity-on-ready-draft'] as const)(
+  'applies a clear draft edit immediately: %s',
+  async id => {
+    const scenario = conversationCases.find(c => c.id === id);
+    expect(scenario?.scripted).toHaveLength(2);
+    const outcome = await runConversation(config(), evalConnector(), scenario!.turns, { converse: applyClearEditConverse(scenario!) });
+    expect(scenario!.check(outcome)).toEqual([]);
+  },
+);
+
+/**
  * Scripted stand-in for the model. If the don't-guess customer rules are present, a later unnamed
  * file leaves the customer blank and asks who it is. If they are missing, it offers the earlier
  * chat's customer, matching the live bug this case guards.
@@ -155,6 +200,47 @@ it('does not offer a previous-chat customer on a new unnamed file request', asyn
   expect(scenario!.check(outcome)).toEqual([]);
   expect(outcome.replies.at(-1)).toMatch(/Who is the customer\?/);
   expect(outcome.replies.at(-1)).not.toMatch(/Example Studio/);
+});
+
+it('still saves with confirm-and-save after a clear note is applied to a ready draft', async () => {
+  const c = config();
+  c.orderSavingEnabled = true;
+  c.channel.respondToAllMessages = true;
+  const storage = new LibSQLStore({ id: 'note-then-save', url: ':memory:' });
+  const store = new TelegramStore(':memory:', 'note-then-save');
+  await store.init();
+  const connector = new DemoConnector();
+  const journal = new WriteJournal(':memory:');
+  await journal.init();
+  const scenario = conversationCases.find(c => c.id === 'apply-clear-note-on-ready-draft')!;
+  const converse = applyClearEditConverse(scenario);
+  let messageId = 100;
+  let lastSave: string | undefined;
+  const send = async (_text: string, _reply: number, keyboard?: { inline_keyboard: { callback_data: string }[][] }) => {
+    lastSave = keyboard?.inline_keyboard.flat().find(b => b.callback_data.startsWith('save:'))?.callback_data;
+    return { message_id: messageId++ };
+  };
+  try {
+    const engine = createConversationEngine(c, connector, storage, { converse });
+    const controller = new TelegramController(c, 'bot', store, engine, send, undefined, orderCreator(c, connector, journal), async () => ({ message_id: 200 }));
+    await controller.handle(message(1, 'ordine per Example Studio: 2 Pebble hand wash 250 ml, spedizione 0 euro'));
+    await controller.handle(message(2, 'nota: lasciare al banco', 100));
+    const ready = await store.activeRequest();
+    expect(ready?.status).toBe('ready');
+    expect(ready?.draft.notes).toBe('lasciare al banco');
+    expect(ready?.draft.shippingPrice).toBe(0);
+    expect(lastSave).toMatch(/^save:u1:\d+$/);
+    await controller.handle(press(3, lastSave!, 101));
+    const saved = await store.order('u1');
+    expect(saved?.status).toBe('saved');
+    expect(saved?.prepared?.notes).toBe('lasciare al banco');
+    expect(connector.createCalls).toBe(1);
+    await engine.shutdown();
+  } finally {
+    store.close();
+    journal.close();
+    await storage.close();
+  }
 });
 
 it('still saves when the operator presses confirm-and-save on a ready draft', async () => {
