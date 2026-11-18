@@ -5,10 +5,10 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Node.js >= 22.13](https://img.shields.io/badge/node-%3E%3D22.13-339933)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)
-![Status: pre-pilot](https://img.shields.io/badge/status-pre--pilot-orange)
+![Status: pilot](https://img.shields.io/badge/status-pilot-yellow)
 
 > [!IMPORTANT]
-> OrderFlow is an **unofficial** project. It is not affiliated with or endorsed by Fatture in Cloud or TeamSystem. It has not yet been used against a live production account. Read [Project status](#project-status) before you connect real data.
+> OrderFlow is an **unofficial** project. It is not affiliated with or endorsed by Fatture in Cloud or TeamSystem. It is in a supervised pilot: confirmed orders have been saved against a live account, under operator supervision. Hosting and authentication for a deployed server are not done. Read [Project status](#project-status) before you connect real data.
 
 ---
 
@@ -239,7 +239,7 @@ When enabled, they run in the background on model runs and on delivered Telegram
 
 ## Project status
 
-OrderFlow is in **foundation / pre-pilot** stage.
+OrderFlow is in a **supervised pilot**. Confirmed orders have been saved against a live account, under operator supervision. This is not a hosted production deployment.
 
 **Working and covered by offline tests**
 
@@ -255,9 +255,12 @@ OrderFlow is in **foundation / pre-pilot** stage.
 - [x] Live turn tracing across model/API/delivery operations
 - [x] Fictional acceptance scenarios and multi-turn conversation evals with the live agent
 
+**Done in the supervised pilot**
+
+- [x] First confirmed order against a live account, under operator supervision
+
 **Not yet done**
 
-- [ ] First confirmed order against a live account (user acceptance testing)
 - [ ] Automatic recovery of failed PDF deliveries (manual delivery recovery is available)
 - [ ] Shipping notes for existing customers
 - [ ] Editing orders after they are saved (handled manually in Fatture in Cloud for now)
