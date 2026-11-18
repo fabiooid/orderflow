@@ -4,6 +4,8 @@ A timeout does not tell us whether Fatture in Cloud saved the record. OrderFlow 
 
 Stop the Telegram poller first. These commands use the deployment/group/company in your existing config, acquire the poller lock, and only modify local recovery state. Keep the local databases backed up. `REQUEST_ID` is the request's `orderId` shown in traces, for example `u12345`.
 
+To revoke and replace leaked Fatture or Telegram tokens, use [docs/rotate-tokens.md](rotate-tokens.md) instead of this page.
+
 ## Inspect
 
 ```sh
