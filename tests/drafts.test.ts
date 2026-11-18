@@ -57,6 +57,20 @@ it('rereads a tester mark so a later turn cannot treat it as the sale SKU', asyn
   ]));
 });
 
+it('tells the agent to ask who the customer is when the draft has none', async () => {
+  const api = createDraftApi(config(), new DemoConnector(), off);
+  const spoken = 'Yes, prepare an order from this.';
+  const needs = await api.order(draftSchema.parse({
+    lines: [{ query: 'Hand cream 100 ml SKU-100', quantity: 2 }],
+  }), { ...context, operatorText: spoken, operatorWords: spoken }, '2026-01-15');
+  expect(needs.status).toBe('needs');
+  expect(forAgent(needs).customer).toMatchObject({
+    status: 'missing',
+    action: expect.stringContaining('Ask who the customer is'),
+  });
+  expect(forAgent(needs).customer?.action).toContain('Do not offer a name from earlier messages');
+});
+
 it('shows an unmatched customer query so the agent cannot contradict the preview', async () => {
   const api = createDraftApi(config(), new DemoConnector(), off);
   const spoken = 'Northwind Supplies Ltd: 2 Pebble hand wash 250 ml';
