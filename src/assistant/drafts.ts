@@ -151,6 +151,6 @@ export function forAgent(result: DraftResult, revision?: number) {
     note: result.status === 'needs'
       ? 'Shown to the operator with these points. Use customer.status, lines[].status and shipping.status: accepted is already selected; unconfirmed and ambiguous still need a pick or exact name; unsupported is not in the catalogue as requested. shipping.status unknown is not 0; amount 0 means no charge. Ask about the returned issues. Never say the draft is ready while status is needs.'
       : result.status === 'existing' ? 'This customer already exists; nothing will be created.'
-      : 'Complete, and shown to the operator for review.',
+      : 'Complete, and shown to the operator for review. Do not ask them to confirm a change they already instructed.',
   };
 }

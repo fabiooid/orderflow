@@ -30,6 +30,8 @@ it('gives the agent the order and customer APIs and lookups, and no way to save'
     expect(tools.prepareOrder?.description).toContain('Empty lines keep rows already on this request');
     expect(tools.prepareOrder?.description).toContain('Empty clientQuery when this request did not name a customer');
     expect(tools.prepareOrder?.description).toContain('Search does not open or change a draft');
+    expect(tools.prepareOrder?.description).toContain('clear draft edit');
+    expect(tools.prepareOrder?.description).toContain('Do not wait for them to confirm that instruction');
     expect(tools.prepareCustomer?.description).toContain('Missing email or VAT');
     expect(tools.prepareOrder?.description).toContain('unique SKUs/testers');
     expect(tools.prepareOrder?.description).toContain('Do not claim ready while the result status is needs');
@@ -66,6 +68,11 @@ it('keeps business rules in the prompt and field rules in the API schema, with n
   expect(prompt).toContain('Search does not open or change a draft');
   expect(prompt).toContain('Missing customer email or VAT does not block starting an order');
   expect(prompt).toContain('An explicit shipping 0 already on this request stays');
+  expect(prompt).toContain('apply a clear instruction');
+  expect(prompt).toContain('Do not ask them to confirm the instruction they just gave');
+  expect(prompt).toContain('Do not restate or re-confirm unchanged fields');
+  expect(prompt).not.toContain('propose changes');
+  expect(replySchema(config().locale, config().currency).shape.reply.description).toContain('Do not ask the operator to confirm an instruction they just gave');
   expect(prompt).not.toContain('always call search-clients');
   expect(prompt).not.toMatch(/\/(?:ordine|cliente|annulla|confermaordine|confermacliente)\b/);
   const fields = orderDraftInput.shape;
@@ -96,7 +103,18 @@ it('tells the agent to put only the requested instruction in order notes', () =>
   expect(prompt).toContain('Leave shipping, discounts and notes empty unless they stated them this request');
   expect(notes).toContain('only a note the operator asked to write');
   expect(notes).toContain('Empty when they did not');
+  expect(notes).toContain('send it this turn');
   expect(notes).not.toContain("customer's message");
+});
+
+it('tells the agent to apply a clear draft edit instead of asking to confirm it', () => {
+  const prompt = systemPrompt(config().invoicing.label);
+  const reply = replySchema(config().locale, config().currency).shape.reply.description ?? '';
+  expect(prompt).toContain('A clear instruction on an open draft');
+  expect(prompt).toContain('Ask only if something is still missing or ambiguous');
+  expect(prompt).toContain('Do not mention shipping unless this turn changed it');
+  expect(reply).toContain('Do not ask the operator to confirm an instruction they just gave');
+  expect(reply).toContain('Do not restate unchanged fields');
 });
 
 /**

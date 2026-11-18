@@ -21,6 +21,7 @@ it('reports a ready order with its totals, or exactly what is still needed', asy
   const ready = await api.order(draft(), readyContext, '2026-01-15');
   expect(ready.status).toBe('ready');
   if (ready.status === 'ready') expect(ready.totals.gross).toBe(36.11);
+  expect(forAgent(ready).note).toContain('Do not ask them to confirm a change they already instructed');
   const needsSpoken = 'Example Studio: 2 Pebble 250';
   const needs = await api.order({ ...draft(), lines: [{ query: 'Pebble 250', quantity: 2 }], shippingPrice: undefined }, { ...context, operatorText: needsSpoken, operatorWords: needsSpoken }, '2026-01-15');
   expect(needs.status).toBe('needs');
