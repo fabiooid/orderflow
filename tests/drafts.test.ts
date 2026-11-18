@@ -21,7 +21,7 @@ it('reports a ready order with its totals, or exactly what is still needed', asy
   const ready = await api.order(draft(), readyContext, '2026-01-15');
   expect(ready.status).toBe('ready');
   if (ready.status === 'ready') expect(ready.totals.gross).toBe(36.11);
-  expect(forAgent(ready).note).toContain('Complete, and shown to the operator for review');
+  expect(forAgent(ready).note).toBe('Complete.');
   const needsSpoken = 'Example Studio: 2 Pebble 250';
   const needs = await api.order({ ...draft(), lines: [{ query: 'Pebble 250', quantity: 2 }], shippingPrice: undefined }, { ...context, operatorText: needsSpoken, operatorWords: needsSpoken }, '2026-01-15');
   expect(needs.status).toBe('needs');
@@ -33,13 +33,12 @@ it('reports a ready order with its totals, or exactly what is still needed', asy
     status: 'needs',
     customer: { status: 'accepted', name: 'Example Studio' },
     lines: [{ query: 'Pebble 250', quantity: 2, status: expect.stringMatching(/unconfirmed|ambiguous|unsupported/) }],
-    shipping: { status: 'unknown' },
   });
   expect(shown.issues).toEqual(expect.arrayContaining([
     expect.objectContaining({ field: 'lines.0', candidates: expect.arrayContaining([expect.stringMatching(/Pebble hand wash 250 ml/)]) }),
   ]));
   expect(shown.issues?.some(i => i.field === 'shippingPrice')).toBe(false);
-  expect(shown.shipping).toEqual({ status: 'unknown' });
+  expect(shown.shipping).toBeUndefined();
   expect(JSON.stringify(forAgent(needs))).not.toContain('101');
 });
 
@@ -66,11 +65,12 @@ it('keeps blank customer and shipping on status, not as issues or ask-actions', 
     lines: [{ query: 'Hand cream 100 ml SKU-100', quantity: 2 }],
   }), { ...context, operatorText: spoken, operatorWords: spoken }, '2026-01-15');
   expect(needs.status).toBe('needs');
-  expect(forAgent(needs).customer).toEqual({ status: 'missing' });
-  expect(forAgent(needs).shipping).toEqual({ status: 'unknown' });
+  expect(forAgent(needs).customer).toBeUndefined();
+  expect(forAgent(needs).shipping).toBeUndefined();
   expect(forAgent(needs).issues?.some(i => i.field === 'client' || i.field === 'shippingPrice')).toBe(false);
-  expect(forAgent(needs).note).toContain('Do not mention status missing or unknown');
+  expect(forAgent(needs).note).toContain('Issues listed here still need a pick or exact name');
   expect(forAgent(needs).note).not.toContain('Ask about issues that still need a pick');
+  expect(JSON.stringify(forAgent(needs))).not.toMatch(/"status":"unknown"/);
   expect(JSON.stringify(forAgent(needs))).not.toMatch(/catalogue default/i);
   expect(JSON.stringify(forAgent(needs))).not.toMatch(/Do not ask who it is/);
 });
@@ -87,8 +87,8 @@ it('shows an unmatched customer query so the agent cannot contradict the preview
     status: 'needs',
     customer: { status: expect.stringMatching(/unconfirmed|ambiguous|unsupported|missing/), query: 'Northwind Supplies Ltd' },
     lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2, status: 'accepted' }],
-    shipping: { status: 'unknown' },
   });
+  expect(forAgent(needs).shipping).toBeUndefined();
   expect(JSON.stringify(forAgent(needs))).not.toContain('"status":"accepted","name"');
 });
 
@@ -258,7 +258,7 @@ it('does not offer a previous-chat client search as a choice when this request d
     });
     expect(outcome.result && outcome.result.status === 'needs'
       && outcome.result.issues.some(i => i.field === 'client' && i.candidates?.length)).toBe(false);
-    expect(forAgent(outcome.result!).customer).toMatchObject({ status: 'missing' });
+    expect(forAgent(outcome.result!).customer).toBeUndefined();
     expect(JSON.stringify(forAgent(outcome.result!))).not.toMatch(/Example Studio/);
   } finally { await storage.close(); }
 });

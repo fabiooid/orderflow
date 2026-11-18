@@ -46,6 +46,12 @@ export function isCustomerConfirmation(text: string, pending?: PendingQuestion, 
   return trimmed.length < 80;
 }
 
+/** Printed note the operator labelled (`nota:` / `note:`), without that role word. */
+export function statedNote(text: string): string | undefined {
+  const labelled = /(?:^|\n|,)\s*(?:nota|note)\s*:\s*(.+)$/i.exec(text.trim())?.[1]?.trim();
+  return labelled || undefined;
+}
+
 /** Delivery charge the operator stated. This turn wins, then the last statement in the request. `0` is no charge; `undefined` is unknown. */
 export function statedShipping(operatorWords: string, turnWords?: string): number | undefined {
   const fromTurn = turnWords?.trim() ? lastShippingStatement(turnWords) : undefined;

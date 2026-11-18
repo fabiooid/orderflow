@@ -88,7 +88,8 @@ it('keeps business rules in the prompt and field rules in the API schema, with n
   expect(prompt).not.toMatch(/\/(?:ordine|cliente|annulla|confermaordine|confermacliente)\b/);
   const fields = orderDraftInput.shape;
   expect(fields.newClient.description).toContain('operator says the customer is new');
-  expect(fields.notes.description).toContain('only a note the operator asked to write');
+  expect(fields.notes.description).toContain('only the wording the operator asked to write');
+  expect(fields.notes.description).toContain('without a leading role word');
   expect(fields.delivery.description).toContain("other than the customer's own address");
   expect(fields.clientQuery.description).toContain('Empty when this request did not name a customer');
   expect(fields.clientQuery.description).toContain('Do not copy earlier messages, a previous or cancelled request, or letterhead');
@@ -113,7 +114,8 @@ it('tells the agent to put only the requested instruction in order notes', () =>
   const prompt = systemPrompt(config().invoicing.label);
   const notes = orderDraftInput.shape.notes.description ?? '';
   expect(prompt).toContain('Leave shipping, discounts and notes empty unless they stated them this request');
-  expect(notes).toContain('only a note the operator asked to write');
+  expect(notes).toContain('only the wording the operator asked to write');
+  expect(notes).toContain('without a leading role word');
   expect(notes).toContain('Empty when they did not');
   expect(notes).toContain('send it this turn');
   expect(notes).not.toContain("customer's message");

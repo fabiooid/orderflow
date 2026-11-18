@@ -114,14 +114,14 @@ export function forAgent(result: DraftResult, revision?: number) {
   const customerCandidates = issues?.find(i => i.field === 'client')?.candidates?.map(c => c.label);
   const customer = result.kind === 'order' && result.client
     ? { status: 'accepted' as const, name: result.client.name, ...(result.client.city ? { city: result.client.city } : {}), ...(result.client.vatNumber ? { vatNumber: result.client.vatNumber } : {}) }
-    : result.draft.clientQuery.trim()
+    : result.kind === 'order' && result.draft.clientQuery.trim()
       ? {
         status: customerStatus,
         query: result.draft.clientQuery,
         ...(customerCandidates?.length ? { candidates: customerCandidates } : {}),
         ...(customerStatus === 'accepted' || customerCandidates?.length ? {} : { action: 'Needs the legal name or VAT.' }),
       }
-      : { status: 'missing' as const };
+      : undefined;
   const lines = result.kind === 'order'
     ? result.draft.lines.map((line, index) => {
       const field = `lines.${index}`;
@@ -142,21 +142,19 @@ export function forAgent(result: DraftResult, revision?: number) {
       };
     })
     : undefined;
-  const shipping = result.kind === 'order'
-    ? result.draft.shippingPrice === undefined
-      ? { status: 'unknown' as const }
-      : { status: 'set' as const, amount: result.draft.shippingPrice }
+  const shipping = result.kind === 'order' && result.draft.shippingPrice !== undefined
+    ? { status: 'set' as const, amount: result.draft.shippingPrice }
     : undefined;
   return {
     status: result.status,
     ...(revision !== undefined ? { revision } : {}),
-    customer,
+    ...(customer ? { customer } : {}),
     ...(lines ? { lines } : {}),
     ...(shipping ? { shipping } : {}),
     ...(result.status === 'needs' ? { issues: issuesForAgent(result.issues, result.draft) } : {}),
     note: result.status === 'needs'
-      ? 'Shown to the operator. Do not mention status missing or unknown. Unconfirmed, ambiguous and unsupported identities still need a pick or exact name. shipping.status unknown is not 0; amount 0 means no charge. Never say the draft is ready while status is needs.'
+      ? 'Issues listed here still need a pick or exact name. Never say the draft is ready while status is needs.'
       : result.status === 'existing' ? 'This customer already exists; nothing will be created.'
-      : 'Complete, and shown to the operator for review.',
+      : 'Complete.',
   };
 }

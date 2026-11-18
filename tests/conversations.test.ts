@@ -24,7 +24,9 @@ const scriptedIds = [
   'spreadsheet-letterhead-is-not-customer',
   'spreadsheet-header-names-customer',
   'new-file-does-not-reuse-previous-chat-customer',
+  'new-file-unmatched-product-does-not-ask-blank-customer',
   'new-order-does-not-guess-customer-or-shipping',
+  'new-order-unnamed-italian',
 ];
 
 function asOrderDraft(act: ScriptedAct | undefined): OrderDraft {
@@ -94,7 +96,8 @@ function notesConverse(scenario: (typeof conversationCases)[number]): Converse {
   const notes = orderDraftInput.shape.notes.description ?? '';
   const followsRule = /notes empty unless they stated them this request/.test(prompt)
     && /Do not summarise an attached message/.test(notes)
-    && /only a note the operator asked to write/.test(notes);
+    && /only the wording the operator asked to write/.test(notes)
+    && /without a leading role word/.test(notes);
   return async (turn, act) => {
     const next = structuredClone(draft);
     if (!followsRule) {
@@ -206,7 +209,12 @@ function previousChatCustomerConverse(scenario: (typeof conversationCases)[numbe
   };
 }
 
-it.each(['new-file-does-not-reuse-previous-chat-customer', 'new-order-does-not-guess-customer-or-shipping'] as const)(
+it.each([
+  'new-file-does-not-reuse-previous-chat-customer',
+  'new-file-unmatched-product-does-not-ask-blank-customer',
+  'new-order-does-not-guess-customer-or-shipping',
+  'new-order-unnamed-italian',
+] as const)(
   'does not offer a previous-chat customer or shipping on %s',
   async id => {
     const scenario = conversationCases.find(c => c.id === id);
