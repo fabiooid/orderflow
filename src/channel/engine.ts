@@ -24,7 +24,7 @@ import { documentTemplates } from './order-forms.js';
 import { createDocumentWorkflow, workflowTemplatePages } from '../documents/workflow.js';
 import { createVisionDocumentProvider } from '../documents/reader.js';
 import { omitMedia } from '../assistant/omit-media.js';
-import { labelledCustomerQuery, operatorAskedToCreateOrder, statedLineQuantity } from '../assistant/intent.js';
+import { labelledCustomerQuery, operatorAskedToCancel, operatorAskedToCreateOrder, statedLineQuantity } from '../assistant/intent.js';
 
 function pendingFromIssues(issues: Issue[] | undefined, revision: number): PendingQuestion | undefined {
   const client = issues?.find(issue => issue.field === 'client' && issue.candidates?.length);
@@ -160,6 +160,9 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
     };
     const act: TurnActions = { order: draft => calls.order(draft, requestContext), customer: draft => calls.customer(draft, requestContext), cancel: () => calls.cancel(requestContext) };
     const { reply, locale } = await converse(prompt, act, requestContext);
+    if (!outcome.refused && !outcome.cancel && request && operatorAskedToCancel(input.operatorText)) {
+      calls.cancel(requestContext);
+    }
     if (outcome.cancel) return { text: reply, reply, locale, cancel: true };
     const turnState = turnOf(requestContext);
     const openKind = request ? kindOf(request) : undefined;

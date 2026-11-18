@@ -123,7 +123,7 @@ it('drops a locked shop when a later hotel refine no longer fits that account', 
 });
 
 it('reads a labelled customer follow-up and an ask to create an order, without treating file consent as that ask', async () => {
-  const { labelledCustomerQuery, operatorAskedToCreateOrder, isFileConsent } = await import('../src/assistant/intent.js');
+  const { labelledCustomerQuery, operatorAskedToCancel, operatorAskedToCreateOrder, isFileConsent } = await import('../src/assistant/intent.js');
   expect(labelledCustomerQuery('cliente Northwind Bistro')).toBe('Northwind Bistro');
   expect(labelledCustomerQuery('customer: Example Studio')).toBe('Example Studio');
   expect(labelledCustomerQuery('Northwind')).toBeUndefined();
@@ -134,4 +134,7 @@ it('reads a labelled customer follow-up and an ask to create an order, without t
   expect(operatorAskedToCreateOrder('crea cliente Marco Esempio')).toBe(false);
   expect(isFileConsent('ok prepara questo file')).toBe(true);
   expect(operatorAskedToCreateOrder('ok prepara questo file')).toBe(false);
+  expect(operatorAskedToCancel('lascia stare, non serve più')).toBe(true);
+  expect(operatorAskedToCancel('annulla')).toBe(true);
+  expect(operatorAskedToCancel('ok mostrami l\'ordine')).toBe(false);
 });

@@ -23,6 +23,8 @@ it('gives the agent the order and customer APIs and lookups, and no way to save'
     expect(tools.searchClients?.description).toContain('Search does not change the draft');
     expect(tools.searchProducts?.description).toContain('not in the catalogue');
     expect(tools.searchProducts?.description).toContain('found=catalogue is not identity evidence');
+    expect(tools.searchProducts?.description).toContain('do not paste the whole catalogue');
+    expect(tools.cancelRequest?.description).toContain('lascia stare');
     expect(tools.prepareOrder?.description).toContain('Empty lines keep rows already on this request');
     expect(tools.prepareOrder?.description).toContain('Search does not open or change a draft');
     expect(tools.prepareCustomer?.description).toContain('Missing email or VAT');

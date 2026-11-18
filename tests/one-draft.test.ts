@@ -447,6 +447,22 @@ it('matches the preview: needs never looks ready, and a needs draft cannot be sa
   } finally { journal.close(); }
 });
 
+it('cancels the open request when they ask to drop it and the model skips cancel-request', async () => {
+  const outcome = await runConversation(config(), new DemoConnector(), [
+    { text: 'ordine per Example Studio: 2 Pebble hand wash 250 ml' },
+    { text: 'lascia stare, non serve più' },
+  ], { converse: async (prompt, act) => {
+    if (!prompt.openRequest) {
+      await act.order(draftSchema.parse({
+        clientQuery: 'Example Studio',
+        lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }],
+      }));
+    }
+    return { reply: 'ok', locale: 'it' };
+  } });
+  expect(outcome.open).toBeUndefined();
+});
+
 it('re-renders an open order when the model does not call a draft tool', async () => {
   const outcome = await runConversation(config(), new DemoConnector(), [
     { text: 'ordine per Example Studio: 2 Pebble hand wash 250 ml' },

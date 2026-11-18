@@ -55,7 +55,7 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
    */
   const searchProducts = createTool({
     id: 'search-products',
-    description: 'Find products in the catalogue. With words (scent, type, size, code) it returns products that contain every word (found=words). If no product has every word, it returns products that match each word separately (found=related): say that combination is not in the catalogue, list the real products for each requested detail, and do not present a related product as the requested item. With no words, or when no product shares them, it returns the catalogue so you can judge by meaning which products fit, in any language ("saponi" can be a hand wash). found=catalogue is not identity evidence. This does not open a draft: if they then ask to order, call prepare-order with the products they meant. Answer from what it returns; never invent products.',
+    description: 'Find products in the catalogue. With words (scent, type, size, code) it returns products that contain every word (found=words). If no product has every word, it returns products that match each word separately (found=related): say that combination is not in the catalogue, list the real products for each requested detail, and do not present a related product as the requested item. With no words, or when no product shares them, it returns the catalogue so you can judge by meaning which products fit, in any language ("saponi" can be a hand wash). found=catalogue is not identity evidence. A "what exists" question lists the catalogue; for an order line, name only the products that fit that meaning and call prepare-order — do not paste the whole catalogue into the reply. This does not open a draft. Answer from what it returns; never invent products.',
     inputSchema: z.object({ query: z.string().describe('Words to look for; empty to see the catalogue.') }),
     outputSchema: z.object({ found: z.enum(['words', 'related', 'catalogue', 'catalogue-too-large']), products: z.array(productSchema) }),
     execute: async ({ query }, context) => {
@@ -159,7 +159,7 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
   };
   const cancelRequest = createTool({
     id: 'cancel-request',
-    description: 'Cancel the open unsaved order or customer request, only when the operator asks to drop it. Nothing saved is affected.',
+    description: 'Cancel the open unsaved order or customer request, only when the operator asks to drop it ("annulla", "lascia stare", "non serve più", cancel, never mind). Call this the same turn. Nothing saved is affected.',
     inputSchema: z.object({}), outputSchema: z.object({ status: z.enum(['cancelled', 'locked', 'nothing-open']), note: z.string().optional() }),
     execute: async (_input, context) => cancel(context?.requestContext),
   });

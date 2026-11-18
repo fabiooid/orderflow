@@ -58,6 +58,11 @@ export function statedLineQuantity(text: string) {
   return Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
+/** True when this message asks to drop the open unsaved request. */
+export function operatorAskedToCancel(text: string) {
+  return /\b(?:annulla(?:re|t[oa])?|lascia stare|non serve più|cancel(?:led| it)?|never mind|drop (?:it|the (?:order|request)))\b/i.test(text);
+}
+
 /** Customer name the operator labelled in this message (`cliente X` / `customer X`). */
 export function labelledCustomerQuery(text: string) {
   const name = /^(?:cliente|customer)\s*[:\-]?\s+(.+)$/i.exec(text.trim())?.[1]?.trim();
