@@ -105,6 +105,25 @@ it('shows the chosen customer on a draft order', () => {
   expect(text).toContain('❓ Da completare: controllo IVA');
 });
 
+it('keeps a tester designation on a draft line whose query is the printed sale identity', () => {
+  const draft = draftSchema.parse({
+    clientQuery: 'Example Studio',
+    lines: [{ query: 'SOAP250ML Pebble hand wash 250 ml', quantity: 1, tester: true }],
+  });
+  expect(orderDraft(draft, [], false)).toMatch(/1 × SOAP250ML Pebble hand wash 250 ml · tester/);
+});
+
+it('shows the tester catalogue name on a ready preview, not the sale SKU', async () => {
+  const order = await prepared();
+  order.lines.unshift({
+    productId: '808', code: 'SAMPLE-T', name: 'TESTER Pebble wash', description: 'Tester bottle',
+    quantity: 1, netPrice: 4, discountPercent: 0, vatId: 1, vatRate: 22, shipping: false,
+  });
+  const text = orderPreview(order, { net: 1, vat: 1, gross: 2 }, true);
+  expect(text).toMatch(/1 × TESTER Pebble wash — €4,00/);
+  expect(text).not.toMatch(/1 × Pebble hand wash 250 ml — €12,00/);
+});
+
 it('shows a configured currency other than euro after the amount', async () => {
   const order = await prepared();
   const text = orderPreview(order, { net: 29.6, vat: 6.51, gross: 36.11 }, false, [], 'USD');

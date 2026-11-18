@@ -8,7 +8,7 @@ import { DemoConnector } from '../src/connector/demo.js';
 import { WriteJournal } from '../src/storage/write-journal.js';
 import { orderCreator } from '../src/channel/order.js';
 import { TelegramController } from '../src/channel/controller.js';
-import { TelegramStore } from '../src/channel/store.js';
+import { loadConversation, TelegramStore } from '../src/channel/store.js';
 import { createConversationEngine, type Converse } from '../src/channel/engine.js';
 import { LibSQLStore } from '@mastra/libsql';
 import { config, message, press } from './helpers.js';
@@ -204,5 +204,18 @@ it('updates the customer from a short name and still allows confirm-and-save aft
     journal.close();
     await storage.close();
   }
+});
+
+it('reloads stored drafts with or without a tester fact', () => {
+  const base = {
+    orderId: 'u1', revision: 1, status: 'suspended' as const, policy: 'test',
+    draft: { clientQuery: 'Example Studio', discountPercent: 0, notes: '', lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }] },
+  };
+  expect(loadConversation(JSON.stringify(base)).draft.lines[0]?.tester).toBeUndefined();
+  const withTester = {
+    ...base,
+    draft: { ...base.draft, lines: [{ query: 'SOAP250ML Pebble hand wash 250 ml tester', quantity: 1, tester: true }] },
+  };
+  expect(loadConversation(JSON.stringify(withTester)).draft.lines[0]).toMatchObject({ tester: true, quantity: 1 });
 });
 

@@ -3,7 +3,7 @@ import { withCompleteClientSearch } from './client-search.js';
 import { z } from 'zod';
 import type { AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
-import { asksForTester, clientPickLabel, isTester, matchClients, nameInText, normalize, productCodesIn, sameClientIds, searchClients } from '../domain/matching.js';
+import { clientPickLabel, correspondingTesters, isTester, lineWantsTester, matchClients, nameInText, normalize, productCodesIn, sameClientIds, searchClients, testerQuery } from '../domain/matching.js';
 import { draftSchema, type Client, type Product, type Issue, type OrderDraft } from '../domain/types.js';
 import { productCandidates, clientCandidates } from './candidates.js';
 import { loadMatchingConfig, type MatchingConfig } from './config.js';
@@ -99,30 +99,40 @@ export function createIdentityResolver(app: AppConfig, connector: OrderConnector
       ...(!clientQuery && choice?.field !== 'client' ? { forced: 'no-match' as const } : {}),
       ...(choice?.field !== 'client' && !confirmedClient && (siblingAsk || new Set(ca.map(a => a.clientId)).size > 1) ? { forced: 'ambiguous' as const } : {}) });
     for (const [index, line] of draft.lines.entries()) {
-      const all = products.filter(p => p.id !== app.invoicing.shippingProductId && p.netPrice > 0);
-      const confirmed = context.confirmedChoices?.find(c => c.field === `lines.${index}` && c.queryHash === hash(normalize(line.query)) && productCandidates(all).some(record => record.id === c.id && identityHash(record) === c.identityHash));
-      const chosen = all.find(p => p.id === (choice?.field === `lines.${index}` ? choice.id : confirmed?.id));
+      const wantsTester = lineWantsTester(line);
+      const incoming = testerQuery(line);
+      const all = products.filter(p => p.id !== app.invoicing.shippingProductId && (p.netPrice > 0 || isTester(p)));
+      const confirmed = context.confirmedChoices?.find(c => c.field === `lines.${index}` && c.queryHash === hash(normalize(incoming)) && productCandidates(all).some(record => record.id === c.id && identityHash(record) === c.identityHash));
+      const picked = all.find(p => p.id === (choice?.field === `lines.${index}` ? choice.id : confirmed?.id));
+      const chosen = picked && (!wantsTester || isTester(picked)) ? picked : undefined;
       if (chosen) {
         if (line.productId !== chosen.id && line.documentPrice) line.documentPrice.decision = 'pending';
         line.query = chosen.name;
       }
-      const coded = productCodesIn(line.query, all);
+      const query = testerQuery(line);
+      const coded = productCodesIn(query, all);
       const uniqueCode = coded.length === 1 ? coded[0] : undefined;
       const uniqueInText = uniqueCode?.code && nameInText(context.operatorText, uniqueCode.code) ? uniqueCode : undefined;
-      const namedExact = all.filter(p => [p.code, p.name].some(value => normalize(value) === normalize(line.query) && has(context.operatorText, value)));
-      const exactCodes = chosen ? [chosen] : uniqueInText ? [uniqueInText] : namedExact;
+      const namedExact = all.filter(p => [p.code, p.name].some(value => normalize(value) === normalize(query) && has(context.operatorText, value)));
+      const testers = wantsTester ? correspondingTesters(query, all) : [];
+      const uniqueTester = testers.length === 1 ? testers[0] : undefined;
+      const exactIdentity = chosen ?? (wantsTester ? (uniqueTester && isTester(uniqueTester) ? uniqueTester : undefined) : uniqueInText);
+      const exactCodes = exactIdentity ? [exactIdentity] : wantsTester ? namedExact.filter(isTester) : namedExact;
       // Size words that only appear inside a matched code are identity, not a second requested size.
-      const sizeSource = uniqueCode?.code ? ` ${normalize(line.query)} `.replace(` ${normalize(uniqueCode.code)} `, ' ') : line.query;
-      const requestedSizes = sizes(sizeSource);
-      const wantsTester = asksForTester(line.query) && !/\b(non|no|not|senza|without)\s+(?:a\s+)?tester/i.test(line.query);
-      const eligible = all.filter(p => (!coded.length || coded.some(c => c.id === p.id)) && (isTester(p) === wantsTester || exactCodes.some(e => e.id === p.id)) && requestedSizes.every(size => (sizes(`${p.code} ${p.name}`).length ? sizes(`${p.code} ${p.name}`) : sizes(p.description)).includes(size)));
+      // Tester catalogue names often omit the sale size; do not require it when a tester was requested.
+      const sizeSource = uniqueCode?.code ? ` ${normalize(query)} `.replace(` ${normalize(uniqueCode.code)} `, ' ') : query;
+      const requestedSizes = wantsTester ? [] : sizes(sizeSource);
+      const eligible = wantsTester
+        ? testers
+        : all.filter(p => (!coded.length || coded.some(c => c.id === p.id)) && (isTester(p) === wantsTester || exactCodes.some(e => e.id === p.id)) && requestedSizes.every(size => (sizes(`${p.code} ${p.name}`).length ? sizes(`${p.code} ${p.name}`) : sizes(p.description)).includes(size)));
       const pa = aliases.aliases.filter(a => normalize(a.phrase) === normalize(line.query));
       const candidates = productCandidates(eligible).map(c => addAliases(c, pa.filter(a => a.productId === c.id).map(a => a.phrase)));
-      pending.push({ field: `lines.${index}`, kind: 'product', query: line.query, candidates,
+      pending.push({ field: `lines.${index}`, kind: 'product', query, candidates,
         operator: !!chosen,
         exact: exactCodes.length === 1 ? candidates.find(c => c.id === exactCodes[0]!.id) : undefined,
-        ...(choice?.field === `lines.${index}` && !chosen ? { forced: 'no-match' as const } : {}),
-        ...(!chosen && new Set(pa.map(a => a.productId)).size > 1 ? { forced: 'ambiguous' as const } : {}) });
+        ...(choice?.field === `lines.${index}` && !chosen && !(wantsTester && testers.length === 1) ? { forced: 'no-match' as const } : {}),
+        ...(!chosen && new Set(pa.map(a => a.productId)).size > 1 ? { forced: 'ambiguous' as const } : {}),
+        ...(wantsTester && !chosen && testers.length !== 1 ? { forced: testers.length ? 'ambiguous' as const : 'no-match' as const } : {}) });
     }
     const requests: SelectionRequest[] = [], requested: Pending[] = [];
     for (const item of pending) {

@@ -185,6 +185,65 @@ it('operator button choices bypass the model but remain limited to current recor
   expect(missing.draft.lines[0]?.productId).toBeUndefined();
 });
 
+it('a tester mark on a sale SKU selects the tester catalogue product, including a free tester', async () => {
+  const connector = new DemoConnector();
+  const products = await connector.listProducts();
+  vi.spyOn(connector, 'listProducts').mockResolvedValue([...products,
+    { id: '808', code: 'SAMPLE-T', name: 'TESTER Pebble wash', description: 'Tester bottle', netPrice: 0 }]);
+  const select = vi.fn(successful);
+  const r = resolver(connector, select);
+  const resolved = await r.resolve({
+    ...draft(),
+    lines: [{ query: 'DEMO-A Pebble hand wash 250 ml tester', quantity: 1, tester: true }],
+  }, { ...context, operatorText: 'Create order\nDEMO-A | Pebble hand wash 250 ml | tester: 1' });
+  expect(resolved.draft.lines[0]?.productId).toBe('808');
+  expect(resolved.issues.filter(i => i.field === 'lines.0')).toEqual([]);
+  expect(select.mock.calls.every(call => !call[0].some(req => req.kind === 'product'))).toBe(true);
+});
+
+it('does not quietly pick the sale SKU when no tester catalogue product corresponds', async () => {
+  const select = vi.fn(successful);
+  const resolved = await resolver(new DemoConnector(), select).resolve({
+    ...draft(),
+    lines: [{ query: 'DEMO-B Linen candle 200 g tester', quantity: 1, tester: true }],
+  }, { ...context, operatorText: 'Create order\nDEMO-B | Linen candle 200 g | tester: 1' });
+  expect(resolved.draft.lines[0]?.productId).toBeUndefined();
+  expect(resolved.issues).toContainEqual(expect.objectContaining({ field: 'lines.0', matchingStatus: 'no-match' }));
+  expect(select.mock.calls.every(call => !call[0].some(req => req.kind === 'product'))).toBe(true);
+});
+
+it('asks when several testers correspond and does not let the matcher assign the sale SKU', async () => {
+  const connector = new DemoConnector();
+  const products = await connector.listProducts();
+  vi.spyOn(connector, 'listProducts').mockResolvedValue([...products,
+    { id: '808', code: 'SAMPLE-T', name: 'TESTER Pebble wash 50 ml', description: '', netPrice: 4 },
+    { id: '810', code: 'SAMPLE-T2', name: 'TESTER Pebble wash 100 ml', description: '', netPrice: 0 }]);
+  const select = vi.fn(successful);
+  const resolved = await resolver(connector, select).resolve({
+    ...draft(),
+    lines: [{ query: 'DEMO-A Pebble hand wash 250 ml tester', quantity: 1, tester: true }],
+  }, { ...context, operatorText: 'Create order\nDEMO-A | Pebble hand wash 250 ml | tester: 1' });
+  expect(resolved.draft.lines[0]?.productId).toBeUndefined();
+  expect(resolved.issues).toContainEqual(expect.objectContaining({ field: 'lines.0', matchingStatus: 'ambiguous' }));
+  expect(resolved.issues.find(i => i.field === 'lines.0')?.candidates?.map(c => c.id).sort()).toEqual(['808', '810']);
+  expect(select.mock.calls.every(call => !call[0].some(req => req.kind === 'product'))).toBe(true);
+});
+
+it('ignores a sale-SKU operator pick on a tester line and still selects the unique tester', async () => {
+  const connector = new DemoConnector();
+  const products = await connector.listProducts();
+  vi.spyOn(connector, 'listProducts').mockResolvedValue([...products,
+    { id: '808', code: 'SAMPLE-T', name: 'TESTER Pebble wash', description: 'Tester bottle', netPrice: 4 }]);
+  const select = vi.fn(successful);
+  const resolved = await resolver(connector, select).resolve({
+    ...draft(),
+    lines: [{ query: 'DEMO-A Pebble hand wash 250 ml tester', quantity: 1, tester: true }],
+  }, { ...context, operatorText: 'Create order\nDEMO-A | Pebble hand wash 250 ml | tester: 1', choice: { field: 'lines.0', id: '101' } });
+  expect(resolved.draft.lines[0]?.productId).toBe('808');
+  expect(resolved.decisions.find(d => d.field === 'lines.0')).toMatchObject({ source: 'exact', selectedId: '808' });
+  expect(select.mock.calls.every(call => !call[0].some(req => req.kind === 'product'))).toBe(true);
+});
+
 it('an explicit code cannot silently turn into a different size or a tester', async () => {
   const connector = new DemoConnector(); const products = await connector.listProducts();
   const p = products.find(p => p.id === '101')!;
