@@ -53,7 +53,7 @@ export const decisionSchema = z.object({
 });
 export type Decision = z.infer<typeof decisionSchema>;
 export const confirmedChoices = (decisions: Decision[], draft?: OrderDraft) => decisions.flatMap(d => {
-  if (d.source !== 'operator' || d.status !== 'matched' || !d.selectedId || !d.queryHash || !d.identityHash) return [];
+  if ((d.source !== 'operator' && d.source !== 'exact') || d.status !== 'matched' || !d.selectedId || !d.queryHash || !d.identityHash) return [];
   const index = /^lines\.(\d+)$/.exec(d.field);
   const ref = index ? draft?.lines[Number(index[1])]?.ref : undefined;
   return [{ field: d.field, id: d.selectedId, queryHash: d.queryHash, identityHash: d.identityHash, ...(ref ? { ref } : {}) }];
@@ -125,6 +125,7 @@ export function createIdentityResolver(app: AppConfig, connector: OrderConnector
       const merged = [...new Set([...(c.aliases ?? []), ...values].filter(Boolean))];
       return { ...c, ...(merged.length ? { aliases: merged } : {}) };
     };
+    const evidence = requestEvidence(context);
     const confirmClient = confirmsPendingCustomer(context.turnWords, context.pendingQuestion)
       ? listed.find(c => c.id === context.pendingQuestion?.ids[0]) : undefined;
     const narrowed = choice?.field === 'client' ? listed.filter(c => c.id === choice.id)
@@ -132,16 +133,16 @@ export function createIdentityResolver(app: AppConfig, connector: OrderConnector
       : combined;
     const clientSet = clientCandidates(narrowed).map(c => addAliases(c, ca.filter(a => a.clientId === c.id).map(a => a.phrase)));
     const confirmedClient = context.confirmedChoices?.find(c => c.field === 'client' && c.queryHash === hash(normalize(clientQuery)) && clientSet.some(record => record.id === c.id && identityHash(record) === c.identityHash));
-    const vatTyped = !!(vat && has(spoken(context), vat));
+    const vatTyped = !!(vat && has(evidence, vat));
     const vatMatches = vatTyped ? clientSet.filter(c => normalize(c.vatNumber ?? '') === normalize(vat)) : [];
     const exactClients = clientSet.filter(c => choice?.field === 'client' ? c.id === choice.id
       : confirmClient ? c.id === confirmClient.id
       : confirmedClient ? c.id === confirmedClient.id
-      : [c.name, c.vatNumber ?? ''].some(v => normalize(v) === normalize(clientQuery) && has(spoken(context), v))
+      : [c.name, c.vatNumber ?? ''].some(v => normalize(v) === normalize(clientQuery) && has(evidence, v))
         || (vatMatches.length === 1 && c.id === vatMatches[0]!.id));
     const siblingAsk = choice?.field !== 'client' && !confirmedClient && !confirmClient && exactClients.length !== 1
       && (allWord.length > 1 || (allWord.length === 0 && related.length > 0) || (related.length > 0 && !sameClientIds(allWord, related)));
-    const heldClient = config.mode === 'off' && original.clientId
+    const heldClient = original.clientId
       ? clientCandidates(listed.filter(c => c.id === original.clientId && (!clientQuery || matchClients(clientQuery, [c]).length === 1)))[0]
       : undefined;
     const clientExact = (exactClients.length === 1 && (choice?.field === 'client' || confirmedClient || confirmClient || new Set(ca.map(a => a.clientId)).size <= 1) ? exactClients[0] : undefined)
@@ -180,16 +181,19 @@ export function createIdentityResolver(app: AppConfig, connector: OrderConnector
       const query = testerQuery(line);
       const coded = productCodesIn(query, all);
       const uniqueCode = coded.length === 1 ? coded[0] : undefined;
-      const evidence = requestEvidence(context);
       const codeSupported = !!(uniqueCode?.code && nameInText(evidence, uniqueCode.code));
-      const namedExact = all.filter(p => [p.code, p.name].some(value => normalize(value) === normalize(query) && has(evidence, value)));
+      const equalNames = all.filter(p => has(evidence, p.name) && normalize(p.name) === normalize(query));
+      const equalCodes = all.filter(p => has(evidence, p.code) && normalize(p.code) === normalize(query));
+      const containedNames = all.filter(p => has(evidence, p.name) && has(query, p.name));
+      const namedExact = equalNames.length ? equalNames : equalCodes.length ? equalCodes : containedNames;
       const testers = wantsTester ? correspondingTesters(query, all) : [];
       const uniqueTester = testers.length === 1 ? testers[0] : undefined;
       const extraSizes = explicitLineSizes(query, spoken(context), context.attachmentText ?? '');
       const variantConflict = !!(uniqueCode && codeSupported && extraSizes.some(size => !productIdentitySizes(uniqueCode).includes(size)));
-      const heldProduct = config.mode === 'off' && original.lines[index]?.productId
-        ? all.find(p => p.id === original.lines[index]!.productId && (!wantsTester || isTester(p)) && (wantsTester || !isTester(p) || nameInText(query, p.code)))
-        : undefined;
+      const stored = original.lines[index]?.productId ? all.find(p => p.id === original.lines[index]!.productId) : undefined;
+      const storedFitsQuery = !!(stored && [stored.code, stored.name].some(value => normalize(value) === normalize(query) || has(query, value) || nameInText(query, stored.code)));
+      const heldProduct = stored && storedFitsQuery && (!wantsTester || isTester(stored)) && (wantsTester || !isTester(stored) || nameInText(query, stored.code))
+        ? stored : undefined;
       const exactIdentity = chosen
         ?? (wantsTester ? (uniqueTester && isTester(uniqueTester) ? uniqueTester : undefined) : undefined)
         ?? (!wantsTester && uniqueCode && codeSupported && !variantConflict ? uniqueCode : undefined)

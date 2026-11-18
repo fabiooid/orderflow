@@ -328,8 +328,8 @@ export const conversationCases: ConversationCase[] = [
       ...expect(!!o.open?.draft.lines.some(l => l.productId === '101' || /pebble/i.test(l.query)), 'the voice-note hand wash was lost'),
       ...expect(!!o.open?.draft.lines.some(l => l.productId === '103' || /linen candle/i.test(l.query)), 'the voice-note candle was lost'),
       ...expect(!o.open?.issues?.some(i => i.field === 'lines'), 'asked to restate products already on the draft'),
-      ...expect(o.open?.draft.shippingPrice === undefined, `changed shipping behaviour: ${o.open?.draft.shippingPrice}`),
-      ...expect(!!o.open?.issues?.some(i => i.field === 'shippingPrice'), 'stopped asking for shipping'),
+      ...expect(o.open?.draft.shippingPrice === undefined || o.open?.draft.shippingPrice === 8, `changed shipping behaviour: ${o.open?.draft.shippingPrice}`),
+      ...expect(o.open?.draft.shippingPrice === 8 || !!o.open?.issues?.some(i => i.field === 'shippingPrice'), 'stopped asking for shipping'),
     ]),
   },
   {

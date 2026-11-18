@@ -1,7 +1,7 @@
 import { draftSchema, type OrderDraft } from '../domain/types.js';
 import { normalize } from '../domain/matching.js';
 import type { ReadingLine } from '../documents/product-lines.js';
-import { customerNamedInRequest, statedShipping } from './intent.js';
+import { customerNamedInRequest, operatorAskedToCreateCustomer, statedShipping } from './intent.js';
 
 export type LinePatch = OrderDraft['lines'][number] & { op?: 'add' | 'edit' | 'replace' | 'delete' };
 
@@ -32,16 +32,46 @@ function sameLines(left: OrderDraft['lines'], right: ReadingLine[] | OrderDraft[
   return true;
 }
 
+function uniqueByLineKey<T extends { query: string; quantity?: number; tester?: boolean }>(lines: T[]): T[] {
+  const seen = new Set<string>();
+  return lines.filter(line => {
+    const key = lineKey(line);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function priorProductId(base: OrderDraft['lines'], incoming: Pick<LinePatch, 'ref' | 'query' | 'quantity' | 'tester'>, index?: number) {
+  if (incoming.ref) {
+    const byRef = base.find(line => line.ref === incoming.ref);
+    if (byRef) return byRef.productId;
+  }
+  const byKey = base.find(line => lineKey(line) === lineKey(incoming));
+  if (byKey) return byKey.productId;
+  if (index !== undefined && base[index] && lineKey(base[index]!) === lineKey(incoming)) return base[index]!.productId;
+  return undefined;
+}
+
+/** Model productIds are proposals. Keep only an id already stored on this request's matching line. */
+function dropFabricatedProductId<T extends { productId?: string }>(line: T, prior?: string): T {
+  if (!line.productId || line.productId === prior) return line;
+  const { productId: _drop, ...rest } = line;
+  return rest as T;
+}
+
 function applyIncomingLines(base: OrderDraft['lines'], incoming: LinePatch[]): OrderDraft['lines'] {
   if (!incoming.length) return ensureLineRefs(base);
   const hasRefOp = incoming.some(line => line.ref || line.op);
   if (!hasRefOp) {
     if (base.length && sameLines(base, incoming)) return ensureLineRefs(base);
-    return ensureLineRefs(incoming.map(({ op: _op, ...line }) => line));
+    return ensureLineRefs(uniqueByLineKey(incoming.map(({ op: _op, ...line }, index) => dropFabricatedProductId(line, priorProductId(base, line, index)))));
   }
   const byRef = new Map(base.filter(line => line.ref).map(line => [line.ref!, { ...line }]));
   const unused = base.filter(line => !line.ref || !incoming.some(patch => patch.ref === line.ref));
   const next: OrderDraft['lines'] = [];
+  const hasKey = (line: { query: string; quantity?: number; tester?: boolean }) =>
+    [...next, ...unused].some(existing => lineKey(existing) === lineKey(line));
   for (const patch of incoming) {
     const { op, ...rest } = patch;
     if (op === 'delete') {
@@ -50,7 +80,12 @@ function applyIncomingLines(base: OrderDraft['lines'], incoming: LinePatch[]): O
     }
     const current = patch.ref ? byRef.get(patch.ref) : undefined;
     if (op === 'replace' || !current) {
-      next.push({ ...rest });
+      const incomingLine = dropFabricatedProductId(rest, current?.productId ?? priorProductId(base, rest));
+      if (!current && hasKey(incomingLine)) {
+        if (patch.ref) byRef.delete(patch.ref);
+        continue;
+      }
+      next.push(incomingLine);
       if (patch.ref) byRef.delete(patch.ref);
       continue;
     }
@@ -58,7 +93,7 @@ function applyIncomingLines(base: OrderDraft['lines'], incoming: LinePatch[]): O
     next.push({
       ...current,
       ...rest,
-      ...(queryChanged && rest.productId === undefined ? { productId: undefined } : {}),
+      productId: queryChanged ? undefined : current.productId,
     });
     byRef.delete(patch.ref!);
   }
@@ -66,7 +101,7 @@ function applyIncomingLines(base: OrderDraft['lines'], incoming: LinePatch[]): O
     // Patch edits keep unmatched existing lines (omission is not delete).
     next.push(...unused.filter(line => !next.some(kept => kept.ref && kept.ref === line.ref)));
   }
-  return ensureLineRefs(next);
+  return ensureLineRefs(uniqueByLineKey(next));
 }
 
 export type MergeInput = {
@@ -101,13 +136,17 @@ export function mergeOrderDraft(input: MergeInput): OrderDraft {
   lines = ensureLineRefs(lines);
 
   const named = incoming.clientQuery.trim() || incoming.newClient?.name?.trim() || '';
+  const headerCustomer = /^\s*(?:header:\s*)?customer\s*[:|-]\s*(.+)$/im.exec(input.attachmentText ?? '')?.[1]?.trim() ?? '';
+  const askedCreate = operatorAskedToCreateCustomer(input.operatorWords);
   const keepIncomingCustomer = !input.isNewRequest
     || customerNamedInRequest(named, input.operatorWords, input.attachmentText)
-    || !!incoming.newClient;
+    || (askedCreate && !!incoming.newClient);
   const clientQuery = keepIncomingCustomer && incoming.clientQuery.trim()
     ? incoming.clientQuery
-    : (start.clientQuery.trim() ? start.clientQuery : '');
-  const newClient = keepIncomingCustomer && incoming.newClient ? incoming.newClient : start.newClient;
+    : (start.clientQuery.trim() ? start.clientQuery : (headerCustomer || (!askedCreate ? incoming.newClient?.name?.trim() ?? '' : '')));
+  const newClient = keepIncomingCustomer && incoming.newClient && (askedCreate || !input.isNewRequest)
+    ? incoming.newClient
+    : (!input.isNewRequest ? start.newClient : undefined);
   const clientId = start.clientId;
 
   const stated = statedShipping(input.operatorWords);
@@ -129,7 +168,9 @@ export function mergeOrderDraft(input: MergeInput): OrderDraft {
   if (input.isNewRequest) delete draft.clientId;
   if (!keepIncomingCustomer) {
     delete draft.clientId;
-    if (!start.clientQuery.trim()) draft.clientQuery = '';
+    if (!start.clientQuery.trim()) {
+      draft.clientQuery = headerCustomer || (!askedCreate ? incoming.newClient?.name?.trim() ?? '' : '');
+    }
     if (!start.newClient) delete draft.newClient;
   }
   if (incoming.clientId && incoming.clientId === start.clientId) draft.clientId = start.clientId;

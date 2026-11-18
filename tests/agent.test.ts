@@ -37,6 +37,8 @@ it('keeps business rules in the prompt and field rules in the API schema, with n
   expect(prompt).toContain('exact legal name or VAT');
   expect(prompt).toContain('"Yes, prepare this file" does not confirm a customer');
   expect(prompt).toContain('A single fuzzy search hit is not a lock');
+  expect(prompt).toContain('do not invent or append catalogue codes');
+  expect(prompt).toContain('Search-products only when');
   expect(prompt).toContain('not in the catalogue');
   expect(prompt).toContain('Empty lines keep the open draft');
   expect(prompt).toContain('Catalogue prices apply unless they state a unit price');

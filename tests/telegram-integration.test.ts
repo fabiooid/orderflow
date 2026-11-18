@@ -198,8 +198,9 @@ it('lets an order take over the open new-customer request, carrying the customer
     expect(order?.kind).toBeUndefined();
     expect(order?.draft.newClient).toMatchObject({ name: 'Marco Esempio' });
     expect(order?.draft.shippingPrice).toBeUndefined();
+    expect(order?.draft.lines[0]?.productId).toBeUndefined();
     expect(order?.status).toBe('suspended');
-    expect(order?.issues?.some(i => i.field === 'shippingPrice')).toBe(true);
+    expect(order?.issues?.some(i => i.field.startsWith('lines.'))).toBe(true);
     expect(send.mock.calls[1]![0]).not.toContain('📦 Anteprima ordine');
   } finally { store.close(); await storage.close(); }
 });

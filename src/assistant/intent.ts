@@ -40,3 +40,9 @@ export function customerNamedInRequest(query: string, operatorWords: string, att
   const header = /^\s*(?:header:\s*)?customer\s*[:|-]\s*(.+)$/im.exec(attachmentText)?.[1]?.trim() ?? '';
   return operatorWords.toLowerCase().includes(q.toLowerCase()) || (header.length > 0 && header.toLowerCase().includes(q.toLowerCase()));
 }
+
+/** True when the operator asked to create a customer, not merely to prepare an order. */
+export function operatorAskedToCreateCustomer(operatorWords: string) {
+  return /\b(?:crea(?:re)?(?:\s+un)?|nuovo)\s+cliente\b/i.test(operatorWords)
+    || /\b(?:create(?:\s+an?)?|new)\s+customer\b/i.test(operatorWords);
+}

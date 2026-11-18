@@ -146,7 +146,7 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
   });
   const orderApi = prepare('order', drafts.order), customerApi = prepare('customer', drafts.customer);
   const books = config.invoicing.label;
-  const prepareOrder = draftTool('prepare-order', `The order API: merge this turn's changes into the open draft. Empty lines keep rows already on this request (including attachment facts). Tester marks are their own line (tester true, printed sale code kept). productId and clientId are proposals; the application accepts supported unique SKUs/testers and exact typed customer names, and otherwise keeps candidates. Do not resend a cancelled order. Do not claim ready while the result status is needs. Never saves.`,
+  const prepareOrder = draftTool('prepare-order', `The order API: merge this turn's changes into the open draft. Empty lines keep rows already on this request (including attachment facts). Tester marks are their own line (tester true, printed sale code kept). productId and clientId are proposals; the application accepts supported unique SKUs/testers and exact catalogue or customer names typed this request, and otherwise keeps candidates. Do not invent catalogue codes. Do not resend a cancelled order. Do not claim ready while the result status is needs. Never saves.`,
     orderDraftInput, parseDraft, orderApi, true);
   const prepareCustomer = draftTool('prepare-customer', `The customer API: create a new customer in ${books}, or correct the one being drafted. The application never saves. For an order's customer use prepare-order instead.`,
     customerDraftInput, parseCustomer, customerApi);

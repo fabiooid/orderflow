@@ -5,6 +5,7 @@ import { createJevBatchSelector } from '../src/matching/jev-client.js';
 import type { SelectionResult } from '../src/matching/types.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { createDraftApi } from '../src/assistant/drafts.js';
+import { mergeOrderDraft } from '../src/assistant/merge.js';
 import { config, draft, harborSiblings, monasterySiblings, pharmacyTypeAccounts, sampleNameAccounts, willowmereStayAccounts } from './helpers.js';
 
 const on = matchingConfigSchema.parse({ mode: 'on' });
@@ -32,7 +33,10 @@ it('replaces model IDs with application-validated decisions and does not lock a 
 });
 
 it.each(['ambiguous', 'no-match', 'unavailable'] as const)('never locks identities on matcher %s, and keeps usable candidates', async status => {
-  const resolved = await resolver(new DemoConnector(), async requests => requests.map(() => result(status))).resolve({ ...draft(), clientId: '201', lines: [{ query: 'Pebble hand wash 250 ml', productId: '101', quantity: 2 }] }, context);
+  const resolved = await resolver(new DemoConnector(), async requests => requests.map(() => result(status))).resolve(
+    { ...draft(), clientId: undefined, lines: [{ query: 'small pebble wash', quantity: 2 }] },
+    context,
+  );
   expect(resolved.draft.clientId).toBeUndefined();
   expect(resolved.draft.lines[0]?.productId).toBeUndefined();
   expect(resolved.issues.some(i => i.field === 'client')).toBe(true);
@@ -77,6 +81,19 @@ it('off mode reads the catalogue for exact identities and never calls the matche
   expect(fuzzy.draft.clientId).toBeUndefined();
   expect(fuzzy.draft.lines[0]?.productId).toBeUndefined();
   expect(fuzzy.issues.length).toBeGreaterThan(0);
+  const injected = mergeOrderDraft({
+    incoming: { ...draft(), clientId: '201', lines: [{ query: 'A1 SAP-MNT scanned label', productId: '101', quantity: 2 }] },
+    operatorWords: 'ordine dal modulo',
+    isNewRequest: true,
+  });
+  expect(injected.clientId).toBeUndefined();
+  expect(injected.lines[0]?.productId).toBeUndefined();
+  const injectedResolved = await resolver(connector, select, 'off').resolve(
+    injected,
+    { ...context, operatorText: 'ordine dal modulo', operatorWords: 'ordine dal modulo' },
+  );
+  expect(injectedResolved.draft.clientId).toBeUndefined();
+  expect(injectedResolved.draft.lines[0]?.productId).toBeUndefined();
   expect(select).not.toHaveBeenCalled();
 });
 

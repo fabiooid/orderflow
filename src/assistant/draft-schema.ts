@@ -33,8 +33,8 @@ export const orderDraftInput = z.object({
   lines: z.array(z.object({
     ref: z.string().min(1).max(64).nullable().optional().describe('Stable line id from the open draft (L1, L2, …). Null to add a line. Send op=delete with a ref to remove one. Omitted lines are kept.'),
     op: z.enum(['add', 'edit', 'replace', 'delete']).nullable().optional().describe('add/edit/replace/delete against ref. Null with no refs replaces the whole list only when the rows actually changed.'),
-    query: z.string().min(1).describe('Product wording, keeping printed codes, sizes, scents. Tester marks keep the printed sale code here and set tester true.'),
-    productId: z.string().min(1).nullable().describe('A proposal only. The application accepts a unique supported SKU or unique tester; it does not lock a fuzzy singleton. Never put a sale id on a tester line.'),
+    query: z.string().min(1).describe("The operator's product wording this request, including printed codes they wrote. Do not invent or append a catalogue code they did not write. Tester marks keep the printed sale code and set tester true."),
+    productId: z.string().min(1).nullable().describe('A proposal only. The application accepts a unique supported SKU, unique tester, or exact catalogue name typed this request; it does not lock a fuzzy singleton or a code only you added. Never put a sale id on a tester line.'),
     quantity: z.number().positive().nullable().describe('Count of items, or the tester count on a tester line. A size is not a quantity. null when unknown.'),
     tester: z.boolean().nullable().describe('True only for a requested tester/sample line. A sale quantity and a tester mark are two lines.'),
     netPrice: z.number().nonnegative().nullable().describe('Net unit the operator stated. null: catalogue prices. Never a price read from a file.'),

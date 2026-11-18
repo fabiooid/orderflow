@@ -13,7 +13,7 @@ import { orderCreator } from '../src/channel/order.js';
 import { policyFingerprint } from '../src/channel/controller.js';
 import { WriteJournal } from '../src/storage/write-journal.js';
 import { createDraftApi } from '../src/assistant/drafts.js';
-import { createIdentityResolver, type SelectMany } from '../src/matching/resolver.js';
+import { confirmedChoices, createIdentityResolver, type SelectMany } from '../src/matching/resolver.js';
 import { matchingConfigSchema } from '../src/matching/config.js';
 import type { SelectionResult } from '../src/matching/types.js';
 import { runConversation, scriptedTurns } from '../src/evals/harness.js';
@@ -32,28 +32,52 @@ function api(connector = new DemoConnector(), selectMany: SelectMany = judge) {
   return createDraftApi(config(), connector, createIdentityResolver(config(), connector, { config: onConfig, selectMany }));
 }
 
-it('exposes identity states, candidates, actions, line refs and revision through the declared prepare-order schema', async () => {
-  const storage = new LibSQLStore({ id: 'tool-schema', url: ':memory:' });
+async function executePrepare(input: Record<string, unknown>, operatorWords: string, matching?: { config: ReturnType<typeof matchingConfigSchema.parse>; selectMany: SelectMany }) {
+  const storage = new LibSQLStore({ id: `tool-${Math.random().toString(36).slice(2, 8)}`, url: ':memory:' });
   try {
-    const { agent } = createOrderAgent(config(), new DemoConnector(), storage, { enabled: false, rate: 0 }, { config: onConfig, selectMany: judge });
+    const { agent } = createOrderAgent(config(), new DemoConnector(), storage, { enabled: false, rate: 0 }, matching ?? { config: onConfig, selectMany: judge });
     const tools = await agent.listTools();
     const context = new RequestContext();
-    startTurn(context, { evidence: 'ordine per Maple: pebble wash', operatorWords: 'ordine per Maple: pebble wash', senderId: '5', knownPhrases: [] });
-    const raw = await tools.prepareOrder!.execute!({
-      clientQuery: 'Maple', clientId: null, newClient: null, manualVatCheck: null,
-      lines: [{ ref: null, op: null, query: 'pebble wash', productId: null, quantity: 2, tester: null, netPrice: null, documentPrice: null }],
-      shippingPrice: null, discountPercent: 0, discountShipping: null, delivery: null, notes: '', priceTier: null,
-    }, { requestContext: context } as never);
-    const parsed = draftOutput.parse(raw);
-    expect(parsed.status).toBe('needs');
-    expect(parsed.revision).toBe(1);
-    expect(parsed.customer?.status).toMatch(/unconfirmed|ambiguous|unsupported|missing/);
-    expect(parsed.customer?.status).not.toBe('accepted');
-    expect(parsed.lines?.[0]?.ref).toMatch(/^L\d+$/);
-    expect(parsed.lines?.[0]?.status).not.toBe('accepted');
-    expect(parsed.note).toMatch(/never say the draft is ready while status is needs/i);
-    expect(JSON.stringify(parsed)).not.toMatch(/secret|password|token/i);
-  } finally { await storage.close(); }
+    startTurn(context, { evidence: operatorWords, operatorWords, senderId: '5', knownPhrases: [] });
+    const raw = await tools.prepareOrder!.execute!(input as never, { requestContext: context } as never);
+    return { parsed: draftOutput.parse(raw), storage };
+  } catch (error) {
+    await storage.close();
+    throw error;
+  }
+}
+
+it('exposes needs and ready identity states through the declared prepare-order schema', async () => {
+  const needs = await executePrepare({
+    clientQuery: 'Maple', clientId: null, newClient: null, manualVatCheck: null,
+    lines: [{ ref: null, op: null, query: 'pebble wash', productId: '101', quantity: 2, tester: null, netPrice: null, documentPrice: null }],
+    shippingPrice: null, discountPercent: 0, discountShipping: null, delivery: null, notes: '', priceTier: null,
+  }, 'ordine per Maple: pebble wash');
+  try {
+    expect(needs.parsed.status).toBe('needs');
+    expect(needs.parsed.revision).toBe(1);
+    expect(needs.parsed.customer?.status).toMatch(/unconfirmed|ambiguous|unsupported|missing/);
+    expect(needs.parsed.customer?.status).not.toBe('accepted');
+    expect(needs.parsed.lines?.[0]?.ref).toMatch(/^L\d+$/);
+    expect(needs.parsed.lines?.[0]?.status).not.toBe('accepted');
+    expect(needs.parsed.note).toMatch(/never say the draft is ready while status is needs/i);
+    expect(JSON.stringify(needs.parsed)).not.toMatch(/secret|password|token/i);
+  } finally { await needs.storage.close(); }
+
+  const spoken = 'Order for Example Studio: 2 Pebble hand wash 250 ml, delivery 8 euros.';
+  const ready = await executePrepare({
+    clientQuery: 'Example Studio', clientId: null, newClient: null, manualVatCheck: null,
+    lines: [{ ref: null, op: null, query: 'Pebble hand wash 250 ml — DEMO-A', productId: '102', quantity: 2, tester: null, netPrice: null, documentPrice: null }],
+    shippingPrice: 8, discountPercent: 0, discountShipping: null, delivery: null, notes: '', priceTier: null,
+  }, spoken, { config: matchingConfigSchema.parse({ mode: 'off' }), selectMany: judge });
+  try {
+    expect(ready.parsed.status).toBe('ready');
+    expect(ready.parsed.customer?.status).toBe('accepted');
+    expect(ready.parsed.customer?.name).toBe('Example Studio');
+    expect(ready.parsed.lines?.[0]?.status).toBe('accepted');
+    expect(ready.parsed.lines?.[0]?.ref).toMatch(/^L\d+$/);
+    expect(ready.parsed.note).toMatch(/complete/i);
+  } finally { await ready.storage.close(); }
 });
 
 it('keeps one canonical merge: no duplicate rows, sale+tester stay two lines, repeated attachment is not a second set', () => {
@@ -118,6 +142,138 @@ it('loads older persisted drafts and choices without refs as L1… and still hon
   expect(legacy.draft.lines[0]).toMatchObject({ productId: '101', ref: 'L1' });
   expect(legacy.confirmedChoices?.[0]?.id).toBe('101');
   expect(ensureLineRefs(legacy.draft.lines)[0]?.ref).toBe('L1');
+});
+
+it.each(['off', 'on'] as const)('in %s mode keeps a real stored choice, rejects fake hashes and fabricated ids, and drops stale query or catalogue identity', async mode => {
+  const connector = new DemoConnector();
+  const matching = { config: matchingConfigSchema.parse({ mode }), selectMany: judge };
+  const drafts = createDraftApi(config(), connector, createIdentityResolver(config(), connector, matching));
+  const spoken = 'ordine per Example Studio: 2 Pebble hand wash 250 ml';
+  const first = await drafts.order(draftSchema.parse({
+    clientQuery: 'Example Studio', lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }],
+  }), { orderId: 'choice', revision: 1, operatorText: spoken, operatorWords: spoken }, '2026-01-15');
+  expect(first.draft.lines[0]?.productId).toBe('101');
+  const stored = { ...first.draft, lines: ensureLineRefs(first.draft.lines) };
+  const choices = confirmedChoices(first.decisions, stored);
+  const lineChoice = choices.find(choice => choice.field === 'lines.0');
+  expect(lineChoice).toMatchObject({ field: 'lines.0', id: '101', ref: 'L1' });
+  expect(lineChoice?.queryHash).toMatch(/^[a-f0-9]{64}$/);
+  expect(lineChoice?.identityHash).toMatch(/^[a-f0-9]{64}$/);
+
+  const kept = await drafts.order({ ...stored, lines: [{ ...stored.lines[0]!, quantity: 3 }] }, {
+    orderId: 'choice', revision: 2, operatorText: `${spoken}\nmake it 3`, operatorWords: `${spoken}\nmake it 3`, confirmedChoices: choices,
+  }, '2026-01-15');
+  expect(kept.draft.lines[0]).toMatchObject({ productId: '101', quantity: 3, ref: 'L1' });
+
+  const loaded = loadConversation(JSON.stringify({
+    orderId: 'old', revision: 2, status: 'suspended', policy: 'test',
+    draft: { clientQuery: 'Example Studio', clientId: 201, lines: [{ query: 'Pebble hand wash 250 ml', productId: 101, quantity: 2 }] },
+    confirmedChoices: choices.map(choice => ({ ...choice, id: Number(choice.id) })),
+  }));
+  const restored = await drafts.order(loaded.draft, {
+    orderId: 'old', revision: 3, operatorText: spoken, operatorWords: spoken, confirmedChoices: loaded.confirmedChoices,
+  }, '2026-01-15');
+  expect(loaded.draft.lines[0]?.ref).toBe('L1');
+  expect(restored.draft.lines[0]?.productId).toBe('101');
+
+  const fakeHash = await drafts.order(draftSchema.parse({
+    clientQuery: 'Maple', lines: [{ query: 'small pebble', productId: '101', quantity: 2 }],
+  }), {
+    orderId: 'fake', revision: 1, operatorText: 'ordine per Maple: small pebble', operatorWords: 'ordine per Maple: small pebble',
+    confirmedChoices: [{ field: 'lines.0', id: '101', queryHash: 'x', identityHash: 'y' }],
+  }, '2026-01-15');
+  expect(fakeHash.draft.lines[0]?.productId).toBeUndefined();
+
+  const staleQuery = await drafts.order({
+    ...stored, lines: [{ ...stored.lines[0]!, query: 'Linen candle 200 g', productId: '101' }],
+  }, { orderId: 'choice', revision: 4, operatorText: spoken, operatorWords: spoken, confirmedChoices: choices }, '2026-01-15');
+  expect(staleQuery.draft.lines[0]?.productId).not.toBe('101');
+
+  const fabricated = await drafts.order(draftSchema.parse({
+    clientQuery: 'Example Studio', lines: [{ query: 'A1 SAP-MNT scanned label', productId: '101', quantity: 2 }],
+  }), { orderId: 'fabricated', revision: 1, operatorText: 'ordine dal modulo', operatorWords: 'ordine dal modulo' }, '2026-01-15');
+  expect(fabricated.draft.lines[0]?.productId).toBeUndefined();
+
+  connector.products[0]!.name = 'Renamed pebble';
+  connector.products[0]!.code = 'DEMO-RENAMED';
+  const staleCatalogue = await drafts.order(stored, {
+    orderId: 'choice', revision: 5, operatorText: spoken, operatorWords: spoken, confirmedChoices: choices,
+  }, '2026-01-15');
+  expect(staleCatalogue.draft.lines[0]?.productId).toBeUndefined();
+});
+
+it('drops a model-written productId on a new request and still locks an exact operator name despite an appended code', () => {
+  const merged = mergeOrderDraft({
+    incoming: draftSchema.parse({
+      clientQuery: 'Example Studio',
+      lines: [{ query: 'Pebble hand wash 250 ml — DEMO-A', productId: '102', quantity: 2 }],
+      shippingPrice: 8,
+    }),
+    operatorWords: 'Order for Example Studio: 2 Pebble hand wash 250 ml, delivery 8 euros.',
+    isNewRequest: true,
+  });
+  expect(merged.lines[0]?.productId).toBeUndefined();
+  expect(merged.shippingPrice).toBe(8);
+});
+
+it('fills an empty customer from the attachment header and does not invent notes', () => {
+  const merged = mergeOrderDraft({
+    incoming: draftSchema.parse({}),
+    attachmentLines: [{ query: 'DEMO-A A1 SAP-MNT scanned label', quantity: 2 }],
+    operatorWords: 'ordine dal modulo',
+    attachmentText: 'Header: Customer: Example Studio\nDEMO-A | A1 SAP-MNT scanned label | Qty: 2',
+    isNewRequest: true,
+  });
+  expect(merged.clientQuery).toBe('Example Studio');
+  expect(merged.clientId).toBeUndefined();
+  expect(merged.lines[0]).toMatchObject({ query: 'DEMO-A A1 SAP-MNT scanned label', quantity: 2 });
+  expect(merged.notes).toBe('');
+});
+
+it('treats an attached known name as clientQuery, not a new customer, unless the operator asked to create one', () => {
+  const email = 'Example Studio\nExample Street 1, Example City\nP.IVA DEMO-NOT-A-REAL-VAT';
+  const fromFile = mergeOrderDraft({
+    incoming: draftSchema.parse({ newClient: { name: 'Example Studio', street: 'Example Street 1', city: 'Example City', vatNumber: 'DEMO-NOT-A-REAL-VAT' } }),
+    operatorWords: 'ordine',
+    attachmentText: email,
+    isNewRequest: true,
+  });
+  expect(fromFile.newClient).toBeUndefined();
+  expect(fromFile.clientQuery).toBe('Example Studio');
+  const created = mergeOrderDraft({
+    incoming: draftSchema.parse({ newClient: { name: 'Marco Esempio', street: 'Via Esempio 5', city: 'Bergamo' } }),
+    operatorWords: 'Crea cliente Marco Esempio Via Esempio 5, 24100 Bergamo BG\nok crea ordine',
+    isNewRequest: true,
+  });
+  expect(created.newClient).toMatchObject({ name: 'Marco Esempio', street: 'Via Esempio 5' });
+});
+
+it('does not duplicate attachment rows when the model sends the same facts again', () => {
+  const attachment = [
+    { query: 'DEMO-A A1 SAP-MNT scanned label', quantity: 2 },
+    { query: 'unknown scanned row', quantity: 1 },
+  ];
+  const first = mergeOrderDraft({
+    incoming: draftSchema.parse({}),
+    attachmentLines: attachment,
+    operatorWords: 'ordine dal modulo',
+    attachmentText: 'Header: Customer: Example Studio\nDEMO-A | A1 SAP-MNT scanned label | Qty: 2\nunknown scanned row | Qty: 1',
+    isNewRequest: true,
+  });
+  expect(first.lines).toHaveLength(2);
+  const again = mergeOrderDraft({
+    base: first,
+    incoming: draftSchema.parse({}),
+    incomingLines: [
+      { ref: 'L3', op: 'add', query: 'DEMO-A | A1 SAP-MNT scanned label', quantity: 2 },
+      { ref: 'L4', op: 'add', query: 'unknown scanned row', quantity: 1 },
+    ],
+    attachmentLines: attachment,
+    operatorWords: 'ordine dal modulo',
+    isNewRequest: false,
+  });
+  expect(again.lines).toHaveLength(2);
+  expect(again.lines.map(line => line.ref)).toEqual(['L1', 'L2']);
 });
 
 it('cancels customer and shipping context with the request; a later request starts empty', async () => {

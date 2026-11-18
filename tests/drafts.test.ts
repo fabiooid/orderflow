@@ -13,13 +13,16 @@ import { config, draft } from './helpers.js';
 
 const off = createIdentityResolver(config(), new DemoConnector(), { config: matchingConfigSchema.parse({ mode: 'off' }) });
 const context = { orderId: 'test', revision: 1, operatorText: '' };
+const readySpoken = 'Example Studio: 2 Pebble hand wash 250 ml. Delivery eight.';
+const readyContext = { ...context, operatorText: readySpoken, operatorWords: readySpoken };
 
 it('reports a ready order with its totals, or exactly what is still needed', async () => {
   const api = createDraftApi(config(), new DemoConnector(), off);
-  const ready = await api.order(draft(), context, '2026-01-15');
+  const ready = await api.order(draft(), readyContext, '2026-01-15');
   expect(ready.status).toBe('ready');
   if (ready.status === 'ready') expect(ready.totals.gross).toBe(36.11);
-  const needs = await api.order({ ...draft(), lines: [{ query: 'Pebble 250', quantity: 2 }], shippingPrice: undefined }, context, '2026-01-15');
+  const needsSpoken = 'Example Studio: 2 Pebble 250';
+  const needs = await api.order({ ...draft(), lines: [{ query: 'Pebble 250', quantity: 2 }], shippingPrice: undefined }, { ...context, operatorText: needsSpoken, operatorWords: needsSpoken }, '2026-01-15');
   expect(needs.status).toBe('needs');
   if (needs.status !== 'needs') return;
   expect(needs.issues[0]).toMatchObject({ field: 'lines.0', candidates: expect.arrayContaining([expect.objectContaining({ id: '101' })]) });
