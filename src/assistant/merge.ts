@@ -1,5 +1,5 @@
 import { draftSchema, type OrderDraft } from '../domain/types.js';
-import { normalize } from '../domain/matching.js';
+import { lineWantsTester, normalize, testerRestatementOf } from '../domain/matching.js';
 import type { ReadingLine } from '../documents/product-lines.js';
 import { customerNamedInRequest, operatorAskedToCreateCustomer, statedShipping } from './intent.js';
 
@@ -42,6 +42,42 @@ function uniqueByLineKey<T extends { query: string; quantity?: number; tester?: 
   });
 }
 
+type KeyedLine = { query: string; quantity?: number; tester?: boolean };
+
+/**
+ * Bind model tester wording to an unmatched source tester, or drop it when it restates a source line already
+ * represented. Several unmatched source testers that the same alias could mean are left as they are; the alias is
+ * not added. Sale+tester and distinct quantities are not restatements.
+ */
+function bindTesterRestatements<T extends KeyedLine>(base: T[], incoming: T[]): T[] {
+  if (!base.length) return incoming;
+  const taken = new Set<number>();
+  const result: T[] = [];
+  for (const line of incoming) {
+    if (!lineWantsTester(line)) {
+      result.push(line);
+      continue;
+    }
+    const matches = base.map((item, index) => ({ item, index })).filter(({ item, index }) => !taken.has(index) && testerRestatementOf(line, item));
+    if (matches.length === 1) {
+      taken.add(matches[0]!.index);
+      result.push(matches[0]!.item);
+      continue;
+    }
+    if (matches.length > 1) {
+      const sameKey = matches.find(({ item }) => lineKey(item) === lineKey(line));
+      if (sameKey) {
+        taken.add(sameKey.index);
+        result.push(sameKey.item);
+      }
+      continue;
+    }
+    if (base.some((item, index) => taken.has(index) && testerRestatementOf(line, item))) continue;
+    result.push(line);
+  }
+  return result;
+}
+
 function priorProductId(base: OrderDraft['lines'], incoming: Pick<LinePatch, 'ref' | 'query' | 'quantity' | 'tester'>, index?: number) {
   if (incoming.ref) {
     const byRef = base.find(line => line.ref === incoming.ref);
@@ -60,12 +96,18 @@ function dropFabricatedProductId<T extends { productId?: string }>(line: T, prio
   return rest as T;
 }
 
+function restatesExisting(existing: KeyedLine[], line: KeyedLine) {
+  const matches = existing.filter(item => testerRestatementOf(line, item));
+  return matches.length === 1 || (matches.length > 1 && matches.every(item => lineKey(item) !== lineKey(line)));
+}
+
 function applyIncomingLines(base: OrderDraft['lines'], incoming: LinePatch[]): OrderDraft['lines'] {
   if (!incoming.length) return ensureLineRefs(base);
   const hasRefOp = incoming.some(line => line.ref || line.op);
   if (!hasRefOp) {
     if (base.length && sameLines(base, incoming)) return ensureLineRefs(base);
-    return ensureLineRefs(uniqueByLineKey(incoming.map(({ op: _op, ...line }, index) => dropFabricatedProductId(line, priorProductId(base, line, index)))));
+    const next = uniqueByLineKey(incoming.map(({ op: _op, ...line }, index) => dropFabricatedProductId(line, priorProductId(base, line, index))));
+    return ensureLineRefs(bindTesterRestatements(base, next));
   }
   const byRef = new Map(base.filter(line => line.ref).map(line => [line.ref!, { ...line }]));
   const unused = base.filter(line => !line.ref || !incoming.some(patch => patch.ref === line.ref));
@@ -81,7 +123,7 @@ function applyIncomingLines(base: OrderDraft['lines'], incoming: LinePatch[]): O
     const current = patch.ref ? byRef.get(patch.ref) : undefined;
     if (op === 'replace' || !current) {
       const incomingLine = dropFabricatedProductId(rest, current?.productId ?? priorProductId(base, rest));
-      if (!current && hasKey(incomingLine)) {
+      if (!current && (hasKey(incomingLine) || restatesExisting([...next, ...unused], incomingLine))) {
         if (patch.ref) byRef.delete(patch.ref);
         continue;
       }
@@ -110,6 +152,7 @@ export type MergeInput = {
   incomingLines?: LinePatch[];
   attachmentLines?: ReadingLine[];
   operatorWords: string;
+  turnWords?: string;
   attachmentText?: string;
   isNewRequest: boolean;
 };
@@ -149,10 +192,11 @@ export function mergeOrderDraft(input: MergeInput): OrderDraft {
     : (!input.isNewRequest ? start.newClient : undefined);
   const clientId = start.clientId;
 
-  const stated = statedShipping(input.operatorWords);
-  const shippingPrice = input.isNewRequest
-    ? (incoming.shippingPrice !== undefined && stated !== undefined ? incoming.shippingPrice : stated)
-    : incoming.shippingPrice !== undefined ? incoming.shippingPrice : start.shippingPrice;
+  const stated = statedShipping(input.operatorWords, input.turnWords);
+  const shippingPrice = stated !== undefined
+    ? stated
+    : !input.isNewRequest && incoming.shippingPrice !== undefined ? incoming.shippingPrice
+    : input.isNewRequest ? undefined : start.shippingPrice;
 
   const notes = incoming.notes.trim() ? incoming.notes : start.notes;
   const draft = draftSchema.parse({

@@ -53,6 +53,7 @@ export const acceptanceCases: ConversationCase[] = [
       ...expect(o.open?.status === 'suspended', `expected a draft still waiting, got ${o.open?.status ?? 'none'}`),
       ...expect(/2 × Pebble hand wash 250 ml/.test(lastReply(o)), 'matched line did not show the catalogue name'),
       ...expect(/€12,00/.test(lastReply(o)), 'matched line did not show the catalogue price'),
+      ...expect(!/\(A1 SAP-MNT scanned label\)/.test(lastReply(o)), 'matched line still parenthesized the source query'),
       ...expect(/unknown scanned row/.test(lastReply(o)), 'unmatched line lost the original wording'),
       ...expect(!/2 × A1 SAP-MNT scanned label/.test(lastReply(o)), 'matched line still led with the original form text'),
       ...expect(o.open?.draft.lines.length === 2, `expected 2 attachment rows, got ${o.open?.draft.lines.length}`),

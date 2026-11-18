@@ -26,10 +26,6 @@ function place(client: Partial<Pick<NewCustomer, 'street' | 'postalCode' | 'city
 /** The line an issue or choice field such as `lines.2` or `lines.2.quantity` refers to. */
 export const lineIndex = (field: string) => { const match = /^lines\.(\d+)/.exec(field); return match ? Number(match[1]) : undefined; };
 
-function sameLabel(a: string, b: string) {
-  return a.trim().toLowerCase() === b.trim().toLowerCase();
-}
-
 /** Catalogue name when the line already has a product id; otherwise the original wording. */
 function lineLabel(line: OrderDraft['lines'][number] | undefined, catalogue: DraftCatalogue) {
   if (!line) return undefined;
@@ -80,10 +76,8 @@ export function orderDraft(draft: OrderDraft, issues: Issue[], it: boolean, clie
     const name = product?.name ?? line.query;
     const amount = line.netPrice ?? product?.netPrice;
     const price = amount === undefined ? '' : ` — ${money(amount, it, currency)}`;
-    // Original form text stays only when it still adds something the catalogue name does not already say.
-    const asWritten = product && !sameLabel(line.query, product.name) ? ` (${line.query})` : '';
     const testerMark = line.tester && !asksForTester(name) ? ` · ${say(it, 'lineTester')}` : '';
-    lines.push(`${quantity} × ${name}${asWritten}${testerMark}${price}${unsure ? ' ❓' : ''}`);
+    lines.push(`${quantity} × ${name}${testerMark}${price}${unsure ? ' ❓' : ''}`);
   }
   lines.push('', `🚚 ${say(it, 'draftDelivery')}: ${draft.shippingPrice === undefined ? '❓' : draft.shippingPrice === 0 ? say(it, 'draftNone') : money(draft.shippingPrice, it, currency)}`);
   if (draft.delivery) lines.push(`📦 ${say(it, 'draftShipTo')}: ${draft.delivery.address}${draft.delivery.country ? `, ${draft.delivery.country}` : ' ❓'}`);

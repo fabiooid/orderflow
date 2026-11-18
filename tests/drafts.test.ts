@@ -27,12 +27,17 @@ it('reports a ready order with its totals, or exactly what is still needed', asy
   if (needs.status !== 'needs') return;
   expect(needs.issues[0]).toMatchObject({ field: 'lines.0', candidates: expect.arrayContaining([expect.objectContaining({ id: '101' })]) });
   // The agent reads the problems and candidate names; record IDs stay with the application.
-  expect(forAgent(needs)).toMatchObject({
+  const shown = forAgent(needs);
+  expect(shown).toMatchObject({
     status: 'needs',
     customer: { status: 'accepted', name: 'Example Studio' },
     lines: [{ query: 'Pebble 250', quantity: 2, status: expect.stringMatching(/unconfirmed|ambiguous|unsupported/) }],
-    issues: [{ field: 'lines.0', candidates: expect.arrayContaining([expect.stringMatching(/Pebble hand wash 250 ml/)]) }],
+    shipping: { status: 'unknown' },
   });
+  expect(shown.issues).toEqual(expect.arrayContaining([
+    expect.objectContaining({ field: 'lines.0', candidates: expect.arrayContaining([expect.stringMatching(/Pebble hand wash 250 ml/)]) }),
+    expect.objectContaining({ field: 'shippingPrice' }),
+  ]));
   expect(JSON.stringify(forAgent(needs))).not.toContain('101');
 });
 
@@ -64,6 +69,7 @@ it('shows an unmatched customer query so the agent cannot contradict the preview
     status: 'needs',
     customer: { status: expect.stringMatching(/unconfirmed|ambiguous|unsupported|missing/), query: 'Northwind Supplies Ltd' },
     lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2, status: 'accepted' }],
+    shipping: { status: 'unknown' },
   });
   expect(JSON.stringify(forAgent(needs))).not.toContain('"status":"accepted","name"');
 });

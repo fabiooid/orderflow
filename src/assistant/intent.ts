@@ -4,9 +4,32 @@ export type { PendingQuestion };
 /** File-consent wording is not a customer confirmation. */
 const FILE_CONSENT = /\b(prepara|prepare|crea(?:re)?(?:\s+un)?\s+ordine|create(?:\s+an?)?\s+order|importa|allegat|file|excel|xlsx|questa|this file)\b/i;
 const AFFIRM = /^(sì|si|yes|ok|okay|va bene|confermo|quello|quella)\b/i;
-const NO_SHIPPING = /\b(niente|nessun[ao]?)\s+(spedizione|consegna|addebito)|(?:no|without|senza)\s+(?:delivery|shipping|charge)|gratuita|free\s+(?:shipping|delivery)|no charge\b/i;
-const SHIPPING_AMOUNT = /\b(?:spedizione|shipping|consegna|delivery|addebito)\b[^0-9]{0,24}(\d+(?:[.,]\d+)?)/i;
-const AMOUNT_THEN_SHIPPING = /(\d+(?:[.,]\d+)?)\s*(?:€|eur|euro|usd|gbp)?\s*(?:di\s+)?(?:spedizione|shipping|consegna|delivery)\b/i;
+const NO_CHARGE = /\b(?:niente|nessun[ao]?|no|without|senza)\s+(?:spedizione|consegna|addebito|delivery|shipping|charge)\b|\bgratuita\b|\bfree\s+(?:shipping|delivery)\b|\bno charge\b/gi;
+const SHIPPING_AMOUNT = /\b(?:spedizione|shipping|consegna|delivery|addebito)\b[^0-9]{0,24}(\d+(?:[.,]\d+)?)/gi;
+const AMOUNT_THEN_SHIPPING = /(\d+(?:[.,]\d+)?)\s*(?:€|eur|euro|usd|gbp)?\s*(?:di\s+)?(?:spedizione|shipping|consegna|delivery)\b/gi;
+
+function parseAmount(raw: string) {
+  const value = Number(raw.replace(',', '.'));
+  return Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+/** Last shipping statement in this text: a no-charge phrase or an amount next to a delivery word. */
+function lastShippingStatement(text: string): number | undefined {
+  if (!text.trim()) return undefined;
+  const hits: { index: number; value: number }[] = [];
+  for (const match of text.matchAll(NO_CHARGE)) hits.push({ index: match.index ?? 0, value: 0 });
+  for (const match of text.matchAll(AMOUNT_THEN_SHIPPING)) {
+    const value = parseAmount(match[1]!);
+    if (value !== undefined) hits.push({ index: match.index ?? 0, value });
+  }
+  for (const match of text.matchAll(SHIPPING_AMOUNT)) {
+    const value = parseAmount(match[1]!);
+    if (value !== undefined) hits.push({ index: match.index ?? 0, value });
+  }
+  if (!hits.length) return undefined;
+  hits.sort((a, b) => a.index - b.index || a.value - b.value);
+  return hits.at(-1)!.value;
+}
 
 /** True when this message is only agreeing to prepare from a file, not naming a customer. */
 export function isFileConsent(text: string) {
@@ -23,14 +46,11 @@ export function isCustomerConfirmation(text: string, pending?: PendingQuestion, 
   return trimmed.length < 80;
 }
 
-/** Delivery charge the operator stated in this request's own words. `0` is no charge; `undefined` is unknown. */
-export function statedShipping(operatorWords: string): number | undefined {
-  if (!operatorWords.trim()) return undefined;
-  if (NO_SHIPPING.test(operatorWords)) return 0;
-  const match = SHIPPING_AMOUNT.exec(operatorWords) ?? AMOUNT_THEN_SHIPPING.exec(operatorWords);
-  if (!match) return undefined;
-  const value = Number(match[1]!.replace(',', '.'));
-  return Number.isFinite(value) && value >= 0 ? value : undefined;
+/** Delivery charge the operator stated. This turn wins, then the last statement in the request. `0` is no charge; `undefined` is unknown. */
+export function statedShipping(operatorWords: string, turnWords?: string): number | undefined {
+  const fromTurn = turnWords?.trim() ? lastShippingStatement(turnWords) : undefined;
+  if (fromTurn !== undefined) return fromTurn;
+  return lastShippingStatement(operatorWords);
 }
 
 /** True when this request's words or a non-empty customer header actually named a customer. */

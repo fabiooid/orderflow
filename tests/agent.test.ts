@@ -52,7 +52,9 @@ it('keeps business rules in the prompt and field rules in the API schema, with n
   expect(prompt).toContain('Catalogue prices apply unless they state a unit price');
   expect(prompt).toContain('Supplier letterhead is not the customer');
   expect(prompt).toContain('customer.status');
+  expect(prompt).toContain('shipping.status');
   expect(prompt).toContain('Never say the draft is ready while status is needs');
+  expect(prompt).toContain('Never say shipping is 0 unless');
   expect(prompt).toContain('short customer name');
   expect(prompt).toContain('not a request to save');
   expect(prompt).toContain('Search does not open or change a draft');

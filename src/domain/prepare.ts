@@ -85,7 +85,7 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
     if (status !== 'valid') issues.push({ field: 'vat', message: `VAT validation is ${status}. Confirm a manual VIES check for ${client.country} ${client.vatNumber ?? "(missing VAT number)"}; N3.2 requires a valid result.` });
   }
   const shippingPrice = draft.shippingPrice;
-  if (!issues.length && shippingPrice === undefined) issues.push({ field: 'shippingPrice', message: `Confirm the delivery charge (catalogue default ${shipping.netPrice} ${config.currency} excluding VAT) or remove it`, defaultPrice: shipping.netPrice });
+  if (shippingPrice === undefined && draft.lines.length) issues.push({ field: 'shippingPrice', message: `Confirm the delivery charge (catalogue default ${shipping.netPrice} ${config.currency} excluding VAT) or remove it`, defaultPrice: shipping.netPrice });
   const existing = locked?.id;
   const binding = rule ? config.invoicing.vat.find(item => item.ruleId === rule.id) : undefined;
   if (rule && !binding) issues.push({ field: 'vat', message: 'No provider VAT binding matches this rule; review required' });

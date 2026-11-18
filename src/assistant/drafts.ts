@@ -136,14 +136,20 @@ export function forAgent(result: DraftResult, revision?: number) {
       };
     })
     : undefined;
+  const shipping = result.kind === 'order'
+    ? result.draft.shippingPrice === undefined
+      ? { status: 'unknown' as const, action: 'Ask the delivery charge. Do not say it is 0 while status is unknown.' }
+      : { status: 'set' as const, amount: result.draft.shippingPrice }
+    : undefined;
   return {
     status: result.status,
     ...(revision !== undefined ? { revision } : {}),
     customer,
     ...(lines ? { lines } : {}),
+    ...(shipping ? { shipping } : {}),
     ...(result.status === 'needs' ? { issues: issuesForAgent(result.issues) } : {}),
     note: result.status === 'needs'
-      ? 'Shown to the operator with these points. Use customer.status and lines[].status: accepted is already selected; unconfirmed and ambiguous still need a pick or exact name; unsupported is not in the catalogue as requested. Ask about the returned issues. Never say the draft is ready while status is needs.'
+      ? 'Shown to the operator with these points. Use customer.status, lines[].status and shipping.status: accepted is already selected; unconfirmed and ambiguous still need a pick or exact name; unsupported is not in the catalogue as requested. shipping.status unknown is not 0; amount 0 means no charge. Ask about the returned issues. Never say the draft is ready while status is needs.'
       : result.status === 'existing' ? 'This customer already exists; nothing will be created.'
       : 'Complete, and shown to the operator for review.',
   };

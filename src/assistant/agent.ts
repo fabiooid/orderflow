@@ -111,6 +111,7 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
           incomingLines: linePatches,
           attachmentLines: turn?.attachmentLines,
           operatorWords: turn?.operatorWords ?? '',
+          turnWords: turn?.turnWords,
           attachmentText: turn?.attachmentText,
           isNewRequest: turn?.request?.kind !== 'order',
         });

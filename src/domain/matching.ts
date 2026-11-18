@@ -39,6 +39,28 @@ export function testerQuery(line: { query: string; tester?: boolean }) {
   return `${query} tester`;
 }
 
+function testerContentTokens(query: string) {
+  return normalize(query).split(' ').filter(token => token && !token.startsWith('tester') && token !== 'sample' && token !== 'campion' && token !== 'prova');
+}
+
+/**
+ * True when two tester lines are the same source fact under different wording (a sale code plus tester flag vs
+ * an explicit tester query). Distinct quantities stay separate. Sale+tester is not this: the sale line does not want a tester.
+ */
+export function testerRestatementOf(
+  left: { query: string; quantity?: number; tester?: boolean },
+  right: { query: string; quantity?: number; tester?: boolean },
+) {
+  if (!lineWantsTester(left) || !lineWantsTester(right)) return false;
+  if (left.quantity !== undefined && right.quantity !== undefined && left.quantity !== right.quantity) return false;
+  if (normalize(testerQuery(left)) === normalize(testerQuery(right))) return true;
+  const a = testerContentTokens(testerQuery(left));
+  const b = testerContentTokens(testerQuery(right));
+  if (!a.length || !b.length) return false;
+  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
+  return shorter.every(token => longer.includes(token));
+}
+
 // Dropping a final vowel lets Italian singular and plural match (candele/candela, saponi/sapone).
 function tokens(query: string) {
   return normalize(query).split(' ').filter(Boolean).map(t => t.length > 4 ? t.replace(/[aeio]$/, '') : t);

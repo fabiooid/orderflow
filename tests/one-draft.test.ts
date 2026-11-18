@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { LibSQLStore } from '@mastra/libsql';
 import { RequestContext } from '@mastra/core/request-context';
 import { createOrderAgent } from '../src/assistant/agent.js';
-import { draftOutput } from '../src/assistant/draft-schema.js';
+import { draftOutput, parseDraft } from '../src/assistant/draft-schema.js';
 import { forAgent } from '../src/assistant/drafts.js';
 import { ensureLineRefs, mergeOrderDraft } from '../src/assistant/merge.js';
 import { startTurn } from '../src/assistant/turn-context.js';
@@ -561,4 +561,174 @@ it('opens a draft from a client search when the model never calls prepare-order'
     expect(outcome.open?.issues?.some(i => i.field === 'client' && i.candidates?.some(c => c.id === maplePine.id))).toBe(true);
     expect(outcome.replies.at(-1)).toMatch(/🏪 Maple(?: & Pine Trading Ltd)? ❓/);
   } finally { await storage.close(); }
+});
+
+it('does not add a tester alias restatement of a seeded row, and keeps sale+tester and repeated source rows', () => {
+  const seeded = [
+    { query: 'DEMO-A Pebble hand wash 250 ml', quantity: 2 },
+    { query: 'DEMO-A Pebble hand wash 250 ml tester', quantity: 1, tester: true as const },
+  ];
+  const restated = mergeOrderDraft({
+    incoming: draftSchema.parse({
+      lines: [
+        { query: 'DEMO-A Pebble hand wash 250 ml', quantity: 2 },
+        { query: 'DEMO-A Pebble hand wash 250 ml tester', quantity: 1, tester: true },
+        { query: 'Pebble tester', quantity: 1, tester: true },
+      ],
+    }),
+    attachmentLines: seeded,
+    operatorWords: 'crea ordine per Harbour Shop',
+    isNewRequest: true,
+  });
+  expect(restated.lines.filter(l => l.tester)).toHaveLength(1);
+  expect(restated.lines).toEqual(expect.arrayContaining([
+    expect.objectContaining({ query: 'DEMO-A Pebble hand wash 250 ml', quantity: 2 }),
+    expect.objectContaining({ query: 'DEMO-A Pebble hand wash 250 ml tester', quantity: 1, tester: true }),
+  ]));
+  expect(restated.lines.find(l => l.query === 'DEMO-A Pebble hand wash 250 ml')?.tester).toBeUndefined();
+  expect(restated.lines.some(l => /^pebble tester$/i.test(l.query))).toBe(false);
+
+  const saleAndTester = mergeOrderDraft({
+    incoming: draftSchema.parse({}),
+    attachmentLines: seeded,
+    operatorWords: 'crea ordine',
+    isNewRequest: true,
+  });
+  expect(saleAndTester.lines).toHaveLength(2);
+
+  const repeats = mergeOrderDraft({
+    incoming: draftSchema.parse({
+      lines: [
+        { query: 'DEMO-A Pebble hand wash 250 ml tester', quantity: 1, tester: true },
+        { query: 'DEMO-A Pebble hand wash 250 ml tester', quantity: 1, tester: true },
+        { query: 'Pebble tester', quantity: 1, tester: true },
+      ],
+    }),
+    attachmentLines: [
+      { query: 'DEMO-A Pebble hand wash 250 ml tester', quantity: 1, tester: true },
+      { query: 'DEMO-A Pebble hand wash 250 ml tester', quantity: 1, tester: true },
+    ],
+    operatorWords: 'crea ordine',
+    isNewRequest: true,
+  });
+  expect(repeats.lines.filter(l => l.tester)).toHaveLength(2);
+  expect(repeats.lines.some(l => /^pebble tester$/i.test(l.query))).toBe(false);
+
+  const distinctQty = mergeOrderDraft({
+    incoming: draftSchema.parse({
+      lines: [
+        { query: 'DEMO-A Pebble hand wash 250 ml tester', quantity: 1, tester: true },
+        { query: 'Pebble tester', quantity: 2, tester: true },
+      ],
+    }),
+    attachmentLines: [{ query: 'DEMO-A Pebble hand wash 250 ml tester', quantity: 1, tester: true }],
+    operatorWords: 'crea ordine',
+    isNewRequest: true,
+  });
+  expect(distinctQty.lines.filter(l => l.tester).map(l => l.quantity).sort()).toEqual([1, 2]);
+});
+
+it('persists a follow-up no-charge phrase when the draft tool omits or nulls shipping', () => {
+  const start = mergeOrderDraft({
+    incoming: draftSchema.parse({ clientQuery: 'Harbour Shop', lines: [{ query: 'DEMO-A', quantity: 2 }] }),
+    operatorWords: 'crea ordine per Harbour Shop',
+    isNewRequest: true,
+  });
+  expect(start.shippingPrice).toBeUndefined();
+  const omitted = mergeOrderDraft({
+    base: start,
+    incoming: draftSchema.parse({}),
+    operatorWords: 'crea ordine per Harbour Shop\nniente consegna',
+    turnWords: 'niente consegna',
+    isNewRequest: false,
+  });
+  expect(omitted.shippingPrice).toBe(0);
+  const nulled = mergeOrderDraft({
+    base: omitted,
+    incoming: parseDraft({
+      clientQuery: '', clientId: null, newClient: null, manualVatCheck: null,
+      lines: [], shippingPrice: null, discountPercent: 0, discountShipping: null, delivery: null, notes: '', priceTier: null,
+    }),
+    operatorWords: 'crea ordine per Harbour Shop\nniente consegna\nno consegna',
+    turnWords: 'no consegna',
+    isNewRequest: false,
+  });
+  expect(nulled.shippingPrice).toBe(0);
+  const corrected = mergeOrderDraft({
+    base: nulled,
+    incoming: parseDraft({
+      clientQuery: '', clientId: null, newClient: null, manualVatCheck: null,
+      lines: [], shippingPrice: null, discountPercent: 0, discountShipping: null, delivery: null, notes: '', priceTier: null,
+    }),
+    operatorWords: 'crea ordine per Harbour Shop\nniente consegna\nno consegna\nspedizione 8 euro',
+    turnWords: 'spedizione 8 euro',
+    isNewRequest: false,
+  });
+  expect(corrected.shippingPrice).toBe(8);
+  const english = mergeOrderDraft({
+    incoming: draftSchema.parse({ clientQuery: 'Harbour Shop', lines: [{ query: 'DEMO-A', quantity: 2 }] }),
+    operatorWords: 'create order for Harbour Shop, no delivery',
+    isNewRequest: true,
+  });
+  expect(english.shippingPrice).toBe(0);
+});
+
+it.each(['off', 'on'] as const)('keeps catalogue-only previews, no-charge shipping and one tester through follow-up, pick and correction (%s)', async mode => {
+  const connector = evalConnector();
+  connector.products.push({ id: '808', code: 'SAMPLE-T', name: 'TESTER Pebble wash', description: '', netPrice: 0 });
+  const matching = mode === 'off'
+    ? { config: matchingConfigSchema.parse({ mode: 'off' }) }
+    : { config: matchingConfigSchema.parse({ mode: 'on' }), selectMany: judge };
+  const sheet = [
+    'DEMO-A | Pebble hand wash 250 ml | Qty: 2 | tester: 1',
+    'SKU-100 | Hand cream 100 ml | Qty: 1',
+  ].join('\n');
+  const phantomLines = [
+    { query: 'DEMO-A Pebble hand wash 250 ml', quantity: 2 },
+    { query: 'DEMO-A Pebble hand wash 250 ml tester', quantity: 1, tester: true as const },
+    { query: 'Pebble tester', quantity: 1, tester: true as const },
+    { query: 'SKU-100 Hand cream 100 ml', quantity: 1 },
+  ];
+  const emptyKeep = parseDraft({
+    clientQuery: '', clientId: null, newClient: null, manualVatCheck: null,
+    lines: [], shippingPrice: null, discountPercent: 0, discountShipping: null, delivery: null, notes: '', priceTier: null,
+  });
+  const outcome = await runConversation(config(), connector, [
+    { text: 'crea ordine per Maple', attachment: sheet },
+    { text: 'niente consegna' },
+    { text: 'no consegna' },
+    { press: 'Maple' },
+    { text: 'spedizione 8 euro' },
+  ], {
+    matching,
+    converse: scriptedTurns([
+      draftSchema.parse({ clientQuery: 'Maple', lines: phantomLines }),
+      null,
+      emptyKeep,
+      emptyKeep,
+    ]),
+  });
+  const testers = outcome.open?.draft.lines.filter(l => l.tester) ?? [];
+  expect(testers).toHaveLength(1);
+  expect(testers[0]).toMatchObject({ quantity: 1, productId: '808' });
+  expect(testers[0]?.query === 'DEMO-A Pebble hand wash 250 ml tester' || testers[0]?.query === 'TESTER Pebble wash').toBe(true);
+  expect(outcome.open?.draft.lines.some(l => l.productId === '101' && l.quantity === 2 && !l.tester)).toBe(true);
+  expect(outcome.open?.draft.lines.some(l => /SKU-100|Hand cream/i.test(l.query) && !l.productId)).toBe(true);
+  expect(outcome.open?.draft.shippingPrice).toBe(8);
+  expect(outcome.open?.draft.clientId).toBe(maplePine.id);
+  const first = outcome.replies[0] ?? '';
+  const afterCharge = outcome.replies[1] ?? '';
+  const afterPick = outcome.replies[3] ?? '';
+  const last = outcome.replies.at(-1) ?? '';
+  expect(first).toContain('2 × Pebble hand wash 250 ml');
+  expect(first).toContain('1 × TESTER Pebble wash');
+  expect(first).toContain('1 × SKU-100 Hand cream 100 ml ❓');
+  expect(first).not.toContain('(DEMO-A');
+  expect(first).not.toContain('(Pebble tester)');
+  expect(first).toMatch(/Consegna: ❓/);
+  expect(afterCharge).toMatch(/Consegna: nessuna/);
+  expect(afterPick).toMatch(/Maple & Pine Trading Ltd/);
+  expect(afterPick).toMatch(/Consegna: nessuna/);
+  expect(afterPick).not.toContain('(DEMO-A');
+  expect(last).toMatch(/Consegna: €8,00|Anteprima ordine/);
 });

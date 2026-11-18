@@ -426,9 +426,10 @@ describe('order preparation', () => {
     const result = await prepareOrder({ ...draft(), shippingPrice: 0 }, config(), new DemoConnector(), '2026-01-15');
     expect(result.ready && result.order.lines.map(l => l.productId)).toEqual(['101']);
   });
-  it('asks about delivery only after the rest of the order is settled', async () => {
+  it('asks about delivery while a product identity is still open, once the draft has lines', async () => {
     const result = await prepareOrder({ ...draft(), lines: [{ query: 'Pebble 250', quantity: 2 }], shippingPrice: undefined }, config(), new DemoConnector(), '2026-01-15');
-    expect(!result.ready && result.issues.map(i => i.field)).not.toContain('shippingPrice');
+    expect(!result.ready && result.issues.map(i => i.field)).toContain('shippingPrice');
+    expect(!result.ready && result.issues.map(i => i.field)).toContain('lines.0');
   });
   it('does not merge variants even if source codes are equal', async () => {
     const connector = new DemoConnector();

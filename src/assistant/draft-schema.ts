@@ -41,7 +41,7 @@ export const orderDraftInput = z.object({
     documentPrice: z.object({ amount: z.number().nonnegative(), basis: z.enum(['net', 'gross', 'unclear']), decision: z.enum(['pending', 'catalogue', 'document']) }).strict().nullable().default(null)
       .describe('A price printed in a document, pending until the operator answers. Null when none is pending.'),
   }).strict()).describe('Changes to lines. Empty keeps the open draft, including attachment rows already merged. A new request starts empty. Do not copy cancelled orders.'),
-  shippingPrice: z.number().nonnegative().nullable().describe('Delivery charge, net. null unless the operator states or confirms it this request; 0 when they say there is no charge. Do not copy a cancelled request. An explicit 0 already on this request stays.'),
+  shippingPrice: z.number().nonnegative().nullable().describe('Delivery charge, net. 0 when they say there is no charge this request. null when they have not stated it; the application keeps an explicit 0 already on this request and applies a no-charge phrase even if this field is omitted. Do not copy a cancelled request. A later amount on this request replaces an earlier 0.'),
   discountPercent: z.number().min(0).max(100).describe('Order discount the operator states, otherwise 0.'),
   discountShipping: z.boolean().nullable().describe('Whether the discount also applies to delivery, only when the operator says so.'),
   delivery: z.object({ country: z.string().nullable(), address: z.string().min(1) }).strict().nullable()
@@ -75,6 +75,11 @@ export const draftOutput = z.object({
     candidates: z.array(z.string()).optional(),
     action: z.string().optional(),
   })).optional(),
+  shipping: z.object({
+    status: z.enum(['unknown', 'set']),
+    amount: z.number().nonnegative().optional(),
+    action: z.string().optional(),
+  }).optional(),
   issues: z.array(z.object({ field: z.string(), problem: z.string(), candidates: z.array(z.string()).optional() })).optional(),
   note: z.string(),
 });

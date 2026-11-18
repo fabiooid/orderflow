@@ -24,7 +24,7 @@ import { documentTemplates } from './order-forms.js';
 import { createDocumentWorkflow, workflowTemplatePages } from '../documents/workflow.js';
 import { createVisionDocumentProvider } from '../documents/reader.js';
 import { omitMedia } from '../assistant/omit-media.js';
-import { labelledCustomerQuery, operatorAskedToCancel, operatorAskedToCreateOrder, statedLineQuantity } from '../assistant/intent.js';
+import { labelledCustomerQuery, operatorAskedToCancel, operatorAskedToCreateOrder, statedLineQuantity, statedShipping } from '../assistant/intent.js';
 
 function pendingFromIssues(issues: Issue[] | undefined, revision: number): PendingQuestion | undefined {
   const client = issues?.find(issue => issue.field === 'client' && issue.candidates?.length);
@@ -127,7 +127,7 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
         ...result.catalogueIncreases,
         context: config.pricing?.catalogueIncreaseContext,
       }) };
-    // Catalogue names and prices are already known; the draft template must not keep printing only the original wording.
+    // Matched lines print the catalogue name; unresolved lines keep the original wording.
     const catalogue = result.draft.lines.some(line => line.productId) ? await connector.listProducts().catch(() => []) : [];
     return { order: { ...next, status: 'suspended', issues: result.issues }, text: orderDraft(result.draft, result.issues, it, result.client, config.currency, catalogue) };
   };
@@ -212,6 +212,8 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
     const line = choice && lineIndex(choice.field);
     if (line !== undefined && draft.lines[line]) draft.lines[line]!.productId = choice!.id;
     if (choice?.field === 'client') { draft.clientId = choice.id; delete draft.newClient; }
+    const stated = statedShipping(previous.operatorWords ?? '');
+    if (stated !== undefined) draft.shippingPrice = stated;
     const context = {
       orderId: previous.orderId, revision: previous.revision + 1,
       operatorText: previous.sourceText ?? '', operatorWords: previous.operatorWords, attachmentText: previous.attachmentText,
