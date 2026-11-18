@@ -139,6 +139,9 @@ function businessIdentityText(client: ClientSearchRecord) {
   return normalize([client.name, client.notes].filter(Boolean).join(' '));
 }
 
+/** Leading words in “Cliente [name]” / “Customer [name]” utterances, not the business name. */
+const NAMING_ROLE_WORDS = new Set(['cliente', 'customer', 'client', 'buyer', 'destinatario', 'intestatario']);
+
 /** Trade or legal-form words that name a kind of account, not one account. */
 const GENERIC_ACCOUNT_WORDS = new Set([
   'srl', 'spa', 'sas', 'snc', 'ltd', 'llc', 'inc', 'gmbh', 'plc', 'corp', 'bv', 'nv',
@@ -298,10 +301,14 @@ export function sameClientIds<T extends ClientSearchRecord>(left: T[], right: T[
  * match, still suggest the account whose legal name, notes, or contact person has the distinctive
  * words — not a weaker street-only hit. If a tighter refine (a hint such as hotel or shop) finds nobody,
  * fall back to siblings that share the remaining distinctive words, not every account of the same generic type.
+ * A leading role word that is not on any record is dropped so “Cliente [name]” still finds the name.
  */
 export function searchClients<T extends ClientSearchRecord>(query: string, clients: T[]): T[] {
-  const matched = matchClients(query, clients);
   const words = normalize(query).split(' ').filter(Boolean);
+  while (words.length > 1 && NAMING_ROLE_WORDS.has(words[0]!) && !clients.some(client => hitsText(clientText(client), words[0]!, true))) {
+    words.shift();
+  }
+  const matched = matchClients(words.join(' '), clients);
   const named = words.length ? personNameSuggestions(words, clients) : [];
   if (named.length) {
     const identityComplete = matched.filter(client => leftoverWords(identityText(client), words, true).length === 0);

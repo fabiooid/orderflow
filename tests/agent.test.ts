@@ -27,7 +27,9 @@ it('gives the agent the order and customer APIs and lookups, and no way to save'
     expect(tools.prepareOrder?.description).toContain('exact name or VAT');
     expect(tools.searchClients?.description).toContain('One close or related account is still a question');
     expect(tools.searchClients?.description).toContain('clients array');
+    expect(tools.searchClients?.description).toContain('name alone before offering to create');
     expect(tools.prepareOrder?.description).toContain('If this request already has lines, keep them');
+    expect(tools.prepareOrder?.description).toContain('even if the customer is unknown');
     expect(tools.prepareOrder?.description).toContain('short customer name');
     expect(tools.prepareOrder?.description).toContain('Do not ask to save the current draft as-is');
     expect(Object.values(tools).every(tool => !/creates?|saves?|writes?/i.test(tool.id))).toBe(true);
@@ -49,6 +51,8 @@ it('keeps business rules in the prompt and field rules in the API schema, with n
   expect(prompt).toContain('Naming a customer is not a request to copy products');
   expect(prompt).toContain('not in the catalogue');
   expect(prompt).toContain('Keep any product lines already on this request');
+  expect(prompt).toContain('even if the customer is still unknown');
+  expect(prompt).toContain('name alone before offering to create');
   expect(prompt).toContain('Catalogue prices apply unless the operator states a unit price');
   expect(prompt).toContain('Supplier letterhead is not the customer');
   expect(prompt).toContain('customer.matched');

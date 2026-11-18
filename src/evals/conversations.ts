@@ -249,6 +249,28 @@ export const conversationCases: ConversationCase[] = [
     ]),
   },
   {
+    id: 'spreadsheet-create-order-persists-without-tools',
+    // Caption Create order; the agent asks for the customer and never calls prepare-order.
+    turns: [{
+      text: 'Create order',
+      attachment: [
+        'Letterhead (supplier, not the customer): Northwind Supplies Ltd, Harbour Lane 1, Example City, IT, P.IVA IT000111222, orders@northwind-supplies.invalid',
+        'SKU-100 | Hand cream 100 ml | Qty: 2',
+        'SKU-250 | Room spray 250 ml | tester: 1',
+      ].join('\n'),
+    }],
+    scripted: [null],
+    check: all(neverGaveUp, o => [
+      ...expect(!!o.open, 'no open request'),
+      ...expect(!/northwind supplies/i.test(o.open?.draft.clientQuery ?? ''), `used letterhead as customer: ${o.open?.draft.clientQuery}`),
+      ...expect(!o.open?.draft.newClient, `proposes creating "${o.open?.draft.newClient?.name}"`),
+      ...expect(!!o.open?.draft.lines.some(l => /SKU-100|hand cream/i.test(l.query) && l.quantity === 2), 'the filled cream line was not persisted'),
+      ...expect(!!o.open?.draft.lines.some(l => /tester/i.test(l.query) && /SKU-250|room spray/i.test(l.query)), 'the tester line was not persisted'),
+      ...expect(o.open?.status !== 'saved' && o.open?.status !== 'saving', `saved without confirm (${o.open?.status ?? 'none'})`),
+      ...notesStayEmpty(o),
+    ]),
+  },
+  {
     id: 'spreadsheet-letterhead-is-not-customer',
     // Caption Create order; blank customer header; supplier letterhead must not become the customer.
     turns: [{

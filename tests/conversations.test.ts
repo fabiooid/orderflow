@@ -20,6 +20,7 @@ const scriptedIds = [
   'customer-only-does-not-invent-lines',
   'cancelled-request-does-not-copy-lines',
   'spreadsheet-keeps-named-customer',
+  'spreadsheet-create-order-persists-without-tools',
   'spreadsheet-letterhead-is-not-customer',
   'spreadsheet-header-names-customer',
 ];

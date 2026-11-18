@@ -6,7 +6,7 @@ import { clientSchema, draftSchema } from '../domain/types.js';
  * the schema tells the agent what is needed; the application validates every call and reports what is still missing.
  */
 const clientFields: Record<string, string> = {
-  name: 'Business name exactly as given, including words such as "Cliente".',
+  name: 'The business name as given, without a leading role word such as customer or cliente.',
   country: 'ISO 3166 alpha-2 code such as IT, also when the address makes it clear (an Italian CAP with a province such as BG). null only when the address leaves it open.',
   street: 'Street and number of the billing address.',
   postalCode: 'Postal code (CAP).',
@@ -29,7 +29,7 @@ const nullableClient = z.object(Object.fromEntries(Object.entries(clientSchema.o
 }))).strict();
 
 export const orderDraftInput = z.object({
-  clientQuery: z.string().describe('The customer name or VAT number the operator gave, as written, or the matched business name from search-clients. Include hint words they gave (hotel, albergo, shop, store, negozio, a city). When they clarify, replace this with the refined name. A short customer name typed against an open draft is a new search, not a request to save: put those words here. When the operator names the customer, that name wins over any company named in attached content. If attached content names a customer and the operator did not, use that header name. Supplier letterhead is not a customer name. Keep the name already on this request when the attachment header is blank. Empty when no customer is known yet.'),
+  clientQuery: z.string().describe('The customer name or VAT number the operator gave, as written, or the matched business name from search-clients. Include hint words they gave (hotel, albergo, shop, store, negozio, a city). When they name a customer with a role word (customer, cliente, buyer), put the business name here, not the role word. When they clarify, replace this with the refined name. A short customer name typed against an open draft is a new search, not a request to save: put those words here. When the operator names the customer, that name wins over any company named in attached content. If attached content names a customer and the operator did not, use that header name. Supplier letterhead is not a customer name. Keep the name already on this request when the attachment header is blank. Empty when no customer is known yet.'),
   clientId: z.string().min(1).nullable().describe('Keep the clientId already in the open draft only when it is still the same customer. Send an id only when search-clients matched the exact name or VAT the operator just typed. A single close or related account is a question: leave this null so the application can show a pick. If the operator named a different customer, typed a short customer name, or added a hint (hotel, albergo, shop, store, negozio), search-clients again and do not keep the old id. Otherwise null: the application resolves clientQuery against current records.'),
   newClient: nullableClient.nullable().describe('Only when the operator says the customer is new or types its billing details themselves. A customer named, signed or printed in an attached email or document only identifies it: put its name in clientQuery and leave this null.'),
   manualVatCheck: z.object({ country: z.string().regex(/^[A-Z]{2}$/), vatNumber: z.string().min(1), status: z.enum(['valid', 'invalid']) }).strict().nullable()

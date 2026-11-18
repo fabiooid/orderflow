@@ -13,9 +13,12 @@ export const SPREADSHEET_MIME = [
 ] as const;
 
 const MARK = /^(x+|✓|✔|☑|yes|y|si|sì|ok|v|true)$/iu;
+const TESTER_ORDER = /^(?:a\s+)?(?:\d+\s+)?(tester|sample|campion|prova)s?$/iu;
+const TESTER_POLICY = /\b(no|not|non|senza|without)\s+(?:a\s+|an\s+)?(tester|sample|campion|prova)|(tester|sample|campion|prova)s?.{0,80}\b(not provided|non previsti|cost|costs|prezzo)|\b(not provided|non previsti)\b/iu;
 const TESTER_HINT = /\b(tester|sample|campion|prova)\b/iu;
-const HEADER_HINT = /\b(qty|qta|q\.?t[aàe]?|quantity|quantit[aà]|pz|pcs|tester|sample|campion|prova|code|sku|codice|product|prodotto|articolo|descrizione|price|prezzo)\b/iu;
-const QTY_HINT = /\b(qty|qta|q\.?t[aàe]?|quantity|quantit[aà]|pz|pcs)\b/iu;
+const HEADER_HINT = /\b(qty|qta|q\.?t[aàe]?|quantity|quantit[aà]|pz|pcs|order|ordine|pieces|pezzi|tester|sample|campion|prova|code|sku|codice|product|prodotto|articolo|descrizione|price|prezzo)\b/iu;
+const QTY_HINT = /\b(qty|qta|q\.?t[aàe]?|quantity|quantit[aà]|pz|pcs|order|ordine|pieces|pezzi)\b/iu;
+const PRICE_HINT = /\b(price|prezzo|amount|importo|total|totale|vat|iva)\b/iu;
 const CUSTOMER_LABEL = /\b(customer|cliente|buyer|bill\s*to|sold\s*to|destinatario|intestatario)\b/iu;
 const MAX_SHEETS = 20;
 const MAX_ROWS = 500;
@@ -62,7 +65,11 @@ function cellOf(raw: unknown): Cell {
   }
   const text = String(raw).trim();
   if (!text) return { text: '', number: null, mark: false };
-  if (MARK.test(text)) return { text, number: null, mark: true };
+  if (MARK.test(text)) return { text, number: 1, mark: true };
+  if (TESTER_ORDER.test(text) && !TESTER_POLICY.test(text)) {
+    const count = Number(/^(\d+)/.exec(text)?.[1] ?? '');
+    return { text, number: Number.isFinite(count) && count > 0 ? count : null, mark: false };
+  }
   const number = Number(text.replace(',', '.'));
   if (text !== '' && Number.isFinite(number) && /^-?\d+([.,]\d+)?$/.test(text)) {
     return { text, number, mark: false };
@@ -156,15 +163,21 @@ function columnNumbers(products: Cell[][], column: number) {
   return products.map(row => row[column]?.number).filter((n): n is number => n != null && n > 0);
 }
 
+function isTesterOrder(cell: Cell, heading = '') {
+  if (!cell.text || TESTER_POLICY.test(cell.text) || (cell.text.length > 28 && TESTER_HINT.test(cell.text))) return false;
+  return cell.mark || TESTER_ORDER.test(cell.text) || (TESTER_HINT.test(heading) && cell.number != null && cell.number > 0 && cell.number <= 2);
+}
+
 function classifyColumns(header: string[], data: Cell[][]): ColumnKind[] {
   const products = productRows(data);
   const kinds: ColumnKind[] = header.map((heading, column) => {
     const cells = products.map(row => row[column] ?? { text: '', number: null, mark: false });
     const filled = cells.filter(cell => cell.text);
     const numbers = filled.map(cell => cell.number).filter((n): n is number => n != null && n > 0);
-    const marks = filled.filter(cell => cell.mark || (cell.number === 1 && TESTER_HINT.test(heading))).length;
+    const marks = filled.filter(cell => isTesterOrder(cell, heading)).length;
     const rate = fillRate(products, column);
-    if (TESTER_HINT.test(heading) && (marks || numbers.length)) return 'mark';
+    if (TESTER_HINT.test(heading) && marks) return 'mark';
+    if (PRICE_HINT.test(heading)) return 'printed';
     if (QTY_HINT.test(heading) && numbers.length) return 'quantity';
     if (marks && marks >= filled.length / 2 && rate < 0.7) return 'mark';
     if (numbers.length && rate < 0.7) return 'quantity';
@@ -189,22 +202,24 @@ function headingScore(row: Cell[]) {
   if (filled.length < 2) return -1;
   const labels = filled.filter(cell => cell.number == null && !cell.mark && cell.text.length <= 24).length;
   const hints = filled.filter(cell => HEADER_HINT.test(cell.text)).length;
-  const long = filled.filter(cell => cell.text.length > 28).length;
+  const long = filled.filter(cell => cell.text.length > 28 && !HEADER_HINT.test(cell.text)).length;
   return labels + hints * 4 - long * 5;
 }
 
 function tableStart(rows: Cell[][]) {
-  let best = 0, score = -Infinity;
+  let best = 0, score = -Infinity, bestHeading = -Infinity, firstHeader = 0;
   for (let i = 0; i < rows.length; i++) {
     const filled = rows[i]!.filter(cell => cell.text).length;
     if (filled < 2) continue;
     const heading = headingScore(rows[i]!);
+    if (heading > bestHeading) { bestHeading = heading; firstHeader = i; }
     const following = rows.slice(i + 1, i + 6).filter(nonEmpty).length;
     const quantities = rows.slice(i + 1, i + 8).filter(row => row.some(cell => cell.number != null || cell.mark)).length;
     const next = (heading > 0 ? heading * 4 : 0) + filled + following + quantities * 2;
     if (next > score) { score = next; best = i; }
   }
-  return best;
+  // Repeated table headers later on a filled sheet look denser; keep the first equally labelled header.
+  return bestHeading > 0 ? firstHeader : best;
 }
 
 function preambleFields(rows: Cell[][], start: number) {
@@ -266,8 +281,12 @@ function extractSheet(rows: string[][]) {
       const cell = row[i];
       if (!cell?.text) return [];
       const tester = kinds[i] === 'mark' || TESTER_HINT.test(heading);
-      const value = cell.mark ? '1' : cell.text;
-      return [{ heading: tester && !TESTER_HINT.test(heading) ? 'tester' : heading, value, tester }];
+      if (tester && !isTesterOrder(cell, heading)) return [];
+      const value = tester
+        ? String(cell.number && cell.number > 0 ? cell.number : 1)
+        : cell.text;
+      const label = tester ? 'tester' : kinds[i] === 'quantity' && heading.length > 24 ? 'Qty' : heading;
+      return [{ heading: label, value, tester }];
     });
     if (!filled.length) continue;
     const { code, name } = codeAndName(row, kinds);
