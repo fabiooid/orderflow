@@ -121,3 +121,17 @@ it('drops a locked shop when a later hotel refine no longer fits that account', 
   expect(outcome.open?.prepared?.client.id).not.toBe(shop.id);
   expect(outcome.open?.issues?.find(issue => issue.field === 'client')?.candidates?.map(c => c.id)).toEqual([hotel.id]);
 });
+
+it('reads a labelled customer follow-up and an ask to create an order, without treating file consent as that ask', async () => {
+  const { labelledCustomerQuery, operatorAskedToCreateOrder, isFileConsent } = await import('../src/assistant/intent.js');
+  expect(labelledCustomerQuery('cliente Northwind Bistro')).toBe('Northwind Bistro');
+  expect(labelledCustomerQuery('customer: Example Studio')).toBe('Example Studio');
+  expect(labelledCustomerQuery('Northwind')).toBeUndefined();
+  expect(labelledCustomerQuery('ok mostrami l\'ordine')).toBeUndefined();
+  expect(operatorAskedToCreateOrder('ok crea ordine')).toBe(true);
+  expect(operatorAskedToCreateOrder('crea ordine con 20')).toBe(true);
+  expect(operatorAskedToCreateOrder('add 20 to a new order')).toBe(false);
+  expect(operatorAskedToCreateOrder('crea cliente Marco Esempio')).toBe(false);
+  expect(isFileConsent('ok prepara questo file')).toBe(true);
+  expect(operatorAskedToCreateOrder('ok prepara questo file')).toBe(false);
+});

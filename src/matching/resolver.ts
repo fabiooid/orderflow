@@ -5,8 +5,8 @@ import type { AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
 import {
   clientPickLabel, correspondingTesters, explicitLineSizes, isTester, lineWantsTester, matchClients,
-  namedAlternatives, nameInText, normalize, productCodesIn, productIdentitySizes, relatedProducts,
-  sameClientIds, searchClients, testerQuery,
+  matchProducts, namedAlternatives, nameInText, normalize, productCodesIn, productIdentitySizes,
+  relatedProducts, sameClientIds, searchClients, testerQuery,
 } from '../domain/matching.js';
 import { draftSchema, type Client, type Product, type Issue, type OrderDraft } from '../domain/types.js';
 import { productCandidates, clientCandidates } from './candidates.js';
@@ -201,9 +201,16 @@ export function createIdentityResolver(app: AppConfig, connector: OrderConnector
         ?? heldProduct;
       const exactCodes = exactIdentity ? [exactIdentity] : wantsTester ? namedExact.filter(isTester) : namedExact;
       const searchedIds = new Set((context.searchEvidence ?? []).filter(s => s.kind === 'product').flatMap(s => s.ids));
+      // Uncoded wording is word/related hits, not the whole catalogue. A catalogue dump is not identity evidence.
+      const pool = all.filter(p => isTester(p) === wantsTester || exactCodes.some(e => e.id === p.id));
+      const lexicalQuery = wantsTester ? query : query.replace(/\btesters?\b/gi, ' ');
+      const lexical = wantsTester
+        ? testers
+        : [...coded, ...matchProducts(lexicalQuery, pool), ...namedAlternatives(lexicalQuery, pool), ...relatedProducts(lexicalQuery, pool), ...exactCodes];
+      const lexicalIds = new Set(lexical.map(p => p.id));
       const eligible = wantsTester
         ? testers
-        : all.filter(p => (!coded.length || coded.some(c => c.id === p.id) || searchedIds.has(p.id))
+        : all.filter(p => (lexicalIds.has(p.id) || searchedIds.has(p.id))
           && (isTester(p) === wantsTester || exactCodes.some(e => e.id === p.id))
           && (variantConflict || extraSizes.every(size => productIdentitySizes(p).includes(size))));
       const constrained = variantConflict
@@ -212,8 +219,8 @@ export function createIdentityResolver(app: AppConfig, connector: OrderConnector
       const pa = aliases.aliases.filter(a => normalize(a.phrase) === normalize(line.query));
       let candidates = productCandidates(constrained.length ? constrained : eligible).map(c => addAliases(c, pa.filter(a => a.productId === c.id).map(a => a.phrase)));
       if (!candidates.length && !wantsTester) {
-        const named = namedAlternatives(query, catalogue);
-        const related = named.length ? named : relatedProducts(query, catalogue);
+        const named = namedAlternatives(lexicalQuery, pool);
+        const related = named.length ? named : relatedProducts(lexicalQuery, pool);
         candidates = productCandidates(related).map(c => addAliases(c, []));
       }
       const uniqueExact = exactCodes.length === 1 ? candidates.find(c => c.id === exactCodes[0]!.id) ?? productCandidates(exactCodes)[0] : undefined;

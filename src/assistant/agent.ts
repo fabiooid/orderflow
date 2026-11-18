@@ -55,7 +55,7 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
    */
   const searchProducts = createTool({
     id: 'search-products',
-    description: 'Find products in the catalogue. With words (scent, type, size, code) it returns products that contain every word (found=words). If no product has every word, it returns products that match each word separately (found=related): say that combination is not in the catalogue, list the real products for each requested detail, and do not present a related product as the requested item. With no words, or when no product shares them, it returns the catalogue so you can judge by meaning which products fit, in any language ("saponi" can be a hand wash). Answer from what it returns; never invent products.',
+    description: 'Find products in the catalogue. With words (scent, type, size, code) it returns products that contain every word (found=words). If no product has every word, it returns products that match each word separately (found=related): say that combination is not in the catalogue, list the real products for each requested detail, and do not present a related product as the requested item. With no words, or when no product shares them, it returns the catalogue so you can judge by meaning which products fit, in any language ("saponi" can be a hand wash). found=catalogue is not identity evidence. This does not open a draft: if they then ask to order, call prepare-order with the products they meant. Answer from what it returns; never invent products.',
     inputSchema: z.object({ query: z.string().describe('Words to look for; empty to see the catalogue.') }),
     outputSchema: z.object({ found: z.enum(['words', 'related', 'catalogue', 'catalogue-too-large']), products: z.array(productSchema) }),
     execute: async ({ query }, context) => {
@@ -65,13 +65,15 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
       const result = exact.length ? { found: 'words' as const, products: exact }
         : relatedProducts(query, products).length ? { found: 'related' as const, products: relatedProducts(query, products) }
         : products.length <= CATALOGUE_LIST_LIMIT ? { found: 'catalogue' as const, products } : { found: 'catalogue-too-large' as const, products: [] as Product[] };
-      recordSearch(context?.requestContext, { kind: 'product', query, ids: result.products.slice(0, 30).map(p => p.id) });
+      if (result.found === 'words' || result.found === 'related') {
+        recordSearch(context?.requestContext, { kind: 'product', query, ids: result.products.slice(0, 30).map(p => p.id) });
+      }
       return result;
     },
   });
   const searchClients = createTool({
     id: 'search-clients',
-    description: 'Find existing businesses by legal name, VAT, city, street, everyday name in notes, or contact person. Read `clients`, not `found` alone. One close account is still a question unless the operator typed that exact name or VAT. Results feed prepare-order as candidates, not as a lock. Letterhead is not a customer.',
+    description: 'Find existing businesses by legal name, VAT, city, street, everyday name in notes, or contact person. Read `clients`, not `found` alone. One close account is still a question unless the operator typed that exact name or VAT. Results feed prepare-order as candidates, not as a lock. Search does not change the draft: still call prepare-order with that wording as clientQuery. Letterhead is not a customer.',
     inputSchema: z.object({ query: z.string().min(1).describe('The name or VAT number the operator gave, including hint words such as hotel, shop, or a city. Call again with a refined query when they clarify.') }),
     outputSchema: z.object({
       found: z.number().int().nonnegative().describe('How many client records are in `clients`. This count is not a client id and not a substitute for the list.'),
@@ -146,9 +148,9 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
   });
   const orderApi = prepare('order', drafts.order), customerApi = prepare('customer', drafts.customer);
   const books = config.invoicing.label;
-  const prepareOrder = draftTool('prepare-order', `The order API: merge this turn's changes into the open draft. Empty lines keep rows already on this request (including attachment facts). Tester marks are their own line (tester true, printed sale code kept). productId and clientId are proposals; the application accepts supported unique SKUs/testers and exact catalogue or customer names typed this request, and otherwise keeps candidates. Do not invent catalogue codes. Do not resend a cancelled order. Do not claim ready while the result status is needs. Never saves.`,
+  const prepareOrder = draftTool('prepare-order', `The order API: merge this turn's changes into the open draft. Search does not open or change a draft: call this the same turn they ask to create or add to an order, including after a catalogue answer. Empty lines keep rows already on this request (including attachment facts). Tester marks are their own line (tester true, printed sale code kept). productId and clientId are proposals; the application accepts supported unique SKUs/testers and exact catalogue or customer names typed this request, and otherwise keeps candidates. Do not invent catalogue codes. Do not resend a cancelled order. Do not claim ready while the result status is needs. Never saves.`,
     orderDraftInput, parseDraft, orderApi, true);
-  const prepareCustomer = draftTool('prepare-customer', `The customer API: create a new customer in ${books}, or correct the one being drafted. The application never saves. For an order's customer use prepare-order instead.`,
+  const prepareCustomer = draftTool('prepare-customer', `The customer API: create a new customer in ${books}, or correct the one being drafted. The application never saves. For an order's customer use prepare-order instead. Missing email or VAT does not block starting an order: when they ask to create an order, call prepare-order carrying newClient.`,
     customerDraftInput, parseCustomer, customerApi);
   const cancel = (requestContext?: RequestContext) => {
     const turn = turnOf(requestContext);

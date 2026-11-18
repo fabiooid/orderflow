@@ -46,3 +46,14 @@ export function operatorAskedToCreateCustomer(operatorWords: string) {
   return /\b(?:crea(?:re)?(?:\s+un)?|nuovo)\s+cliente\b/i.test(operatorWords)
     || /\b(?:create(?:\s+an?)?|new)\s+customer\b/i.test(operatorWords);
 }
+
+/** True when this message asks to create or add to an order, not merely to prepare a file. */
+export function operatorAskedToCreateOrder(text: string) {
+  return /\b(?:crea(?:re)?(?:\s+un)?\s+ordine|create(?:\s+an?)?\s+order)\b/i.test(text);
+}
+
+/** Customer name the operator labelled in this message (`cliente X` / `customer X`). */
+export function labelledCustomerQuery(text: string) {
+  const name = /^(?:cliente|customer)\s*[:\-]?\s+(.+)$/i.exec(text.trim())?.[1]?.trim();
+  return name && name.length <= 80 ? name : undefined;
+}

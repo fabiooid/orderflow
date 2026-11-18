@@ -446,3 +446,79 @@ it('matches the preview: needs never looks ready, and a needs draft cannot be sa
     expect(connector.createCalls).toBe(1);
   } finally { journal.close(); }
 });
+
+it('re-renders an open order when the model does not call a draft tool', async () => {
+  const outcome = await runConversation(config(), new DemoConnector(), [
+    { text: 'ordine per Example Studio: 2 Pebble hand wash 250 ml' },
+    { text: "ok mostrami l'ordine" },
+  ], { converse: async (prompt, act) => {
+    if (!prompt.openRequest) {
+      await act.order(draftSchema.parse({
+        clientQuery: 'Example Studio',
+        lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }],
+      }));
+    }
+    return { reply: 'eccolo', locale: 'it' };
+  } });
+  expect(outcome.open?.draft.clientId).toBe('201');
+  expect(outcome.open?.draft.lines.some(l => l.productId === '101' || /pebble/i.test(l.query))).toBe(true);
+  expect(outcome.replies.at(-1)).toMatch(/Bozza ordine|Anteprima ordine/);
+});
+
+it('takes over a customer request when they ask to create an order, even if the model stays on prepare-customer', async () => {
+  const customer = { name: 'Marco Esempio', street: 'Via Esempio 5', postalCode: '24100', city: 'Bergamo', province: 'BG', country: 'IT' };
+  const outcome = await runConversation(config(), new DemoConnector(), [
+    { text: 'Crea cliente: Marco Esempio Via Esempio 5, 24100 Bergamo BG' },
+    { text: 'ok crea ordine' },
+  ], { converse: async (_prompt, act) => {
+    await act.customer(draftSchema.parse({ newClient: customer }));
+    return { reply: 'manca email', locale: 'it' };
+  } });
+  expect(outcome.open?.kind).not.toBe('customer');
+  expect(outcome.open?.draft.newClient).toMatchObject({ name: 'Marco Esempio', country: 'IT' });
+  expect(outcome.replies.some(r => /Nessuna richiesta aperta|annullarla/i.test(r))).toBe(false);
+});
+
+it('applies a labelled customer follow-up when the model skips prepare-order', async () => {
+  const connector = new DemoConnector();
+  connector.clients.push(maplePine);
+  const northwind = { id: '202', name: 'Northwind Bistro', country: 'IT', street: 'Via Nord 5', city: 'Bergamo', postalCode: '24100', email: 'orders@northwind.invalid', vatNumber: 'DEMO-NORTHWIND', notes: '' };
+  connector.clients.push(northwind);
+  const outcome = await runConversation(config(), connector, [
+    { text: 'ordine per Example Studio: 2 Pebble hand wash 250 ml, spedizione 8 euro' },
+    { text: 'cliente Northwind Bistro' },
+  ], { converse: async (prompt, act) => {
+    if (!prompt.openRequest) {
+      await act.order(draftSchema.parse({
+        clientQuery: 'Example Studio',
+        lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }],
+        shippingPrice: 8,
+      }));
+    }
+    return { reply: '', locale: 'it' };
+  } });
+  expect(outcome.open?.draft.clientId).toBe('202');
+  expect(outcome.open?.draft.newClient).toBeUndefined();
+  expect(outcome.open?.draft.lines.some(l => l.productId === '101' || /pebble/i.test(l.query))).toBe(true);
+});
+
+it('opens a draft from a client search when the model never calls prepare-order', async () => {
+  const storage = new LibSQLStore({ id: `search-skip-${Math.random().toString(36).slice(2, 8)}`, url: ':memory:' });
+  try {
+    const connector = new DemoConnector();
+    connector.clients.push(maplePine);
+    const { agent } = createOrderAgent(config(), connector, storage);
+    const tools = await agent.listTools();
+    const outcome = await runConversation(config(), connector, [{ text: 'ordine per Maple' }], {
+      converse: async (_prompt, _act, requestContext) => {
+        await tools.searchClients!.execute!({ query: 'Maple' }, { requestContext } as never);
+        return { reply: 'Trovato Maple & Pine.', locale: 'it' };
+      },
+    });
+    expect(outcome.open?.draft.clientId).toBeUndefined();
+    expect(outcome.open?.status).toBe('suspended');
+    expect(outcome.open?.draft.clientQuery).toMatch(/Maple/i);
+    expect(outcome.open?.issues?.some(i => i.field === 'client' && i.candidates?.some(c => c.id === maplePine.id))).toBe(true);
+    expect(outcome.replies.at(-1)).toMatch(/🏪 Maple(?: & Pine Trading Ltd)? ❓/);
+  } finally { await storage.close(); }
+});

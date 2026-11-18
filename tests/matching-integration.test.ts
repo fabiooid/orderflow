@@ -97,6 +97,32 @@ it('off mode reads the catalogue for exact identities and never calls the matche
   expect(select).not.toHaveBeenCalled();
 });
 
+it.each(['off', 'on'] as const)('in %s mode does not list unrelated catalogue products for an uncoded meaning query', async mode => {
+  const connector = new DemoConnector();
+  connector.products.push(
+    { id: '104', code: 'DEMO-A5', name: 'Pebble hand wash 500 ml', description: '', netPrice: 20 },
+    { id: '105', code: 'DEMO-FIG-GEL', name: 'Fig shower gel 250 ml', description: '', netPrice: 14 },
+    { id: '106', code: 'DEMO-CEDAR-SOAP', name: 'Cedar hand soap 250 ml', description: '', netPrice: 12 },
+  );
+  const select = vi.fn(successful);
+  const soaps = await resolver(connector, select, mode).resolve(
+    { ...draft(), clientQuery: 'Example Studio', lines: [{ query: 'saponi', quantity: 2 }] },
+    { ...context, operatorText: 'ordine per Example Studio: 2 saponi, spedizione 8 euro', operatorWords: 'ordine per Example Studio: 2 saponi, spedizione 8 euro' },
+  );
+  const soapLabels = soaps.issues.find(i => i.field === 'lines.0')?.candidates?.map(c => c.label).join(' ') ?? '';
+  expect(soaps.draft.lines[0]?.productId).toBeUndefined();
+  expect(soapLabels).not.toMatch(/Linen candle/i);
+  expect(select.mock.calls.every(call => (call[0] as { candidates: { name: string }[] }[]).every(request => !request.candidates.some(c => /Linen candle/i.test(c.name))))).toBe(true);
+  const pebble = await resolver(connector, select, mode).resolve(
+    { ...draft(), clientQuery: 'Example Studio', lines: [{ query: 'Pebble hand wash', quantity: 2 }] },
+    { ...context, operatorText: '2 x Pebble hand wash', operatorWords: '2 x Pebble hand wash' },
+  );
+  const pebbleIds = pebble.issues.find(i => i.field === 'lines.0')?.candidates?.map(c => c.id) ?? [];
+  expect(pebble.draft.lines[0]?.productId).toBeUndefined();
+  expect(pebbleIds.some(id => ['101', '104'].includes(id))).toBe(true);
+  expect(pebbleIds).not.toContain('103');
+});
+
 it('uses exact codes and canonical form names without a model ID bypass', async () => {
   const connector = new DemoConnector(); const products = await connector.listProducts(); const p = products.find(p => p.id === '101')!;
   const select = vi.fn(successful);

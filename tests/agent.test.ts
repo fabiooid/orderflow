@@ -1,10 +1,12 @@
 import { expect, it } from 'vitest';
 import { z } from 'zod';
 import { LibSQLStore } from '@mastra/libsql';
+import { RequestContext } from '@mastra/core/request-context';
 import { createOrderAgent, sharedKnowledgeSchema } from '../src/assistant/agent.js';
 import { replySchema } from '../src/channel/engine.js';
 import { orderDraftInput } from '../src/assistant/draft-schema.js';
 import { systemPrompt } from '../src/assistant/system-prompt.js';
+import { startTurn, turnOf } from '../src/assistant/turn-context.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { config, harborSiblings, monasterySiblings, pharmacyTypeAccounts, sampleNameAccounts, willowmereStayAccounts } from './helpers.js';
 
@@ -18,8 +20,12 @@ it('gives the agent the order and customer APIs and lookups, and no way to save'
     expect(tools.searchClients?.description).toContain('One close account is still a question');
     expect(tools.searchClients?.description).toContain('exact name or VAT');
     expect(tools.searchClients?.description).toContain('candidates, not as a lock');
+    expect(tools.searchClients?.description).toContain('Search does not change the draft');
     expect(tools.searchProducts?.description).toContain('not in the catalogue');
+    expect(tools.searchProducts?.description).toContain('found=catalogue is not identity evidence');
     expect(tools.prepareOrder?.description).toContain('Empty lines keep rows already on this request');
+    expect(tools.prepareOrder?.description).toContain('Search does not open or change a draft');
+    expect(tools.prepareCustomer?.description).toContain('Missing email or VAT');
     expect(tools.prepareOrder?.description).toContain('unique SKUs/testers');
     expect(tools.prepareOrder?.description).toContain('Do not claim ready while the result status is needs');
     expect(tools.prepareOrder?.description).not.toContain('always call search-clients first');
@@ -47,6 +53,8 @@ it('keeps business rules in the prompt and field rules in the API schema, with n
   expect(prompt).toContain('Never say the draft is ready while status is needs');
   expect(prompt).toContain('short customer name');
   expect(prompt).toContain('not a request to save');
+  expect(prompt).toContain('Search does not open or change a draft');
+  expect(prompt).toContain('Missing customer email or VAT does not block starting an order');
   expect(prompt).toContain('An explicit shipping 0 already on this request stays');
   expect(prompt).not.toContain('always call search-clients');
   expect(prompt).not.toMatch(/\/(?:ordine|cliente|annulla|confermaordine|confermacliente)\b/);
@@ -109,6 +117,12 @@ it('hands the agent the catalogue when no product contains the words, so it can 
     expect(soaps.found).toBe('catalogue');
     expect(soaps.products.map(p => p.name)).toContain('Pebble hand wash 250 ml');
     expect((await search('')).found).toBe('catalogue');
+    const context = new RequestContext();
+    startTurn(context, { evidence: 'saponi', operatorWords: 'saponi', senderId: '1', knownPhrases: [] });
+    await tools.searchProducts!.execute!({ query: 'saponi' }, { requestContext: context } as never);
+    expect(turnOf(context)?.searchEvidence).toEqual([]);
+    await tools.searchProducts!.execute!({ query: 'candle' }, { requestContext: context } as never);
+    expect(turnOf(context)?.searchEvidence).toEqual([expect.objectContaining({ kind: 'product', query: 'candle', ids: expect.arrayContaining(['103']) })]);
   } finally { await storage.close(); }
 });
 

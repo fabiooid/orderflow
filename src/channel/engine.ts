@@ -25,6 +25,7 @@ import { createDocumentWorkflow, workflowTemplatePages } from '../documents/work
 import { createVisionDocumentProvider } from '../documents/reader.js';
 import { omitMedia } from '../assistant/omit-media.js';
 import type { PendingQuestion } from '../matching/resolver.js';
+import { labelledCustomerQuery, operatorAskedToCreateOrder } from '../assistant/intent.js';
 
 function pendingFromIssues(issues: Issue[] | undefined, revision: number): PendingQuestion | undefined {
   const client = issues?.find(issue => issue.field === 'client' && issue.candidates?.length);
@@ -160,8 +161,23 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
     const act: TurnActions = { order: draft => calls.order(draft, requestContext), customer: draft => calls.customer(draft, requestContext), cancel: () => calls.cancel(requestContext) };
     const { reply, locale } = await converse(prompt, act, requestContext);
     if (outcome.cancel) return { text: reply, reply, locale, cancel: true };
-    if (!outcome.refused && !outcome.result && attachmentLines.length && kindOf(request ?? { kind: undefined }) !== 'customer') {
+    const turnState = turnOf(requestContext);
+    const openKind = request ? kindOf(request) : undefined;
+    const clientSearch = [...(turnState?.searchEvidence ?? [])].reverse().find(item => item.kind === 'client');
+    const labelled = labelledCustomerQuery(input.operatorText);
+    const askedOrder = operatorAskedToCreateOrder(input.operatorText);
+    const customerDraft = outcome.result?.kind === 'customer' ? outcome.result.draft : openKind === 'customer' ? request?.draft : undefined;
+    if (!outcome.refused && askedOrder && outcome.result?.kind !== 'order' && (openKind === 'customer' || outcome.result?.kind === 'customer')) {
+      await calls.order(draftSchema.parse({
+        clientQuery: customerDraft?.newClient?.name ?? customerDraft?.clientQuery ?? '',
+        ...(customerDraft?.newClient ? { newClient: customerDraft.newClient } : {}),
+      }), requestContext);
+    } else if (!outcome.refused && !outcome.result && openKind === 'order') {
+      await calls.order(draftSchema.parse({ clientQuery: clientSearch?.query ?? labelled ?? '' }), requestContext);
+    } else if (!outcome.refused && !outcome.result && attachmentLines.length && openKind !== 'customer') {
       await calls.order(draftSchema.parse({}), requestContext);
+    } else if (!outcome.refused && !outcome.result && (clientSearch || labelled)) {
+      await calls.order(draftSchema.parse({ clientQuery: clientSearch?.query ?? labelled ?? '' }), requestContext);
     }
     const { result } = outcome;
     if (!result) return { text: reply, reply, locale, ...(outcome.refused ? { blocked: true } : {}) };
