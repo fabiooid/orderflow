@@ -125,13 +125,17 @@ function applyClearEditConverse(scenario: (typeof conversationCases)[number]): C
   const prompt = systemPrompt(config().invoicing.label);
   const reply = replySchema(config().locale, config().currency).shape.reply.description ?? '';
   const followsRule = /apply a clear instruction/.test(prompt)
-    && /Do not ask them to confirm the instruction they just gave/.test(prompt)
-    && /Do not restate or re-confirm unchanged fields/.test(prompt)
-    && /Do not ask the operator to confirm an instruction they just gave/.test(reply);
+    && /Be concise by default/.test(prompt)
+    && /let it speak for itself/.test(prompt)
+    && /Do not repeat its contents or ask about missing fields it already displays/.test(prompt)
+    && /let it speak for itself/.test(reply)
+    && /Add text only to answer a direct question/.test(reply)
+    && !/Ask about issues that still need a pick/.test(prompt)
+    && !/Ask about issues that still need a pick/.test(reply);
   let turn = 0;
   return async (message, act) => {
     const next = drafts[turn++];
-    const english = /Prepare an order|change the quantity|note: /i.test(message.operatorWords);
+    const english = /Prepare an order|change the quantity|note: |delivery /i.test(message.operatorWords);
     if (turn < drafts.length) {
       await act.order(asOrderDraft(next));
       return { reply: '', locale: english ? 'en' : 'it' };
@@ -150,7 +154,7 @@ function applyClearEditConverse(scenario: (typeof conversationCases)[number]): C
   };
 }
 
-it.each(['apply-clear-note-on-ready-draft', 'apply-clear-quantity-on-ready-draft'] as const)(
+it.each(['apply-clear-note-on-ready-draft', 'apply-clear-quantity-on-ready-draft', 'apply-clear-shipping-on-open-draft'] as const)(
   'applies a clear draft edit immediately: %s',
   async id => {
     const scenario = conversationCases.find(c => c.id === id);
@@ -173,11 +177,15 @@ function previousChatCustomerConverse(scenario: (typeof conversationCases)[numbe
   const reply = replySchema(config().locale, config().currency).shape.reply.description ?? '';
   const followsRule = /leave the customer blank/.test(prompt)
     && /Do not offer, search for, confirm, use or keep a customer from earlier messages/.test(prompt)
-    && /draft already shows a blank client/.test(prompt)
+    && /Be concise by default/.test(prompt)
+    && /let it speak for itself/.test(prompt)
+    && /Do not repeat its contents or ask about missing fields it already displays/.test(prompt)
     && /Empty when this request did not name a customer/.test(clientQuery)
     && /Do not send a list price, last paid, or an earlier-chat amount/.test(shipping)
-    && /draft already shows a blank client/.test(reply)
-    && /do not ask them to confirm shipping/.test(reply);
+    && /let it speak for itself/.test(reply)
+    && /Do not repeat its contents or ask about missing fields it already displays/.test(reply)
+    && !/Ask about issues that still need a pick/.test(prompt)
+    && !/Ask about issues that still need a pick/.test(reply);
   let turn = 0;
   return async (_prompt, act) => {
     const next = drafts[turn++];

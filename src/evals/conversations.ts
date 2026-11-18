@@ -101,7 +101,9 @@ const askedToConfirmGivenInstruction = (text: string) =>
   /vuoi aggiungere|want (?:me )?to add|should I add|vuoi (?:applicare|cambiare)|want (?:me )?to (?:apply|change)|keep (?:the )?(?:existing )?(?:shipping|delivery)|mantenere (?:le )?spese|altre modifiche prima di salvare|other changes before (?:you )?save/i.test(agentLead(text));
 /** The live bug: asking to confirm a blank client or a guessed shipping amount the draft already shows as empty. */
 const askedToConfirmBlankCustomerOrShipping = (text: string) =>
-  /chi è il cliente|who is the (?:customer|client)|use this (?:client|customer)|confermi (?:le )?spese|confirm (?:the )?(?:delivery|shipping)|listino|list price|catalogue default|spese di consegna|delivery (?:charge|at|of)|keep (?:the )?(?:existing )?(?:shipping|delivery)/i.test(agentLead(text));
+  /chi è il cliente|who is the (?:customer|client)|nome legale|legal name or vat|use this (?:client|customer)|confermi (?:le )?spese|confirm (?:the )?(?:delivery|shipping)|listino|list price|catalogue default|spese di consegna|importo.{0,40}(?:consegna|spedizion)|what (?:is |are )?(?:the )?(?:delivery|shipping) (?:charge|amount|cost)|delivery (?:charge|at|of)|keep (?:the )?(?:existing )?(?:shipping|delivery)/i.test(agentLead(text));
+/** Asking above a preview about gaps or values it already shows, including a question mark in the lead. */
+const askedAboutPreviewGaps = (text: string) => /\?/.test(agentLead(text)) || askedToConfirmBlankCustomerOrShipping(text) || askedToConfirmGivenInstruction(text);
 /** A later unnamed file or order after an earlier chat had a different customer and a shipping amount. */
 const unnamedAfterEarlierChat: Check = o => {
   const text = last(o);
@@ -114,8 +116,17 @@ const unnamedAfterEarlierChat: Check = o => {
     ...expect(!o.open?.issues?.some(i => i.field === 'client' && i.candidates?.length),
       `offered a guessed customer as a choice: ${offered}`),
     ...expect(!/example studio/i.test(text), `asked to confirm or use a previous-chat customer: ${text.split('\n')[0]}`),
-    ...expect(!askedToConfirmBlankCustomerOrShipping(text), `asked to confirm a blank client or guessed shipping: ${agentLead(text).split('\n')[0]}`),
+    ...expect(!askedAboutPreviewGaps(text), `asked about fields the preview already shows: ${agentLead(text).split('\n')[0]}`),
     ...expect(previewHeading.test(text), 'the updated preview was not shown'),
+  ];
+};
+/** Routine draft edit: show the updated preview, do not ask or recap above it. */
+const previewSpeaksForItself: Check = o => {
+  const text = last(o);
+  return [
+    ...expect(previewHeading.test(text), 'the updated preview was not shown'),
+    ...expect(!askedAboutPreviewGaps(text), `asked above the preview: ${agentLead(text).split('\n')[0]}`),
+    ...expect(!askedToConfirmGivenInstruction(text), `asked to confirm an instruction already given: ${agentLead(text).split('\n')[0]}`),
   ];
 };
 /** The printed note is only the instruction the operator asked for, in their language, with no recap of the draft. */
@@ -596,13 +607,11 @@ export const conversationCases: ConversationCase[] = [
         notes: 'lasciare al banco',
       }),
     ],
-    check: all(neverGaveUp, namedFor('201', /example studio/i), onlyRequestedNote('lasciare al banco'), o => {
+    check: all(neverGaveUp, namedFor('201', /example studio/i), onlyRequestedNote('lasciare al banco'), previewSpeaksForItself, o => {
       const text = last(o);
       return [
         ...expect(o.open?.draft.shippingPrice === 0, `shipping changed to ${o.open?.draft.shippingPrice}`),
         ...expect(o.open?.status !== 'saved' && o.open?.status !== 'saving', `saved without confirm (${o.open?.status ?? 'none'})`),
-        ...expect(!askedToConfirmGivenInstruction(text), `asked to confirm an instruction already given: ${agentLead(text).split('\n')[0]}`),
-        ...expect(previewHeading.test(text), 'the updated preview was not shown'),
         ...expect(/lasciare al banco/i.test(text), 'the updated preview did not show the note'),
       ];
     }),
@@ -626,16 +635,37 @@ export const conversationCases: ConversationCase[] = [
         shippingPrice: 0,
       }),
     ],
-    check: all(neverGaveUp, namedFor('201', /example studio/i), notesStayEmpty, o => {
-      const text = last(o);
+    check: all(neverGaveUp, namedFor('201', /example studio/i), notesStayEmpty, previewSpeaksForItself, o => {
       const line = o.open?.draft.lines.find(l => l.productId === '101' || /pebble/i.test(l.query));
       return [
         ...expect(line?.quantity === 5, `quantity is ${line?.quantity ?? 'missing'}, expected 5`),
         ...expect(o.open?.draft.shippingPrice === 0, `shipping changed to ${o.open?.draft.shippingPrice}`),
         ...expect(o.open?.status !== 'saved' && o.open?.status !== 'saving', `saved without confirm (${o.open?.status ?? 'none'})`),
-        ...expect(!askedToConfirmGivenInstruction(text), `asked to confirm an instruction already given: ${agentLead(text).split('\n')[0]}`),
-        ...expect(previewHeading.test(text), 'the updated preview was not shown'),
       ];
     }),
+  },
+  {
+    id: 'apply-clear-shipping-on-open-draft',
+    // Named customer, unnamed delivery, then a clear shipping amount: apply it and let the preview speak.
+    turns: [
+      { text: 'Prepare an order for Example Studio: 2 Pebble hand wash 250 ml' },
+      { text: 'delivery 8 euros' },
+    ],
+    scripted: [
+      draftSchema.parse({
+        clientQuery: 'Example Studio',
+        lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }],
+      }),
+      draftSchema.parse({
+        clientQuery: 'Example Studio',
+        lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }],
+        shippingPrice: 8,
+      }),
+    ],
+    check: all(neverGaveUp, namedFor('201', /example studio/i), notesStayEmpty, previewSpeaksForItself, o => [
+      ...expect(o.open?.draft.shippingPrice === 8, `shipping is ${o.open?.draft.shippingPrice}, expected 8`),
+      ...expect(o.open?.status !== 'saved' && o.open?.status !== 'saving', `saved without confirm (${o.open?.status ?? 'none'})`),
+      ...expect(!askedAboutPreviewGaps(o.replies[0] ?? ''), `asked about blank delivery on the first preview: ${agentLead(o.replies[0] ?? '').split('\n')[0]}`),
+    ]),
   },
 ];
