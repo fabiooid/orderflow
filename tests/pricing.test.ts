@@ -12,7 +12,7 @@ import { namedAlternatives } from '../src/domain/matching.js';
 import { prepareOrder } from '../src/domain/prepare.js';
 import { draftSchema, type ClientOrder } from '../src/domain/types.js';
 import { orderPreview } from '../src/channel/preview.js';
-import { draft, prepared } from './helpers.js';
+import { config, draft, prepared } from './helpers.js';
 
 const tradeForm = { schemaVersion: 1, id: 'trade-list', name: 'Trade list', priceTier: 'trade', columns: [{ id: 'order', heading: 'Order', value: 'quantity' }], rows: [{ code: 'DEMO-A', label: 'Pebble', cells: { order: { productId: '101', netPrice: 15 } } }] };
 const tiered = (clientIds = [201]) => configSchema.parse({ ...structuredClone(example), priceTiers: [{ id: 'trade', name: 'Trade', clientIds }], orderForms: [tradeForm] });
@@ -82,13 +82,91 @@ describe('previous orders', () => {
       earlier('8', '2025-12-01', [{ productId: '101', netPrice: 12, discountPercent: 20 }]),
       earlier('7', '2025-11-01', [{ productId: '101', netPrice: 30 }]),
     ]);
-    expect(found).toEqual([{ name: 'Pebble hand wash 250 ml', now: 10.8, before: 9.6, order: { number: '8', date: '2025-12-01' } }]);
+    expect(found.anomalies).toEqual([{ name: 'Pebble hand wash 250 ml', now: 10.8, before: 9.6, order: { number: '8', date: '2025-12-01' } }]);
+    expect(found.catalogueIncreases.count).toBe(0);
   });
-  it('shows price differences from earlier orders in the summary without blocking it', async () => {
+  it('groups a general catalogue increase instead of warning on every overlapping SKU', async () => {
+    const connector = new DemoConnector();
+    const result = await prepareOrder(draftSchema.parse({
+      clientQuery: 'Example Studio',
+      lines: [
+        { query: 'Pebble hand wash 250 ml', quantity: 2 },
+        { query: 'Linen candle 200 g', quantity: 1 },
+      ],
+      shippingPrice: 8,
+      discountPercent: 0,
+    }), config(), connector, '2026-01-15');
+    expect(result.ready).toBe(true);
+    if (!result.ready) return;
+    const found = priceDiscrepancies(result.order, [
+      earlier('8', '2025-12-01', [
+        { productId: '101', netPrice: 10 },
+        { productId: '103', netPrice: 16 },
+        { productId: '900', netPrice: 8 },
+      ]),
+    ], await connector.listProducts());
+    expect(found.anomalies).toEqual([]);
+    expect(found.catalogueIncreases).toEqual({
+      count: 2,
+      orders: [{ number: '8', date: '2025-12-01' }, { number: '8', date: '2025-12-01' }],
+    });
+    const text = orderPreview(result.order, { net: 1, vat: 1, gross: 2 }, true, found.anomalies, 'EUR', {
+      ...found.catalogueIncreases,
+      context: 'List increased; the current catalogue is the list.',
+    });
+    expect(text).toContain('2 righe seguono il listino attuale; i prezzi pagati su #8 erano inferiori');
+    expect(text).toContain('List increased; the current catalogue is the list.');
+    expect(text).not.toContain('Da verificare');
+    expect(text).not.toMatch(/Pebble hand wash 250 ml: ora/);
+    expect(text).not.toMatch(/Linen candle 200 g: ora/);
+  });
+  it('still flags an override or a history unit that the current catalogue does not explain', async () => {
+    const connector = new DemoConnector();
+    const result = await prepareOrder(draftSchema.parse({
+      clientQuery: 'Example Studio',
+      lines: [
+        { query: 'Pebble hand wash 250 ml', quantity: 2, netPrice: 9 },
+        { query: 'Linen candle 200 g', quantity: 1 },
+      ],
+      shippingPrice: 8,
+      discountPercent: 0,
+    }), config(), connector, '2026-01-15');
+    expect(result.ready).toBe(true);
+    if (!result.ready) return;
+    const found = priceDiscrepancies(result.order, [
+      earlier('8', '2025-12-01', [
+        { productId: '101', netPrice: 10 },
+        { productId: '103', netPrice: 16 },
+        { productId: '900', netPrice: 8 },
+      ]),
+    ], await connector.listProducts());
+    expect(found.catalogueIncreases.count).toBe(1);
+    expect(found.catalogueIncreases.orders).toEqual([{ number: '8', date: '2025-12-01' }]);
+    expect(found.anomalies).toEqual([
+      { name: 'Pebble hand wash 250 ml', now: 9, before: 10, order: { number: '8', date: '2025-12-01' } },
+    ]);
+    const text = orderPreview(result.order, { net: 1, vat: 1, gross: 2 }, true, found.anomalies, 'EUR', {
+      ...found.catalogueIncreases,
+      context: 'List increased; the current catalogue is the list.',
+    });
+    expect(text).toContain('1 righe seguono il listino attuale; i prezzi pagati su #8 erano inferiori');
+    expect(text).toContain('⚠️ Da verificare\n• Pebble hand wash 250 ml: ora €9,00, ordine precedente €10,00 (#8, 01/12/2025)');
+    expect(text).not.toMatch(/Linen candle 200 g: ora/);
+    expect(text).not.toMatch(/Delivery: ora/);
+  });
+  it('shows unexplained price differences from earlier orders in the summary without blocking it', async () => {
     const order = await prepared();
     const text = orderPreview(order, { net: 1, vat: 1, gross: 2 }, true, [{ name: 'Delivery', now: 15, before: 12, order: { number: '77', date: '2026-01-10' } }]);
     expect(text).toContain('⚠️ Da verificare\n• Delivery: ora €15,00, ordine precedente €12,00 (#77, 10/01/2026)');
     expect(text).toContain('💶 Totali');
+  });
+  it('still asks for shipping and does not invent a customer from history', async () => {
+    const missing = await prepareOrder({ ...draft(), shippingPrice: undefined }, config(), new DemoConnector(), '2026-01-15');
+    expect(missing.ready).toBe(false);
+    if (missing.ready) return;
+    expect(missing.issues.some(i => i.field === 'shippingPrice')).toBe(true);
+    expect(missing.issues.some(i => i.field === 'client' || i.field.startsWith('client.'))).toBe(false);
+    expect(missing.draft.clientQuery).toBe('Example Studio');
   });
   it('reads a client\'s orders from Fatture in Cloud with a filter, never other clients\' orders', async () => {
     const listIssuedDocuments = vi.fn().mockResolvedValue({ data: { data: [

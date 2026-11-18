@@ -177,6 +177,13 @@ const configObject = z.object({
   /** Speech-to-text for Telegram voice notes; omit to answer voice notes with "not enabled". */
   transcription: z.object({ model: z.string().regex(/^openai\/[^\s]+$/, 'Only OpenAI transcription models are supported') }).strict().optional(),
   memory: z.object({ lastMessages: z.number().int().min(1).max(100) }).strict(),
+  /**
+   * Operator-facing pricing notes. Core never invents a shop list-increase story; this short string is
+   * shown once when several lines simply follow the current catalogue after last paid was lower.
+   */
+  pricing: z.object({
+    catalogueIncreaseContext: z.string().min(1).max(240),
+  }).strict().optional(),
   /** Named price lists; clients listed here get the tier's prices from its order forms. */
   priceTiers: z.array(z.object({ id: slug, name: z.string().min(1), clientIds: z.array(opaqueId) }).strict()).default([]),
   /** In the file, entries may be paths to form JSON files; loadConfig reads them. */

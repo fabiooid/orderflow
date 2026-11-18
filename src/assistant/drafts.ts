@@ -4,13 +4,13 @@ import { prepareOrder, type ValidationLookup } from '../domain/prepare.js';
 import type { Client, Issue, NewCustomer, OrderDraft, PreparedOrder, Product, Totals } from '../domain/types.js';
 import { changedIdentities, type Decision, type IdentityResolver, type ResolutionContext } from '../matching/resolver.js';
 import { customerDetails } from '../domain/customer.js';
-import { priceDiscrepancies, type Discrepancy } from '../domain/history.js';
+import { priceDiscrepancies, type CatalogueIncrease, type Discrepancy } from '../domain/history.js';
 import { traceOperation } from './execution-trace.js';
 
 /** What the order API reports: a prepared order ready for confirmation, or what is still needed. */
 export type OrderResult = { kind: 'order'; draft: OrderDraft; decisions: Decision[]; client?: Client } & (
-  /** `discrepancies`: prices that differ from the customer's previous orders, to check; they never block saving. */
-  | { status: 'ready'; order: PreparedOrder; totals: Totals; discrepancies: Discrepancy[] }
+  /** `discrepancies`: charged units that are not explained by the current catalogue. They never block saving. */
+  | { status: 'ready'; order: PreparedOrder; totals: Totals; discrepancies: Discrepancy[]; catalogueIncreases: CatalogueIncrease }
   | { status: 'needs'; issues: Issue[] });
 /** What the customer API reports: a customer ready to create, an existing one, or what is still needed. */
 export type CustomerResult = { kind: 'customer'; draft: OrderDraft; decisions: Decision[] } & (
@@ -65,7 +65,8 @@ export function createDraftApi(config: AppConfig, connector: OrderConnector, mat
     const id = result.order.client.id;
     // Lookup failures only drop the price comparison.
     const [totals, history] = await Promise.all([connector.calculateTotals(result.order), id ? connector.listClientOrders(id, 5).catch(() => []) : []]);
-    return { kind: 'order', status: 'ready', draft: result.draft, decisions, order: result.order, totals, discrepancies: priceDiscrepancies(result.order, history), client: result.order.client };
+    const compared = priceDiscrepancies(result.order, history, products);
+    return { kind: 'order', status: 'ready', draft: result.draft, decisions, order: result.order, totals, discrepancies: compared.anomalies, catalogueIncreases: compared.catalogueIncreases, client: result.order.client };
   }
 
   /** Matching still runs on a new customer, so a near-duplicate of an existing one is offered rather than recreated. */
