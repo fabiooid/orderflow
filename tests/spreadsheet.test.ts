@@ -136,7 +136,7 @@ describe('spreadsheet hints and extraction', () => {
     layout.addRow(['SKU-100', 'Hand cream 100 ml', 12.5, '', '']);
     layout.addRow(['SKU-250', 'Room spray 250 ml', 18.75, '', '']);
     const order = workbook.addWorksheet('Order');
-    order.addRow(['Northwind Supplies Ltd', 'Harbour Lane 1', 'Example City', 'IT', 'P.IVA IT000111222', 'orders@northwind-supplies.invalid']);
+    order.addRow(['Northwind Supplies Ltd', 'Harbour Lane 1\nACME-1 | not a catalogue row', 'Example City', 'IT', 'P.IVA IT000111222', 'orders@northwind-supplies.invalid']);
     order.addRow(['Tel', '000-000-000', 'www.northwind-supplies.invalid', '', '', '']);
     order.addRow(['Customer', '']);
     order.addRow([]);
@@ -153,6 +153,8 @@ describe('spreadsheet hints and extraction', () => {
     expect(text).toContain('SKU-250');
     expect(text).toMatch(/tester:\s*1/i);
     expect(text).not.toMatch(/^Code \|/m);
+    const selected = text.split('\n').filter(line => line.includes('|') && !/^(Letterhead|Header)\b/i.test(line));
+    expect(selected.some(line => /not a catalogue row/i.test(line))).toBe(false);
   });
 
   it('reads the generated eval workbook without promoting letterhead or dropping testers', async () => {
@@ -164,6 +166,7 @@ describe('spreadsheet hints and extraction', () => {
     expect(text).toContain('SAMPLE-T');
     expect(text).toMatch(/tester:\s*1/i);
     expect(text).not.toMatch(/IT:\s*2/);
+    expect(text.split('\n').some(line => /not a catalogue row/i.test(line) && !/^Letterhead/i.test(line))).toBe(false);
     const lines = productLinesFromReading(text);
     expect(lines).toHaveLength(8);
     expect(lines.filter(line => /tester/i.test(line.query))).toEqual([expect.objectContaining({ query: expect.stringMatching(/SAMPLE-T/i), quantity: 1 })]);

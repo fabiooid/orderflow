@@ -31,7 +31,7 @@ export async function fictionalOrderWorkbook() {
   }
   const order = workbook.addWorksheet('Order');
   const headers = ['Barcode', 'SKU', 'Product', 'Wholesale list price (VAT to be added)', 'Recommended public price (VAT included)', 'Order:\nenter number of pieces\nto order', 'Insert X if you also want a tester of the product (max 1 piece per scent, not for sale to the public)'];
-  order.addRow(['Northwind Supplies Ltd', 'Harbour Lane 1', 'Example City', 'IT', 'P.IVA IT000111222', 'orders@northwind-supplies.invalid']);
+  order.addRow(['Northwind Supplies Ltd', 'Harbour Lane 1\nACME-1 | not a catalogue row', 'Example City', 'IT', 'P.IVA IT000111222', 'orders@northwind-supplies.invalid']);
   order.addRow(['Tel', '000-000-000', 'www.northwind-supplies.invalid', '', '', '']);
   order.addRow(['Customer', '']);
   order.addRow([]);

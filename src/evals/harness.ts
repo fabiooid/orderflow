@@ -43,7 +43,7 @@ export function scriptedTurns(drafts: ScriptedAct[]): Converse {
  * Replays turns as group messages through the real controller and engine, against the given (fictional) connector.
  * Without `converse` the configured model answers; nothing is saved and no Telegram message is sent.
  */
-export async function runConversation(config: AppConfig, connector: OrderConnector, turns: ConversationTurn[], options: { converse?: Converse; log?: (line: string) => void } = {}): Promise<ConversationOutcome> {
+export async function runConversation(config: AppConfig, connector: OrderConnector, turns: ConversationTurn[], options: { converse?: Converse; log?: (line: string) => void; onTurn?: (index: number, outcome: ConversationOutcome) => void } = {}): Promise<ConversationOutcome> {
   installTelegramChannel();
   // As the group is configured: every message is for the bot.
   config = { ...config, channel: { ...config.channel, respondToAllMessages: true } };
@@ -86,6 +86,7 @@ export async function runConversation(config: AppConfig, connector: OrderConnect
       const started = performance.now();
       await engine.traceTurn(id, () => controller.handle(update));
       options.log?.(`> ${'press' in turn ? `[${turn.press}]` : turn.text}\n  ${replies.slice(before).join('\n').replace(/\n/g, '\n  ')}\n  (${Math.round(performance.now() - started)} ms)`);
+      options.onTurn?.(index, { replies: replies.slice(), open: await store.activeRequest() });
     }
     return { replies, open: await store.activeRequest() };
   } finally {

@@ -228,7 +228,7 @@ function preambleFields(rows: Cell[][], start: number) {
   for (const row of rows.slice(0, start)) {
     const cells = row.filter(cell => cell.text);
     if (!cells.length) continue;
-    const joined = cells.map(cell => cell.text).join(', ');
+    const joined = cells.map(cell => cell.text.replace(/\s+/g, ' ').trim()).filter(Boolean).join(', ');
     if (CUSTOMER_LABEL.test(cells[0]!.text) || CUSTOMER_LABEL.test(joined)) {
       const value = cells.slice(1).map(cell => cell.text).filter(Boolean).join(', ');
       if (value) customer.push(cells.length === 2 ? `${cells[0]!.text}: ${value}` : joined);
@@ -282,19 +282,20 @@ function extractSheet(rows: string[][]) {
       if (!cell?.text) return [];
       const tester = kinds[i] === 'mark' || TESTER_HINT.test(heading);
       if (tester && !isTesterOrder(cell, heading)) return [];
+      if (kinds[i] === 'quantity' && (cell.number == null || cell.number <= 0)) return [];
       const value = tester
         ? String(cell.number && cell.number > 0 ? cell.number : 1)
-        : cell.text;
+        : String(cell.number ?? cell.text);
       const label = tester ? 'tester' : kinds[i] === 'quantity' && heading.length > 24 ? 'Qty' : heading;
       return [{ heading: label, value, tester }];
     });
     if (!filled.length) continue;
     const { code, name } = codeAndName(row, kinds);
-    const identity = [code, name].filter(Boolean);
+    const identity = [code, name].filter((value): value is string => Boolean(value));
     if (!identity.length) continue;
     const facts = filled.map(item => `${item.heading}: ${item.value}`);
     if (filled.some(item => item.tester) && !facts.some(item => TESTER_HINT.test(item))) facts.push('tester: 1');
-    lines.push([...identity, ...facts].join(' | '));
+    lines.push([...identity, ...facts].map(part => part.replace(/\s+/g, ' ').trim()).filter(Boolean).join(' | '));
   }
   return { ...preamble, lines };
 }
@@ -316,9 +317,10 @@ export async function readSpreadsheet(file: DocumentFile): Promise<string> {
     for (const field of extracted.customer) if (!customer.includes(field)) customer.push(field);
     lines.push(...extracted.lines);
   }
+  const oneLine = (field: string) => field.replace(/\s+/g, ' ').trim();
   return [
-    ...letterhead.map(field => `Letterhead (supplier, not the customer): ${field}`),
-    ...customer.map(field => `Header: ${field}`),
+    ...letterhead.map(field => `Letterhead (supplier, not the customer): ${oneLine(field)}`),
+    ...customer.map(field => `Header: ${oneLine(field)}`),
     ...lines,
   ].join('\n');
 }
