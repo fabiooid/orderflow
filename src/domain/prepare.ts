@@ -2,7 +2,7 @@ import type { AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
 import { clientSchema, draftSchema, preparedOrderSchema, type Client, type Issue, type OrderDraft, type OrderLine, type PreparedOrder, type Product, type VatValidation } from './types.js';
 import { missingCustomerFields } from './customer.js';
-import { asksForTester, clientPickLabel, exactClients, isTester, matchClients, matchProducts, nameInText, namedAlternatives, normalize, relatedProducts, sameClient, searchClients } from './matching.js';
+import { clientPickLabel, exactClients, isTester, lineWantsTester, matchClients, matchProducts, nameInText, namedAlternatives, normalize, relatedProducts, sameClient, searchClients, testerQuery } from './matching.js';
 
 /** `draft` is the draft as preparation read it, for example without a delivery address equal to the billing one. */
 export type Preparation = { ready: false; issues: Issue[]; draft: OrderDraft; clientId?: string } | { ready: true; order: PreparedOrder; draft: OrderDraft };
@@ -61,8 +61,10 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
       issues.push({ field, message: 'Delivery belongs in shippingPrice, not merchandise lines' });
       continue;
     }
-    const accepted = pick && (!isTester(pick) || asksForTester(line.query) || nameInText(line.query, pick.code) || normalize(pick.code) === normalize(line.query) || normalize(pick.name) === normalize(line.query)) ? pick : undefined;
-    const matches = accepted || line.productId !== undefined ? [] : matchProducts(line.query, catalogue);
+    const wantsTester = lineWantsTester(line);
+    const lookup = testerQuery(line);
+    const accepted = pick && (wantsTester ? isTester(pick) : (!isTester(pick) || nameInText(line.query, pick.code) || normalize(pick.code) === normalize(line.query) || normalize(pick.name) === normalize(line.query))) ? pick : undefined;
+    const matches = accepted || (line.productId !== undefined && !wantsTester) ? [] : matchProducts(lookup, catalogue);
     const chosen = accepted ?? (matches.length === 1 ? matches[0] : undefined);
     if (chosen) {
       line.productId = chosen.id;
@@ -81,8 +83,8 @@ export async function prepareOrder(input: OrderDraft, config: AppConfig, connect
       selected.push({ product: chosen, quantity: line.quantity, netPrice, index });
       continue;
     }
-    const named = matches.length ? [] : namedAlternatives(line.query, catalogue);
-    const candidates = matches.length ? matches : named.length ? named : relatedProducts(line.query, catalogue);
+    const named = matches.length ? [] : namedAlternatives(lookup, catalogue);
+    const candidates = matches.length ? matches : named.length ? named : relatedProducts(lookup, catalogue);
     const message = matches.length || named.length ? 'Choose the exact product or variant' : candidates.length ? 'This combination is not in the catalogue. Related products that match part of the request are listed; none of them is the requested item.' : 'No matching product; clarify the name and size';
     issues.push({ field, message, candidates: candidates.map(p => ({ id: p.id, label: p.name })) });
   }

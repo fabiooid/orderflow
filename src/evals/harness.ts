@@ -43,7 +43,7 @@ export function scriptedTurns(drafts: ScriptedAct[]): Converse {
  * Replays turns as group messages through the real controller and engine, against the given (fictional) connector.
  * Without `converse` the configured model answers; nothing is saved and no Telegram message is sent.
  */
-export async function runConversation(config: AppConfig, connector: OrderConnector, turns: ConversationTurn[], options: { converse?: Converse; log?: (line: string) => void; onTurn?: (index: number, outcome: ConversationOutcome) => void } = {}): Promise<ConversationOutcome> {
+export async function runConversation(config: AppConfig, connector: OrderConnector, turns: ConversationTurn[], options: { converse?: Converse; log?: (line: string) => void; onTurn?: (index: number, outcome: ConversationOutcome) => void; extraTurns?: (index: number, outcome: ConversationOutcome) => ConversationTurn[] | void } = {}): Promise<ConversationOutcome> {
   installTelegramChannel();
   // As the group is configured: every message is for the bot.
   config = { ...config, channel: { ...config.channel, respondToAllMessages: true } };
@@ -66,7 +66,9 @@ export async function runConversation(config: AppConfig, connector: OrderConnect
         return { text: [event.text.trim(), reading ? `${label}\n${reading}` : ''].filter(Boolean).join('\n\n') };
       });
     const chat = { id: Number(config.channel.groupId), type: 'supergroup' };
-    for (const [index, turn] of turns.entries()) {
+    const queue = [...turns];
+    for (let index = 0; index < queue.length; index++) {
+      const turn = queue[index]!;
       const id = index + 1;
       let update: { update_id: number };
       if ('press' in turn) {
@@ -86,7 +88,10 @@ export async function runConversation(config: AppConfig, connector: OrderConnect
       const started = performance.now();
       await engine.traceTurn(id, () => controller.handle(update));
       options.log?.(`> ${'press' in turn ? `[${turn.press}]` : turn.text}\n  ${replies.slice(before).join('\n').replace(/\n/g, '\n  ')}\n  (${Math.round(performance.now() - started)} ms)`);
-      options.onTurn?.(index, { replies: replies.slice(), open: await store.activeRequest() });
+      const outcome = { replies: replies.slice(), open: await store.activeRequest() };
+      options.onTurn?.(index, outcome);
+      const extra = options.extraTurns?.(index, outcome);
+      if (extra?.length) queue.splice(index + 1, 0, ...extra);
     }
     return { replies, open: await store.activeRequest() };
   } finally {

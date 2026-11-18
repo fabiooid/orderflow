@@ -94,7 +94,7 @@ export function forAgent(result: DraftResult) {
       ? { matched: false as const, query: result.draft.clientQuery }
       : undefined;
   const lines = result.kind === 'order'
-    ? result.draft.lines.map(line => ({ query: line.query, quantity: line.quantity, matched: Boolean(line.productId) }))
+    ? result.draft.lines.map(line => ({ query: line.query, quantity: line.quantity, matched: Boolean(line.productId), ...(line.tester ? { tester: true as const } : {}) }))
     : undefined;
   return {
     status: result.status,
