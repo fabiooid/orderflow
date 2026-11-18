@@ -130,7 +130,7 @@ it('reads a labelled customer follow-up and an ask to create an order, without t
   expect(labelledCustomerQuery('ok mostrami l\'ordine')).toBeUndefined();
   expect(operatorAskedToCreateOrder('ok crea ordine')).toBe(true);
   expect(operatorAskedToCreateOrder('crea ordine con 20')).toBe(true);
-  expect(operatorAskedToCreateOrder('add 20 to a new order')).toBe(false);
+  expect(operatorAskedToCreateOrder('add 20 to a new order')).toBe(true);
   expect(operatorAskedToCreateOrder('crea cliente Marco Esempio')).toBe(false);
   expect(isFileConsent('ok prepara questo file')).toBe(true);
   expect(operatorAskedToCreateOrder('ok prepara questo file')).toBe(false);

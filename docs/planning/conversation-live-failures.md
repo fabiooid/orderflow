@@ -31,3 +31,7 @@ Do not treat the missing MATCHER_ON key as the only blocker. These are MATCHER_O
 5. **Do not weaken.** Keep Maple unmatched, saponi must not list Linen candle, size question stays, shipping unknown ≠ 0, notes explicit, operator-only save. Voice-note 8 stays allowed because the voice stated it.
 
 Preserve merge/resolver/safe-id behaviour from `1994d58`.
+
+## After implementation (this turn)
+
+Deterministic: `npm run check` pass, `npm test` pass, `npm run boundaries` pass. Live MATCHER_OFF acceptance **7/7**. Live conversations on the first implementation head **37/39**: the original nine failures passed (including short-follow-up). Remaining: `whole-catalogue` (model replied “Ecco i prodotti disponibili:” with no list — truncated copy, not identity) and `new-order-starts-empty` (same skip-prepare-order as short-follow-up, English “add 20 to a new order”). Follow-up: a unique word/related product search plus a stated quantity now opens that line when they ask to create an order. Catalogue dumps still do not invent lines. `whole-catalogue` stays a live listing obligation; do not weaken it.

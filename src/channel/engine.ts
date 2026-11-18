@@ -1,4 +1,4 @@
-import { confirmedChoices } from '../matching/resolver.js';
+import { confirmedChoices, type PendingQuestion, type SearchEvidence } from '../matching/resolver.js';
 import { tracingContext, traceChannelTurn } from '../assistant/execution-trace.js';
 import { z } from 'zod';
 import { Mastra } from '@mastra/core';
@@ -24,8 +24,7 @@ import { documentTemplates } from './order-forms.js';
 import { createDocumentWorkflow, workflowTemplatePages } from '../documents/workflow.js';
 import { createVisionDocumentProvider } from '../documents/reader.js';
 import { omitMedia } from '../assistant/omit-media.js';
-import type { PendingQuestion } from '../matching/resolver.js';
-import { labelledCustomerQuery, operatorAskedToCreateOrder } from '../assistant/intent.js';
+import { labelledCustomerQuery, operatorAskedToCreateOrder, statedLineQuantity } from '../assistant/intent.js';
 
 function pendingFromIssues(issues: Issue[] | undefined, revision: number): PendingQuestion | undefined {
   const client = issues?.find(issue => issue.field === 'client' && issue.candidates?.length);
@@ -97,6 +96,7 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
     if (!await memory.getThreadById({threadId:shared.thread})) await memory.createThread({threadId:shared.thread,resourceId:shared.resource,title: options.threadTitle ?? 'OrderFlow conversation'});
   })().catch(error => { sharedThread = undefined; throw error; });
 
+  const lastProductSearchBySender = new Map<string, SearchEvidence>();
   const reply = replySchema(config.locale, config.currency);
   const converse: Converse = options.converse ?? (async (prompt, _act, requestContext) => {
     await ensureSharedThread();
@@ -164,9 +164,13 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
     const turnState = turnOf(requestContext);
     const openKind = request ? kindOf(request) : undefined;
     const clientSearch = [...(turnState?.searchEvidence ?? [])].reverse().find(item => item.kind === 'client');
+    const productSearch = [...(turnState?.searchEvidence ?? [])].reverse().find(item => item.kind === 'product');
+    const lastProduct = productSearch ?? lastProductSearchBySender.get(input.senderId);
     const labelled = labelledCustomerQuery(input.operatorText);
     const askedOrder = operatorAskedToCreateOrder(input.operatorText);
+    const quantity = statedLineQuantity(input.operatorText);
     const customerDraft = outcome.result?.kind === 'customer' ? outcome.result.draft : openKind === 'customer' ? request?.draft : undefined;
+    if (productSearch?.ids.length) lastProductSearchBySender.set(input.senderId, productSearch);
     if (!outcome.refused && askedOrder && outcome.result?.kind !== 'order' && (openKind === 'customer' || outcome.result?.kind === 'customer')) {
       await calls.order(draftSchema.parse({
         clientQuery: customerDraft?.newClient?.name ?? customerDraft?.clientQuery ?? '',
@@ -178,6 +182,12 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
       await calls.order(draftSchema.parse({}), requestContext);
     } else if (!outcome.refused && !outcome.result && (clientSearch || labelled)) {
       await calls.order(draftSchema.parse({ clientQuery: clientSearch?.query ?? labelled ?? '' }), requestContext);
+    } else if (!outcome.refused && !outcome.result && !request && askedOrder && lastProduct?.ids.length === 1 && quantity) {
+      const products = await connector.listProducts().catch(() => []);
+      const product = products.find(item => item.id === lastProduct.ids[0]);
+      await calls.order(draftSchema.parse({
+        lines: [{ query: product?.name ?? lastProduct.query, quantity }],
+      }), requestContext);
     }
     const { result } = outcome;
     if (!result) return { text: reply, reply, locale, ...(outcome.refused ? { blocked: true } : {}) };

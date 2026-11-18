@@ -49,7 +49,13 @@ export function operatorAskedToCreateCustomer(operatorWords: string) {
 
 /** True when this message asks to create or add to an order, not merely to prepare a file. */
 export function operatorAskedToCreateOrder(text: string) {
-  return /\b(?:crea(?:re)?(?:\s+un)?\s+ordine|create(?:\s+an?)?\s+order)\b/i.test(text);
+  return /\b(?:crea(?:re)?(?:\s+un)?(?:\s+nuovo)?\s+ordine|create(?:\s+an?)?(?:\s+new)?\s+order|nuovo ordine|new order)\b/i.test(text);
+}
+
+/** A count the operator stated in this message, when they are adding it to an order. */
+export function statedLineQuantity(text: string) {
+  const value = Number(/\b(\d+)\b/.exec(text)?.[1]);
+  return Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
 /** Customer name the operator labelled in this message (`cliente X` / `customer X`). */

@@ -17,7 +17,7 @@ import { confirmedChoices, createIdentityResolver, type SelectMany } from '../sr
 import { matchingConfigSchema } from '../src/matching/config.js';
 import type { SelectionResult } from '../src/matching/types.js';
 import { runConversation, scriptedTurns } from '../src/evals/harness.js';
-import { maplePine } from '../src/evals/conversations.js';
+import { evalConnector, maplePine } from '../src/evals/conversations.js';
 import { complete, config, draft, prepared } from './helpers.js';
 
 const onConfig = matchingConfigSchema.parse({ mode: 'on' });
@@ -500,6 +500,30 @@ it('applies a labelled customer follow-up when the model skips prepare-order', a
   expect(outcome.open?.draft.clientId).toBe('202');
   expect(outcome.open?.draft.newClient).toBeUndefined();
   expect(outcome.open?.draft.lines.some(l => l.productId === '101' || /pebble/i.test(l.query))).toBe(true);
+});
+
+it('opens an order from a unique catalogue search when they ask to add a quantity and the model skips prepare-order', async () => {
+  const storage = new LibSQLStore({ id: `qty-skip-${Math.random().toString(36).slice(2, 8)}`, url: ':memory:' });
+  try {
+    const connector = evalConnector();
+    const { agent } = createOrderAgent(config(), connector, storage);
+    const tools = await agent.listTools();
+    const outcome = await runConversation(config(), connector, [
+      { text: 'che candele abbiamo?' },
+      { text: 'crea ordine con 20' },
+    ], {
+      converse: async (prompt, _act, requestContext) => {
+        if (!prompt.openRequest && /candele/i.test(prompt.operatorWords)) {
+          await tools.searchProducts!.execute!({ query: 'candele' }, { requestContext } as never);
+          return { reply: 'Linen candle 200 g — DEMO-B — 20 EUR net', locale: 'it' };
+        }
+        return { reply: 'ok', locale: 'it' };
+      },
+    });
+    expect(outcome.open?.draft.lines.some(l => (l.productId === '103' || /linen candle/i.test(l.query)) && l.quantity === 20)).toBe(true);
+    expect(outcome.open?.draft.clientId).toBeUndefined();
+    expect(outcome.replies.at(-1)).toMatch(/Bozza ordine|Anteprima ordine/);
+  } finally { await storage.close(); }
 });
 
 it('opens a draft from a client search when the model never calls prepare-order', async () => {
