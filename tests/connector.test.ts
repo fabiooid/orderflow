@@ -86,6 +86,20 @@ describe('restricted SDK adapter', () => {
     expect((await connector.listProducts()).map(p => p.id)).toEqual(['1', '2', '3', '4', '5', '6']);
     expect(ports.products.listProducts).toHaveBeenCalledTimes(6);
   });
+  it('saves a tester catalogue identity, not the printed sale SKU', async () => {
+    const order = await prepared();
+    order.lines.unshift({
+      productId: '808', code: 'SAMPLE-T', name: 'TESTER Pebble wash',
+      description: 'Tester bottle of the pebble wash, not the sale SKU.',
+      quantity: 1, netPrice: 4, discountPercent: 0, vatId: 1, vatRate: 22, shipping: false,
+    });
+    expect(toFicOrder(order).items_list?.[0]).toMatchObject({
+      product_id: 808, code: 'SAMPLE-T', name: 'TESTER Pebble wash',
+      description: 'Tester bottle of the pebble wash, not the sale SKU.',
+      qty: 1, net_price: 4,
+    });
+    expect(toFicOrder(order).items_list?.[0]?.product_id).not.toBe(101);
+  });
   it('sends the catalogue description on each invoicing line', async () => {
     const order = await prepared();
     order.lines[0]!.description = 'Fictional pebble-scented wash in a 250 ml bottle.';

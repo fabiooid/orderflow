@@ -47,6 +47,8 @@ export const draftSchema = z.object({
     productId: z.string().min(1).optional(),
     quantity: z.number().finite().positive().max(100000).optional(),
     netPrice: z.number().finite().min(0).max(1000000).optional(),
+    /** Tester/sample request. Absent on drafts stored before this field existed. */
+    tester: z.boolean().optional(),
     documentPrice: z.object({
       amount: z.number().finite().min(0).max(1000000),
       basis: z.enum(['net', 'gross', 'unclear']),

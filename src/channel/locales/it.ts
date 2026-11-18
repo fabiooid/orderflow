@@ -112,6 +112,7 @@ export const it = {
   totalVat: 'IVA',
   totalGross: 'Totale',
   lineDiscount: 'sconto',
+  lineTester: 'tester',
   toCheck: '⚠️ Da verificare',
   priceNow: '{name}: ora {now}, ordine precedente {before} (#{number}, {date})',
   catalogueIncrease: '{count} righe seguono il listino attuale; i prezzi pagati su {orders} erano inferiori',

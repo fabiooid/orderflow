@@ -24,6 +24,21 @@ export function asksForTester(query: string) {
   return normalize(query).split(' ').some(token => token.startsWith('tester'));
 }
 
+const DENIES_TESTER = /\b(non|no|not|senza|without)\s+(?:a\s+)?tester/i;
+
+/** A tester mark, or the word in the query, unless the operator excluded testers. */
+export function lineWantsTester(line: { query: string; tester?: boolean }) {
+  if (DENIES_TESTER.test(line.query)) return false;
+  return line.tester === true || asksForTester(line.query);
+}
+
+/** Query used to resolve a line: keep a tester fact even when the printed sale code is the only wording. */
+export function testerQuery(line: { query: string; tester?: boolean }) {
+  const query = line.query.trim();
+  if (!lineWantsTester(line) || asksForTester(query)) return query;
+  return `${query} tester`;
+}
+
 // Dropping a final vowel lets Italian singular and plural match (candele/candela, saponi/sapone).
 function tokens(query: string) {
   return normalize(query).split(' ').filter(Boolean).map(t => t.length > 4 ? t.replace(/[aeio]$/, '') : t);
@@ -60,13 +75,47 @@ export function productCodesIn(query: string, products: Product[]): Product[] {
   });
 }
 
+function scoredAgainst(query: string, pool: Product[]) {
+  const words = tokens(query);
+  if (!words.length) return [];
+  return pool
+    .map(product => ({ product, score: words.filter(token => contains(productText(product), token)).length }))
+    .filter(entry => entry.score > 0)
+    .sort((a, b) => b.score - a.score);
+}
+
+/**
+ * Catalogue tester records that correspond to this request. Sale SKUs printed on a form locate the
+ * ordinary product; testers are matching tester records by catalogue name text, not a code convention.
+ * Several equally good testers stay ambiguous; none means no tester, not the sale SKU.
+ */
+export function correspondingTesters(query: string, products: Product[]): Product[] {
+  const testers = products.filter(isTester);
+  if (!testers.length) return [];
+  const q = normalize(query);
+  const exact = testers.filter(p => normalize(p.code) === q || normalize(p.name) === q);
+  if (exact.length) return exact;
+  const testerCodes = productCodesIn(query, testers);
+  if (testerCodes.length) return testerCodes;
+  const sales = productCodesIn(query, products.filter(p => !isTester(p)));
+  const identity = sales.length
+    ? sales.map(sale => `${sale.name} ${sale.description}`).join(' ')
+    : tokens(query).filter(token => !token.startsWith('tester')).join(' ');
+  const hits = scoredAgainst(identity, testers);
+  if (!hits.length) return [];
+  const best = hits[0]!.score;
+  return hits.filter(entry => entry.score === best).map(entry => entry.product);
+}
+
 /** Products containing every word of the query, or an exact name or unique catalogue code. */
 export function matchProducts(query: string, products: Product[]): Product[] {
   const q = normalize(query);
+  const wantsTester = asksForTester(query);
   const exact = products.filter(p => normalize(p.code) === q || normalize(p.name) === q);
-  if (exact.length) return exact;
+  if (exact.length && (!wantsTester || exact.every(isTester))) return exact;
   const codes = productCodesIn(query, products);
-  if (codes.length === 1) return codes;
+  if (codes.length === 1 && (!wantsTester || isTester(codes[0]!))) return codes;
+  if (wantsTester) return correspondingTesters(query, products);
   const words = tokens(query);
   if (!words.length) return [];
   return eligible(query, products).filter(p => {
@@ -89,10 +138,12 @@ function scoredHits(query: string, products: Product[]) {
 /** Products sharing any word with the query, best first. Loose on purpose: the agent decides which one was meant. */
 export function searchCatalogue(query: string, products: Product[]): Product[] {
   if (!normalize(query)) return [];
+  const wantsTester = asksForTester(query);
   const exact = products.filter(p => normalize(p.code) === normalize(query) || normalize(p.name) === normalize(query));
-  if (exact.length) return exact;
+  if (exact.length && (!wantsTester || exact.every(isTester))) return exact;
   const codes = productCodesIn(query, products);
-  if (codes.length === 1) return codes;
+  if (codes.length === 1 && (!wantsTester || isTester(codes[0]!))) return codes;
+  if (wantsTester) return correspondingTesters(query, products).slice(0, 15);
   return scoredHits(query, products).slice(0, 15).map(entry => entry.product);
 }
 

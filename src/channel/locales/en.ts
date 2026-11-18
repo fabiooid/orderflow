@@ -112,6 +112,7 @@ export const en = {
   totalVat: 'VAT',
   totalGross: 'Total',
   lineDiscount: 'discount',
+  lineTester: 'tester',
   toCheck: '⚠️ To check',
   priceNow: '{name}: now {now}, previous order {before} (#{number}, {date})',
   catalogueIncrease: '{count} lines follow the current catalogue; last paid on {orders} were lower',

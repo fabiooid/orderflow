@@ -1,5 +1,6 @@
 import type { Client, Issue, NewCustomer, OrderDraft, PreparedOrder, Product, Totals } from '../domain/types.js';
 import type { CatalogueIncrease, Discrepancy } from '../domain/history.js';
+import { asksForTester, isTester } from '../domain/matching.js';
 import { copy, type CopyKey, type CopyVars } from './locales/index.js';
 
 /** Name and net price from the live catalogue, looked up by the product id already on the draft. */
@@ -81,7 +82,8 @@ export function orderDraft(draft: OrderDraft, issues: Issue[], it: boolean, clie
     const price = amount === undefined ? '' : ` — ${money(amount, it, currency)}`;
     // Original form text stays only when it still adds something the catalogue name does not already say.
     const asWritten = product && !sameLabel(line.query, product.name) ? ` (${line.query})` : '';
-    lines.push(`${quantity} × ${name}${asWritten}${price}${unsure ? ' ❓' : ''}`);
+    const testerMark = line.tester && !asksForTester(name) ? ` · ${say(it, 'lineTester')}` : '';
+    lines.push(`${quantity} × ${name}${asWritten}${testerMark}${price}${unsure ? ' ❓' : ''}`);
   }
   lines.push('', `🚚 ${say(it, 'draftDelivery')}: ${draft.shippingPrice === undefined ? '❓' : draft.shippingPrice === 0 ? say(it, 'draftNone') : money(draft.shippingPrice, it, currency)}`);
   if (draft.delivery) lines.push(`📦 ${say(it, 'draftShipTo')}: ${draft.delivery.address}${draft.delivery.country ? `, ${draft.delivery.country}` : ' ❓'}`);
@@ -166,7 +168,9 @@ export function orderPreview(
   lines.push('', `📍 ${place(order.client)}`, '', say(it, 'draftProducts'));
   for (const line of [...goods, ...shipping]) {
     const discount = line.discountPercent > 0 ? ` — ${line.discountPercent}% ${say(it, 'lineDiscount')}` : '';
-    lines.push(`${line.quantity} × ${line.name} — ${money(line.netPrice, it, currency)}${discount}`);
+    const testerMark = isTester({ id: line.productId, code: line.code, name: line.name, description: line.description, netPrice: 0 }) && !asksForTester(line.name)
+      ? ` · ${say(it, 'lineTester')}` : '';
+    lines.push(`${line.quantity} × ${line.name}${testerMark} — ${money(line.netPrice, it, currency)}${discount}`);
   }
   lines.push('', say(it, 'totalsTitle'), `${say(it, 'totalNet')} ${money(totals.net, it, currency)}`, `${say(it, 'totalVat')} ${rates.join(', ')} ${money(totals.vat, it, currency)}`, `${say(it, 'totalGross')} ${money(totals.gross, it, currency)}`);
   if (order.notes.trim()) lines.push('', say(it, 'draftNotes'), order.notes.trim());

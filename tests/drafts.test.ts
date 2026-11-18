@@ -33,6 +33,22 @@ it('reports a ready order with its totals, or exactly what is still needed', asy
   expect(JSON.stringify(forAgent(needs))).not.toContain('101');
 });
 
+it('rereads a tester mark so a later turn cannot treat it as the sale SKU', async () => {
+  const api = createDraftApi(config(), new DemoConnector(), off);
+  const needs = await api.order(draftSchema.parse({
+    clientQuery: 'Example Studio',
+    lines: [
+      { query: 'SOAP250ML Pebble hand wash 250 ml', quantity: 2 },
+      { query: 'SOAP250ML Pebble hand wash 250 ml tester', quantity: 1, tester: true },
+    ],
+  }), context, '2026-01-15');
+  expect(needs.status).toBe('needs');
+  expect(forAgent(needs).lines).toEqual(expect.arrayContaining([
+    expect.objectContaining({ query: expect.stringMatching(/SOAP250ML/), quantity: 2, matched: false }),
+    expect.objectContaining({ query: expect.stringMatching(/tester/i), quantity: 1, tester: true, matched: false }),
+  ]));
+});
+
 it('shows an unmatched customer query so the agent cannot contradict the preview', async () => {
   const api = createDraftApi(config(), new DemoConnector(), off);
   const needs = await api.order(draftSchema.parse({
@@ -109,7 +125,7 @@ it('keeps this request\'s customer when a later draft only adds product lines', 
     const result = await calls.order(draftSchema.parse({
       lines: [
         { query: 'Hand cream 100 ml SKU-100', quantity: 2 },
-        { query: 'Room spray 250 ml SKU-250 tester', quantity: 1 },
+        { query: 'Room spray 250 ml SKU-250 tester', quantity: 1, tester: true },
       ],
     }), context);
     expect(result.status).toBe('needs');
@@ -120,7 +136,7 @@ it('keeps this request\'s customer when a later draft only adds product lines', 
         clientId: '201',
         lines: [
           expect.objectContaining({ query: 'Hand cream 100 ml SKU-100', quantity: 2 }),
-          expect.objectContaining({ query: 'Room spray 250 ml SKU-250 tester', quantity: 1 }),
+          expect.objectContaining({ query: 'Room spray 250 ml SKU-250 tester', quantity: 1, tester: true }),
         ],
       },
     });

@@ -163,14 +163,32 @@ describe('spreadsheet hints and extraction', () => {
     expect(text).not.toMatch(/Header:/);
     expect(text).toContain('CREAM100ML');
     expect(text).toMatch(/Qty:\s*2/);
-    expect(text).toContain('SAMPLE-T');
-    expect(text).toMatch(/tester:\s*1/i);
+    expect(text).toContain('SOAP250ML');
+    expect(text).toMatch(/SOAP250ML[^\n]*tester:\s*1/i);
+    expect(text).not.toMatch(/SAMPLE-T[^\n]*tester/i);
     expect(text).not.toMatch(/IT:\s*2/);
     expect(text.split('\n').some(line => /not a catalogue row/i.test(line) && !/^Letterhead/i.test(line))).toBe(false);
     const lines = productLinesFromReading(text);
     expect(lines).toHaveLength(8);
-    expect(lines.filter(line => /tester/i.test(line.query))).toEqual([expect.objectContaining({ query: expect.stringMatching(/SAMPLE-T/i), quantity: 1 })]);
+    expect(lines.filter(line => line.tester)).toEqual([expect.objectContaining({ query: expect.stringMatching(/SOAP250ML/i), quantity: 1, tester: true })]);
+    expect(lines.some(line => /SOAP250ML/i.test(line.query) && line.quantity === 2 && !line.tester)).toBe(true);
     expect(lines.some(line => /CREAM100ML/i.test(line.query) && line.quantity === 2)).toBe(true);
+  });
+});
+
+describe('labelled attachment lines', () => {
+  it('splits a sale quantity and a tester mark into two lines and keeps the tester count', () => {
+    const lines = productLinesFromReading([
+      'SKU-100 | Hand cream 100 ml | Qty: 2',
+      'SKU-250 | Room spray 250 ml | tester: 1',
+      'SOAP250ML | Pebble hand wash 250 ml | Qty: 2 | tester: 2',
+    ].join('\n'));
+    expect(lines).toEqual([
+      { query: 'SKU-100 Hand cream 100 ml', quantity: 2 },
+      { query: 'SKU-250 Room spray 250 ml tester', quantity: 1, tester: true },
+      { query: 'SOAP250ML Pebble hand wash 250 ml', quantity: 2 },
+      { query: 'SOAP250ML Pebble hand wash 250 ml tester', quantity: 2, tester: true },
+    ]);
   });
 });
 

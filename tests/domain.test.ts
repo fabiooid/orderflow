@@ -3,7 +3,7 @@ import { configSchema } from '../src/config/schema.js';
 import { draftSchema, preparedOrderSchema } from '../src/domain/types.js';
 import { DemoConnector } from '../src/connector/demo.js';
 import { prepareOrder } from '../src/domain/prepare.js';
-import { clientPickLabel, matchClients, matchProducts, relatedProducts, searchCatalogue, searchClients } from '../src/domain/matching.js';
+import { clientPickLabel, correspondingTesters, matchClients, matchProducts, relatedProducts, searchCatalogue, searchClients } from '../src/domain/matching.js';
 import { calculateLineTotals } from '../src/domain/totals.js';
 import { config, draft, harborSiblings, monasterySiblings, pharmacyTypeAccounts, prepared, sampleNameAccounts, willowmereStayAccounts } from './helpers.js';
 
@@ -26,6 +26,10 @@ describe('business configuration', () => {
   });
   it('rejects conflicting existing/new client selection', () => {
     expect(() => draftSchema.parse({ ...draft(), clientId: '10', newClient: new DemoConnector().clients[0] })).toThrow();
+  });
+  it('loads stored draft lines with or without a tester fact', () => {
+    expect(draftSchema.parse({ clientQuery: 'Example Studio', lines: [{ query: 'Pebble', quantity: 1 }] }).lines[0]?.tester).toBeUndefined();
+    expect(draftSchema.parse({ clientQuery: 'Example Studio', lines: [{ query: 'Pebble tester', quantity: 1, tester: true }] }).lines[0]?.tester).toBe(true);
   });
 });
 
@@ -75,6 +79,24 @@ describe('product matching', () => {
     const withTester = [...products, { id: '3', code: 'FAKE013T', name: 'TESTER Lunara Sapone Mani 250ml', description: '', netPrice: 5 }];
     expect(matchProducts('Sapone Mani Lunara', withTester).map(p => p.id)).toEqual(['2']);
     expect(matchProducts('tester sapone lunara', withTester).map(p => p.id)).toEqual(['3']);
+  });
+  it('resolves a tester mark on a printed sale SKU to the tester catalogue product, not the sale SKU', () => {
+    const catalogue = [
+      { id: '804', code: 'SOAP250ML', name: 'Pebble hand wash 250 ml', description: '', netPrice: 12 },
+      { id: '808', code: 'SAMPLE-T', name: 'TESTER Pebble wash', description: 'Tester bottle', netPrice: 4 },
+      { id: '809', code: 'SAMPLE-FREE', name: 'TESTER Grove cream', description: '', netPrice: 0 },
+    ];
+    expect(matchProducts('SOAP250ML Pebble hand wash 250 ml tester', catalogue).map(p => p.id)).toEqual(['808']);
+    expect(correspondingTesters('SOAP250ML tester', catalogue).map(p => p.id)).toEqual(['808']);
+    expect(matchProducts('DEMO-B Linen candle tester', catalogue)).toEqual([]);
+  });
+  it('asks when several testers correspond to the same sale identity', () => {
+    const catalogue = [
+      { id: '804', code: 'SOAP250ML', name: 'Pebble hand wash 250 ml', description: '', netPrice: 12 },
+      { id: '808', code: 'SAMPLE-T', name: 'TESTER Pebble wash 50 ml', description: '', netPrice: 4 },
+      { id: '810', code: 'SAMPLE-T2', name: 'TESTER Pebble wash 100 ml', description: '', netPrice: 4 },
+    ];
+    expect(matchProducts('SOAP250ML Pebble hand wash 250 ml tester', catalogue).map(p => p.id).sort()).toEqual(['808', '810']);
   });
   it('matches a unique catalogue code even when a spreadsheet line adds quantity labels', () => {
     const catalogue = [
@@ -336,6 +358,46 @@ describe('order preparation', () => {
     expect(issue?.message).toMatch(/not in the catalogue/i);
     expect(issue?.candidates?.map(c => c.label)).toEqual(expect.arrayContaining(['Fig shower gel 250 ml', 'Cedar hand soap 250 ml']));
     expect(result.draft.lines[0]?.productId).toBeUndefined();
+  });
+  it('prepares a tester mark as the tester catalogue product at that product’s own price', async () => {
+    const connector = new DemoConnector();
+    connector.products.push(
+      { id: '804', code: 'SOAP250ML', name: 'Pebble hand wash 250 ml', description: '', netPrice: 12 },
+      { id: '808', code: 'SAMPLE-T', name: 'TESTER Pebble wash', description: 'Tester bottle of the pebble wash, not the sale SKU.', netPrice: 4 },
+      { id: '809', code: 'SAMPLE-FREE', name: 'TESTER Grove cream', description: '', netPrice: 0 },
+    );
+    const saleAndTester = await prepareOrder({
+      ...draft(),
+      lines: [
+        { query: 'SOAP250ML Pebble hand wash 250 ml', quantity: 2 },
+        { query: 'SOAP250ML Pebble hand wash 250 ml tester', quantity: 1, tester: true },
+      ],
+    }, config(), connector, '2026-01-15');
+    expect(saleAndTester.ready).toBe(true);
+    if (!saleAndTester.ready) return;
+    expect(saleAndTester.order.lines.filter(l => !l.shipping).map(l => ({ id: l.productId, code: l.code, name: l.name, quantity: l.quantity, netPrice: l.netPrice }))).toEqual([
+      { id: '804', code: 'SOAP250ML', name: 'Pebble hand wash 250 ml', quantity: 2, netPrice: 12 },
+      { id: '808', code: 'SAMPLE-T', name: 'TESTER Pebble wash', quantity: 1, netPrice: 4 },
+    ]);
+    expect(saleAndTester.order.lines.find(l => l.productId === '808')?.description).toBe('Tester bottle of the pebble wash, not the sale SKU.');
+    const forcedSale = await prepareOrder({
+      ...draft(),
+      lines: [{ query: 'SOAP250ML tester', productId: '804', quantity: 1, tester: true }],
+    }, config(), connector, '2026-01-15');
+    expect(forcedSale.ready && forcedSale.order.lines[0]?.productId).toBe('808');
+    const free = await prepareOrder({
+      ...draft(),
+      lines: [{ query: 'Grove cream tester', quantity: 1, tester: true }],
+    }, config(), connector, '2026-01-15');
+    expect(free.ready && free.order.lines[0]).toMatchObject({ productId: '809', netPrice: 0, quantity: 1 });
+    const missing = await prepareOrder({
+      ...draft(),
+      lines: [{ query: 'DEMO-B Linen candle tester', quantity: 1, tester: true }],
+    }, config(), connector, '2026-01-15');
+    expect(missing.ready).toBe(false);
+    if (missing.ready) return;
+    expect(missing.draft.lines[0]?.productId).toBeUndefined();
+    expect(missing.issues.some(i => i.field === 'lines.0')).toBe(true);
   });
   it('accepts the agent’s product pick for a loose description, but not an unasked tester', async () => {
     const connector = new DemoConnector();
