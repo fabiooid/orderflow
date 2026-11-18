@@ -24,6 +24,7 @@ const scriptedIds = [
   'spreadsheet-letterhead-is-not-customer',
   'spreadsheet-header-names-customer',
   'new-file-does-not-reuse-previous-chat-customer',
+  'new-order-does-not-guess-customer-or-shipping',
 ];
 
 function asOrderDraft(act: ScriptedAct | undefined): OrderDraft {
@@ -160,19 +161,23 @@ it.each(['apply-clear-note-on-ready-draft', 'apply-clear-quantity-on-ready-draft
 );
 
 /**
- * Scripted stand-in for the model. If the don't-guess customer rules are present, a later unnamed
- * file leaves the customer blank and asks who it is. If they are missing, it offers the earlier
- * chat's customer, matching the live bug this case guards.
+ * Scripted stand-in for the model. If the don't-guess customer and shipping rules are present, a
+ * later unnamed file or order leaves those fields blank and lets the preview speak. If they are
+ * missing, it offers the earlier chat's customer and asks to confirm a guessed delivery price.
  */
 function previousChatCustomerConverse(scenario: (typeof conversationCases)[number]): Converse {
   const drafts = scenario.scripted!;
   const prompt = systemPrompt(config().invoicing.label);
   const clientQuery = orderDraftInput.shape.clientQuery.description ?? '';
+  const shipping = orderDraftInput.shape.shippingPrice.description ?? '';
   const reply = replySchema(config().locale, config().currency).shape.reply.description ?? '';
-  const followsRule = /leave the customer blank and ask who it is/.test(prompt)
-    && /Do not offer, confirm, use or keep a customer from earlier messages/.test(prompt)
+  const followsRule = /leave the customer blank/.test(prompt)
+    && /Do not offer, search for, confirm, use or keep a customer from earlier messages/.test(prompt)
+    && /draft already shows a blank client/.test(prompt)
     && /Empty when this request did not name a customer/.test(clientQuery)
-    && /If customer.status is missing, ask who the customer is/.test(reply);
+    && /Do not send a list price, last paid, or an earlier-chat amount/.test(shipping)
+    && /draft already shows a blank client/.test(reply)
+    && /do not ask them to confirm shipping/.test(reply);
   let turn = 0;
   return async (_prompt, act) => {
     const next = drafts[turn++];
@@ -183,24 +188,30 @@ function previousChatCustomerConverse(scenario: (typeof conversationCases)[numbe
     if (turn === drafts.length) {
       if (followsRule) {
         await act.order(asOrderDraft(next));
-        return { reply: 'Who is the customer?', locale: 'en' };
+        return { reply: '', locale: 'en' };
       }
-      await act.order(draftSchema.parse({ ...asOrderDraft(next), clientQuery: 'Example Studio' }));
-      return { reply: 'Confirm Example Studio from earlier?', locale: 'en' };
+      await act.order(draftSchema.parse({ ...asOrderDraft(next), clientQuery: 'Example Studio', shippingPrice: 8 }));
+      return { reply: 'Who is the customer? Confirm Example Studio from earlier, and delivery 8.00 or the list price?', locale: 'en' };
     }
     if (next) await act.order(asOrderDraft(next));
     return { reply: '', locale: 'it' };
   };
 }
 
-it('does not offer a previous-chat customer on a new unnamed file request', async () => {
-  const scenario = conversationCases.find(c => c.id === 'new-file-does-not-reuse-previous-chat-customer');
-  expect(scenario?.scripted).toHaveLength(3);
-  const outcome = await runConversation(config(), evalConnector(), scenario!.turns, { converse: previousChatCustomerConverse(scenario!) });
-  expect(scenario!.check(outcome)).toEqual([]);
-  expect(outcome.replies.at(-1)).toMatch(/Who is the customer\?/);
-  expect(outcome.replies.at(-1)).not.toMatch(/Example Studio/);
-});
+it.each(['new-file-does-not-reuse-previous-chat-customer', 'new-order-does-not-guess-customer-or-shipping'] as const)(
+  'does not offer a previous-chat customer or shipping on %s',
+  async id => {
+    const scenario = conversationCases.find(c => c.id === id);
+    expect(scenario?.scripted).toHaveLength(3);
+    const outcome = await runConversation(config(), evalConnector(), scenario!.turns, { converse: previousChatCustomerConverse(scenario!) });
+    expect(scenario!.check(outcome)).toEqual([]);
+    expect(outcome.replies.at(-1)).not.toMatch(/Who is the customer\?/);
+    expect(outcome.replies.at(-1)).not.toMatch(/Example Studio/);
+    expect(outcome.replies.at(-1)).not.toMatch(/list price/i);
+    expect(outcome.open?.draft.shippingPrice).toBeUndefined();
+    expect(outcome.open?.issues?.some(i => i.field === 'client' && i.candidates?.length)).toBeFalsy();
+  },
+);
 
 it('still saves with confirm-and-save after a clear note is applied to a ready draft', async () => {
   const c = config();

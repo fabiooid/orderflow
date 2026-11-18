@@ -58,7 +58,7 @@ it('rereads a tester mark so a later turn cannot treat it as the sale SKU', asyn
   ]));
 });
 
-it('tells the agent to ask who the customer is when the draft has none', async () => {
+it('tells the agent not to ask about a blank customer or shipping the draft already shows', async () => {
   const api = createDraftApi(config(), new DemoConnector(), off);
   const spoken = 'Yes, prepare an order from this.';
   const needs = await api.order(draftSchema.parse({
@@ -67,9 +67,17 @@ it('tells the agent to ask who the customer is when the draft has none', async (
   expect(needs.status).toBe('needs');
   expect(forAgent(needs).customer).toMatchObject({
     status: 'missing',
-    action: expect.stringContaining('Ask who the customer is'),
+    action: expect.stringContaining('The draft already shows a blank customer'),
   });
-  expect(forAgent(needs).customer?.action).toContain('Do not offer a name from earlier messages');
+  expect(forAgent(needs).customer?.action).toContain('Do not ask who it is');
+  expect(forAgent(needs).customer?.action).toContain('Do not offer, search for, or confirm a name from earlier messages');
+  expect(forAgent(needs).shipping).toMatchObject({
+    status: 'unknown',
+    action: expect.stringContaining('The draft already shows blank delivery'),
+  });
+  expect(forAgent(needs).shipping?.action).toContain('Do not ask the operator to confirm a charge');
+  expect(forAgent(needs).note).toContain('do not ask the operator to confirm those blanks');
+  expect(JSON.stringify(forAgent(needs))).not.toMatch(/catalogue default/i);
 });
 
 it('shows an unmatched customer query so the agent cannot contradict the preview', async () => {
@@ -235,3 +243,27 @@ it('uses Mastra resource memory for shared confirmed aliases without storing pri
     expect(() => sharedKnowledgeSchema.parse({ ...confirmed, prices: { item: 1 } })).toThrow();
   } finally { await storage.close(); }
 }, 20000);
+
+it('does not offer a previous-chat client search as a choice when this request did not name a customer', async () => {
+  const storage = new LibSQLStore({ id: 'no-guessed-client-button', url: ':memory:' });
+  try {
+    const { agent, calls } = createOrderAgent(config(), new DemoConnector(), storage);
+    const tools = await agent.listTools();
+    const context = new RequestContext();
+    const spoken = 'Yes, prepare an order from this.';
+    const outcome = startTurn(context, { evidence: spoken, operatorWords: spoken, senderId: '5', knownPhrases: [] });
+    await tools.searchClients!.execute!({ query: 'Example Studio' }, { requestContext: context } as never);
+    const result = await calls.order(draftSchema.parse({
+      lines: [{ query: 'Hand cream 100 ml SKU-100', quantity: 2 }],
+    }), context);
+    expect(result.status).toBe('needs');
+    expect(outcome.result).toMatchObject({
+      kind: 'order',
+      draft: expect.objectContaining({ clientQuery: '', shippingPrice: undefined }),
+    });
+    expect(outcome.result && outcome.result.status === 'needs'
+      && outcome.result.issues.some(i => i.field === 'client' && i.candidates?.length)).toBe(false);
+    expect(forAgent(outcome.result!).customer).toMatchObject({ status: 'missing' });
+    expect(JSON.stringify(forAgent(outcome.result!))).not.toMatch(/Example Studio/);
+  } finally { await storage.close(); }
+});

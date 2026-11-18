@@ -88,3 +88,23 @@ export function labelledCustomerQuery(text: string) {
   const name = /^(?:cliente|customer)\s*[:\-]?\s+(.+)$/i.exec(text.trim())?.[1]?.trim();
   return name && name.length <= 80 ? name : undefined;
 }
+
+const folded = (value: string) => value.trim().toLowerCase();
+
+/** True when a client search is grounded in this message, not a previous-chat guess. */
+export function clientSearchNamedThisTurn(query: string, operatorWords: string, attachmentText = '') {
+  const q = query.trim();
+  if (!q) return false;
+  if (customerNamedInRequest(q, operatorWords, attachmentText)) return true;
+  const labelled = labelledCustomerQuery(operatorWords);
+  if (labelled) {
+    const a = folded(q), b = folded(labelled);
+    return a.includes(b) || b.includes(a);
+  }
+  const spoken = operatorWords.trim();
+  if (spoken.split(/\s+/).length <= 4 && spoken.length >= 3) {
+    const a = folded(q), b = folded(spoken);
+    return a.includes(b) || b.includes(a);
+  }
+  return false;
+}

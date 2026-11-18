@@ -19,6 +19,24 @@ it('requires an installed matcher when matching is enabled', () => {
   expect(() => createIdentityResolver(config(), new DemoConnector(), { config: on })).toThrow(/selectMany/);
 });
 
+it.each(['off', 'on'] as const)('in %s mode does not offer a previous-chat search as a customer choice on an unnamed request', async mode => {
+  const connector = new DemoConnector();
+  const select = vi.fn(successful);
+  const resolved = await resolver(connector, select, mode).resolve(
+    { ...draft(), clientQuery: '', clientId: undefined, lines: [{ query: 'Hand cream 100 ml SKU-100', quantity: 2 }] },
+    {
+      ...context,
+      operatorText: 'Yes, prepare an order from this.',
+      operatorWords: 'Yes, prepare an order from this.',
+      searchEvidence: [{ kind: 'client', query: 'Example Studio', ids: ['201'] }],
+    },
+  );
+  expect(resolved.draft.clientId).toBeUndefined();
+  expect(resolved.draft.clientQuery).toBe('');
+  expect(resolved.issues.find(i => i.field === 'client')?.candidates ?? []).toEqual([]);
+  expect(select.mock.calls.every(call => !(call[0] as { kind: string }[]).some(request => request.kind === 'client'))).toBe(true);
+});
+
 it('replaces model IDs with application-validated decisions and does not lock a matcher proposal', async () => {
   const input = { ...draft(), clientId: '202', lines: [{ query: 'small pebble wash', productId: '102', quantity: 3, netPrice: 9 }] };
   const resolved = await resolver().resolve(input, context);

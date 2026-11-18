@@ -99,6 +99,25 @@ const agentLead = (text: string) => {
 /** The live bug: asking to apply a clear instruction, keep unchanged shipping, or make other edits before save. */
 const askedToConfirmGivenInstruction = (text: string) =>
   /vuoi aggiungere|want (?:me )?to add|should I add|vuoi (?:applicare|cambiare)|want (?:me )?to (?:apply|change)|keep (?:the )?(?:existing )?(?:shipping|delivery)|mantenere (?:le )?spese|altre modifiche prima di salvare|other changes before (?:you )?save/i.test(agentLead(text));
+/** The live bug: asking to confirm a blank client or a guessed shipping amount the draft already shows as empty. */
+const askedToConfirmBlankCustomerOrShipping = (text: string) =>
+  /chi è il cliente|who is the (?:customer|client)|use this (?:client|customer)|confermi (?:le )?spese|confirm (?:the )?(?:delivery|shipping)|listino|list price|catalogue default|spese di consegna|delivery (?:charge|at|of)|keep (?:the )?(?:existing )?(?:shipping|delivery)/i.test(agentLead(text));
+/** A later unnamed file or order after an earlier chat had a different customer and a shipping amount. */
+const unnamedAfterEarlierChat: Check = o => {
+  const text = last(o);
+  const offered = o.open?.issues?.find(i => i.field === 'client')?.candidates?.map(c => c.label).join(', ') ?? '';
+  return [
+    ...expect(!!o.open, 'no open request'),
+    ...expect(!o.open?.draft.clientId && !o.open?.draft.newClient && !/example studio/i.test(o.open?.draft.clientQuery ?? ''),
+      `took a customer from an earlier request: ${o.open?.draft.newClient?.name ?? o.open?.draft.clientQuery ?? o.open?.draft.clientId}`),
+    ...expect(o.open?.draft.shippingPrice === undefined, `invented a delivery charge of ${o.open?.draft.shippingPrice}`),
+    ...expect(!o.open?.issues?.some(i => i.field === 'client' && i.candidates?.length),
+      `offered a guessed customer as a choice: ${offered}`),
+    ...expect(!/example studio/i.test(text), `asked to confirm or use a previous-chat customer: ${text.split('\n')[0]}`),
+    ...expect(!askedToConfirmBlankCustomerOrShipping(text), `asked to confirm a blank client or guessed shipping: ${agentLead(text).split('\n')[0]}`),
+    ...expect(previewHeading.test(text), 'the updated preview was not shown'),
+  ];
+};
 /** The printed note is only the instruction the operator asked for, in their language, with no recap of the draft. */
 const onlyRequestedNote = (expected: string): Check => o => {
   const notes = o.open?.draft.notes ?? '';
@@ -409,19 +428,30 @@ export const conversationCases: ConversationCase[] = [
       'cancel',
       draftSchema.parse({ lines: [{ query: 'Hand cream 100 ml SKU-100', quantity: 2 }] }),
     ],
-    check: all(neverGaveUp, o => {
-      const text = last(o);
-      const askedWho = /\?|\b(?:dimmi|indica|indicami|specifica|quale|tell me|which|specify|who)\b/i.test(text) || /🏪 ❓/.test(text);
-      return [
-        ...expect(!!o.open, 'no open request'),
-        ...expect(!o.open?.draft.clientId && !o.open?.draft.newClient && !/example studio/i.test(o.open?.draft.clientQuery ?? ''),
-          `took a customer from an earlier request: ${o.open?.draft.newClient?.name ?? o.open?.draft.clientQuery ?? o.open?.draft.clientId}`),
-        ...expect(!/northwind supplies/i.test(o.open?.draft.clientQuery ?? ''), `used letterhead as customer: ${o.open?.draft.clientQuery}`),
-        ...expect(!!o.open?.draft.lines.some(l => /SKU-100|hand cream/i.test(l.query) && l.quantity === 2), 'the filled cream line was lost'),
-        ...expect(!/example studio/i.test(text), `asked to confirm or use a previous-chat customer: ${text.split('\n')[0]}`),
-        ...expect(askedWho, 'did not ask who the customer is'),
-      ];
-    }),
+    check: all(neverGaveUp, unnamedAfterEarlierChat, o => [
+      ...expect(!/northwind supplies/i.test(o.open?.draft.clientQuery ?? ''), `used letterhead as customer: ${o.open?.draft.clientQuery}`),
+      ...expect(!!o.open?.draft.lines.some(l => /SKU-100|hand cream/i.test(l.query) && l.quantity === 2), 'the filled cream line was lost'),
+    ]),
+  },
+  {
+    id: 'new-order-does-not-guess-customer-or-shipping',
+    // Earlier English order named a customer and shipping; a later unnamed new order must stay blank.
+    turns: [
+      { text: 'Prepare an order for Example Studio: 2 Pebble hand wash 250 ml, delivery 8 euros' },
+      { text: 'cancel, never mind' },
+      { text: 'Prepare an order from this list: 3 Pebble hand wash 250 ml' },
+    ],
+    scripted: [
+      draftSchema.parse({
+        clientQuery: 'Example Studio',
+        lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }],
+        shippingPrice: 8,
+      }),
+      'cancel',
+      draftSchema.parse({ lines: [{ query: 'Pebble hand wash 250 ml', quantity: 3 }] }),
+    ],
+    check: all(neverGaveUp, unnamedAfterEarlierChat, o =>
+      expect(!!o.open?.draft.lines.some(l => /pebble/i.test(l.query) && l.quantity === 3), 'the new order lines were lost')),
   },
   {
     id: 'english-request',

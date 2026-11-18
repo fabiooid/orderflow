@@ -41,7 +41,7 @@ export const orderDraftInput = z.object({
     documentPrice: z.object({ amount: z.number().nonnegative(), basis: z.enum(['net', 'gross', 'unclear']), decision: z.enum(['pending', 'catalogue', 'document']) }).strict().nullable().default(null)
       .describe('A price printed in a document, pending until the operator answers. Null when none is pending.'),
   }).strict()).describe('Changes to lines. Empty keeps the open draft, including attachment rows already merged. A new request starts empty. Do not copy cancelled orders.'),
-  shippingPrice: z.number().nonnegative().nullable().describe('Delivery charge, net. 0 when they say there is no charge this request. null when they have not stated it; the application keeps an explicit 0 already on this request and applies a no-charge phrase even if this field is omitted. Do not copy a cancelled request. A later amount on this request replaces an earlier 0.'),
+  shippingPrice: z.number().nonnegative().nullable().describe('Delivery charge, net. 0 when they say there is no charge this request. null when they have not stated it; the application keeps an explicit 0 already on this request and applies a no-charge phrase even if this field is omitted. Do not copy a cancelled request. Do not send a list price, last paid, or an earlier-chat amount unless they stated one this request. A later amount on this request replaces an earlier 0.'),
   discountPercent: z.number().min(0).max(100).describe('Order discount the operator states, otherwise 0.'),
   discountShipping: z.boolean().nullable().describe('Whether the discount also applies to delivery, only when the operator says so.'),
   delivery: z.object({ country: z.string().nullable(), address: z.string().min(1) }).strict().nullable()
