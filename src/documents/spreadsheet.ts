@@ -14,6 +14,9 @@ export const SPREADSHEET_MIME = [
 
 const MARK = /^(x+|✓|✔|☑|yes|y|si|sì|ok|v|true)$/iu;
 const TESTER_HINT = /\b(tester|sample|campion|prova)\b/iu;
+const HEADER_HINT = /\b(qty|qta|q\.?t[aàe]?|quantity|quantit[aà]|pz|pcs|tester|sample|campion|prova|code|sku|codice|product|prodotto|articolo|descrizione|price|prezzo)\b/iu;
+const QTY_HINT = /\b(qty|qta|q\.?t[aàe]?|quantity|quantit[aà]|pz|pcs)\b/iu;
+const CUSTOMER_LABEL = /\b(customer|cliente|buyer|bill\s*to|sold\s*to|destinatario|intestatario)\b/iu;
 const MAX_SHEETS = 20;
 const MAX_ROWS = 500;
 const MAX_COLS = 40;
@@ -162,6 +165,7 @@ function classifyColumns(header: string[], data: Cell[][]): ColumnKind[] {
     const marks = filled.filter(cell => cell.mark || (cell.number === 1 && TESTER_HINT.test(heading))).length;
     const rate = fillRate(products, column);
     if (TESTER_HINT.test(heading) && (marks || numbers.length)) return 'mark';
+    if (QTY_HINT.test(heading) && numbers.length) return 'quantity';
     if (marks && marks >= filled.length / 2 && rate < 0.7) return 'mark';
     if (numbers.length && rate < 0.7) return 'quantity';
     if (numbers.length && rate >= 0.7 && !priceLike(numbers) && header.some((_, i) => i !== column && priceLike(columnNumbers(products, i)))) {
@@ -180,30 +184,49 @@ function classifyColumns(header: string[], data: Cell[][]): ColumnKind[] {
   return kinds;
 }
 
+function headingScore(row: Cell[]) {
+  const filled = row.filter(cell => cell.text);
+  if (filled.length < 2) return -1;
+  const labels = filled.filter(cell => cell.number == null && !cell.mark && cell.text.length <= 24).length;
+  const hints = filled.filter(cell => HEADER_HINT.test(cell.text)).length;
+  const long = filled.filter(cell => cell.text.length > 28).length;
+  return labels + hints * 4 - long * 5;
+}
+
 function tableStart(rows: Cell[][]) {
-  let best = 0, score = -1;
+  let best = 0, score = -Infinity;
   for (let i = 0; i < rows.length; i++) {
     const filled = rows[i]!.filter(cell => cell.text).length;
     if (filled < 2) continue;
+    const heading = headingScore(rows[i]!);
     const following = rows.slice(i + 1, i + 6).filter(nonEmpty).length;
-    const next = filled + following;
+    const quantities = rows.slice(i + 1, i + 8).filter(row => row.some(cell => cell.number != null || cell.mark)).length;
+    const next = (heading > 0 ? heading * 4 : 0) + filled + following + quantities * 2;
     if (next > score) { score = next; best = i; }
   }
   return best;
 }
 
-function headerFields(rows: Cell[][], start: number) {
-  const fields: string[] = [];
+function preambleFields(rows: Cell[][], start: number) {
+  const letterhead: string[] = [];
+  const customer: string[] = [];
   for (const row of rows.slice(0, start)) {
     const cells = row.filter(cell => cell.text);
-    if (cells.length === 2 && cells[1]!.text) fields.push(`${cells[0]!.text}: ${cells[1]!.text}`);
-    else if (cells.length > 2) {
-      for (let i = 0; i + 1 < cells.length; i += 2) {
-        if (cells[i + 1]!.text) fields.push(`${cells[i]!.text}: ${cells[i + 1]!.text}`);
-      }
+    if (!cells.length) continue;
+    const joined = cells.map(cell => cell.text).join(', ');
+    if (CUSTOMER_LABEL.test(cells[0]!.text) || CUSTOMER_LABEL.test(joined)) {
+      const value = cells.slice(1).map(cell => cell.text).filter(Boolean).join(', ');
+      if (value) customer.push(cells.length === 2 ? `${cells[0]!.text}: ${value}` : joined);
+      continue;
     }
+    letterhead.push(joined);
   }
-  return fields;
+  return { letterhead, customer };
+}
+
+function headingLike(row: Cell[]) {
+  if (row.some(cell => cell.number != null || cell.mark)) return false;
+  return row.filter(cell => cell.text && HEADER_HINT.test(cell.text)).length >= 2;
 }
 
 function codeAndName(row: Cell[], kinds: ColumnKind[]) {
@@ -222,7 +245,7 @@ function extractSheet(rows: string[][]) {
     return cells;
   });
   const used = grid.filter(nonEmpty);
-  if (used.length < 2) return { fields: [] as string[], lines: [] as string[] };
+  if (used.length < 2) return { letterhead: [] as string[], customer: [] as string[], lines: [] as string[] };
   const start = tableStart(used);
   const headerRow = used[start]!;
   const allText = headerRow.every(cell => !cell.number && !cell.mark);
@@ -233,9 +256,11 @@ function extractSheet(rows: string[][]) {
     return next;
   });
   const kinds = classifyColumns(headings, data);
-  if (!kinds.some(kind => kind === 'quantity' || kind === 'mark')) return { fields: headerFields(used, start), lines: [] };
+  const preamble = preambleFields(used, start);
+  if (!kinds.some(kind => kind === 'quantity' || kind === 'mark')) return { ...preamble, lines: [] };
   const lines: string[] = [];
   for (const row of data) {
+    if (headingLike(row)) continue;
     const filled = headings.flatMap((heading, i) => {
       if (kinds[i] !== 'quantity' && kinds[i] !== 'mark') return [];
       const cell = row[i];
@@ -252,26 +277,29 @@ function extractSheet(rows: string[][]) {
     if (filled.some(item => item.tester) && !facts.some(item => TESTER_HINT.test(item))) facts.push('tester: 1');
     lines.push([...identity, ...facts].join(' | '));
   }
-  return { fields: headerFields(used, start), lines };
+  return { ...preamble, lines };
 }
 
 /**
  * Read a workbook into labelled facts for the existing draft flow: product identity, filled quantities,
- * tester marks, and any non-empty header pairs. Sheets with no filled quantity or mark are omitted, so a
+ * tester marks, and any non-empty customer header pairs. Sheets with no filled quantity or mark are omitted, so a
  * catalogue layout is not treated as the order. Printed prices stay off the lines; catalogue prices apply.
+ * Unlabelled letterhead above the table is the supplier, not the customer.
  */
 export async function readSpreadsheet(file: DocumentFile): Promise<string> {
   const sheets = await workbookSheets(file);
-  const fields: string[] = [];
+  const letterhead: string[] = [];
+  const customer: string[] = [];
   const lines: string[] = [];
   for (const sheet of sheets) {
     const extracted = extractSheet(sheet);
-    for (const field of extracted.fields) if (!fields.includes(field)) fields.push(field);
+    for (const field of extracted.letterhead) if (!letterhead.includes(field)) letterhead.push(field);
+    for (const field of extracted.customer) if (!customer.includes(field)) customer.push(field);
     lines.push(...extracted.lines);
   }
-  const parts = [
-    ...fields.map(field => `Header: ${field}`),
+  return [
+    ...letterhead.map(field => `Letterhead (supplier, not the customer): ${field}`),
+    ...customer.map(field => `Header: ${field}`),
     ...lines,
-  ];
-  return parts.join('\n');
+  ].join('\n');
 }

@@ -22,10 +22,10 @@ it('learns product and client aliases in Mastra memory and uses them in fresh ag
     expect(await tools.rememberAlias!.execute!({ kind: 'client', phrase: 'Corner shop', targetId: '201', action: 'remember', quote: 'the shop is called Corner shop' }, ctx)).toEqual({ status: 'remembered' });
     const fresh = await createOrderAgent(config(), connector, storage).agent.listTools();
     expect(await fresh.searchProducts!.execute!({ query: 'little pebble' }, ctx)).toMatchObject({ found: 'words', products: expect.arrayContaining([expect.objectContaining({ id: '101' })]) });
-    expect(await fresh.searchClients!.execute!({ query: 'Corner shop' }, ctx)).toEqual([expect.objectContaining({ id: '201' })]);
+    expect(await fresh.searchClients!.execute!({ query: 'Corner shop' }, ctx)).toEqual({ found: 1, clients: [expect.objectContaining({ id: '201' })] });
     const other = config(); other.deploymentId = 'another-deployment';
     const isolated = await createOrderAgent(other, connector, storage).agent.listTools();
-    expect(await isolated.searchClients!.execute!({ query: 'Corner shop' }, ctx)).toEqual([]);
+    expect(await isolated.searchClients!.execute!({ query: 'Corner shop' }, ctx)).toEqual({ found: 0, clients: [] });
     expect(await tools.rememberAlias!.execute!({ ...product, targetId: '999' }, ctx)).toEqual({ status: 'target-not-found' });
     expect(await tools.rememberAlias!.execute!(product, { observe: noopObserve })).toEqual({ status: 'not-authorized' });
     expect(await tools.rememberAlias!.execute!({ ...product, quote: 'invented evidence' }, ctx)).toEqual({ status: 'not-authorized' });

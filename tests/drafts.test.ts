@@ -24,8 +24,28 @@ it('reports a ready order with its totals, or exactly what is still needed', asy
   if (needs.status !== 'needs') return;
   expect(needs.issues[0]).toMatchObject({ field: 'lines.0', candidates: expect.arrayContaining([expect.objectContaining({ id: '101' })]) });
   // The agent reads the problems and candidate names; record IDs stay with the application.
-  expect(forAgent(needs)).toMatchObject({ status: 'needs', issues: [{ field: 'lines.0', candidates: expect.arrayContaining(['Pebble hand wash 250 ml']) }] });
+  expect(forAgent(needs)).toMatchObject({
+    status: 'needs',
+    customer: { matched: true, name: 'Example Studio' },
+    lines: [{ query: 'Pebble 250', quantity: 2, matched: false }],
+    issues: [{ field: 'lines.0', candidates: expect.arrayContaining(['Pebble hand wash 250 ml']) }],
+  });
   expect(JSON.stringify(forAgent(needs))).not.toContain('101');
+});
+
+it('shows an unmatched customer query so the agent cannot contradict the preview', async () => {
+  const api = createDraftApi(config(), new DemoConnector(), off);
+  const needs = await api.order(draftSchema.parse({
+    clientQuery: 'Northwind Supplies Ltd',
+    lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }],
+  }), context, '2026-01-15');
+  expect(needs.status).toBe('needs');
+  expect(forAgent(needs)).toMatchObject({
+    status: 'needs',
+    customer: { matched: false, query: 'Northwind Supplies Ltd' },
+    lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2, matched: true }],
+  });
+  expect(JSON.stringify(forAgent(needs))).not.toContain('"matched":true,"name"');
 });
 
 it('never trusts a model-written identity: matching replaces it with the judged one', async () => {

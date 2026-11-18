@@ -42,11 +42,31 @@ function eligible(query: string, products: Product[]) {
   return products.filter(p => isTester(p) === wantsTester);
 }
 
-/** Products containing every word of the query, or an exact name or code. */
+/** Catalogue codes: digits or a hyphenated token, not a single name word such as a scent. */
+function codeLike(code: string) {
+  return code.length >= 3 && (/\d/.test(code) || /[A-Za-z][-_][A-Za-z0-9]/.test(code));
+}
+
+/**
+ * Catalogue records whose code is the whole query, or a whole token inside it.
+ * Letter-only names are not treated as SKUs when they appear as ordinary words.
+ */
+export function productCodesIn(query: string, products: Product[]): Product[] {
+  if (!normalize(query)) return [];
+  return products.filter(p => {
+    if (!p.code) return false;
+    if (normalize(p.code) === normalize(query)) return true;
+    return codeLike(p.code) && nameInText(query, p.code);
+  });
+}
+
+/** Products containing every word of the query, or an exact name or unique catalogue code. */
 export function matchProducts(query: string, products: Product[]): Product[] {
   const q = normalize(query);
   const exact = products.filter(p => normalize(p.code) === q || normalize(p.name) === q);
   if (exact.length) return exact;
+  const codes = productCodesIn(query, products);
+  if (codes.length === 1) return codes;
   const words = tokens(query);
   if (!words.length) return [];
   return eligible(query, products).filter(p => {
@@ -71,6 +91,8 @@ export function searchCatalogue(query: string, products: Product[]): Product[] {
   if (!normalize(query)) return [];
   const exact = products.filter(p => normalize(p.code) === normalize(query) || normalize(p.name) === normalize(query));
   if (exact.length) return exact;
+  const codes = productCodesIn(query, products);
+  if (codes.length === 1) return codes;
   return scoredHits(query, products).slice(0, 15).map(entry => entry.product);
 }
 

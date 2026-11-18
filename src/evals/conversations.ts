@@ -249,6 +249,33 @@ export const conversationCases: ConversationCase[] = [
     ]),
   },
   {
+    id: 'spreadsheet-letterhead-is-not-customer',
+    // Caption Create order; blank customer header; supplier letterhead must not become the customer.
+    turns: [{
+      text: 'Create order',
+      attachment: [
+        'Letterhead (supplier, not the customer): Northwind Supplies Ltd, Harbour Lane 1, Example City, IT, P.IVA IT000111222, orders@northwind-supplies.invalid',
+        'SKU-100 | Hand cream 100 ml | Qty: 2',
+        'SKU-250 | Room spray 250 ml | tester: 1',
+      ].join('\n'),
+    }],
+    scripted: [draftSchema.parse({
+      lines: [
+        { query: 'Hand cream 100 ml SKU-100', quantity: 2 },
+        { query: 'Room spray 250 ml SKU-250 tester', quantity: 1 },
+      ],
+    })],
+    check: all(neverGaveUp, o => [
+      ...expect(!/northwind supplies/i.test(o.open?.draft.clientQuery ?? ''), `used letterhead as customer: ${o.open?.draft.clientQuery}`),
+      ...expect(!o.open?.draft.newClient, `proposes creating "${o.open?.draft.newClient?.name}"`),
+      ...expect(!!o.open?.draft.lines.some(l => /SKU-100|hand cream/i.test(l.query) && l.quantity === 2), 'the filled cream line was lost'),
+      ...expect(!!o.open?.draft.lines.some(l => /tester/i.test(l.query) && /SKU-250|room spray/i.test(l.query)), 'the tester line was lost'),
+      ...expect(!o.open?.draft.lines.some(l => l.documentPrice), 'set a file price without a pending document price'),
+      ...expect(o.open?.draft.shippingPrice === undefined, `invented a delivery charge of ${o.open?.draft.shippingPrice}`),
+      ...notesStayEmpty(o),
+    ]),
+  },
+  {
     id: 'spreadsheet-header-names-customer',
     turns: [{ text: 'ordine', attachment: 'Header: Customer: Northwind Bistro\nSKU-100 | Hand cream 100 ml | Qty: 2' }],
     scripted: [draftSchema.parse({

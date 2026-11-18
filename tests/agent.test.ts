@@ -26,6 +26,7 @@ it('gives the agent the order and customer APIs and lookups, and no way to save'
     expect(tools.prepareOrder?.description).toContain('not a substitute');
     expect(tools.prepareOrder?.description).toContain('exact name or VAT');
     expect(tools.searchClients?.description).toContain('One close or related account is still a question');
+    expect(tools.searchClients?.description).toContain('clients array');
     expect(tools.prepareOrder?.description).toContain('If this request already has lines, keep them');
     expect(tools.prepareOrder?.description).toContain('short customer name');
     expect(tools.prepareOrder?.description).toContain('Do not ask to save the current draft as-is');
@@ -48,6 +49,9 @@ it('keeps business rules in the prompt and field rules in the API schema, with n
   expect(prompt).toContain('Naming a customer is not a request to copy products');
   expect(prompt).toContain('not in the catalogue');
   expect(prompt).toContain('Keep any product lines already on this request');
+  expect(prompt).toContain('Catalogue prices apply unless the operator states a unit price');
+  expect(prompt).toContain('Supplier letterhead is not the customer');
+  expect(prompt).toContain('customer.matched');
   expect(prompt).toContain('# Correct a customer');
   expect(prompt).toContain('short customer name');
   expect(prompt).toContain('not a request to save');
@@ -59,6 +63,8 @@ it('keeps business rules in the prompt and field rules in the API schema, with n
   expect(fields.delivery.description).toContain('never a delivery address');
   expect(fields.clientQuery.description).toContain('search-clients');
   expect(fields.clientQuery.description).toContain('short customer name');
+  expect(fields.clientQuery.description).toContain('Supplier letterhead is not a customer name');
+  expect(fields.lines.element.shape.documentPrice.description).toContain('Leave null when none is pending');
   expect(fields.clientId.description).toContain('do not keep the old id');
   expect(fields.clientId.description).toContain('short customer name');
   expect(fields.lines.description).toContain('A new request starts with no lines');
@@ -115,6 +121,7 @@ it('hands the agent the catalogue when no product contains the words, so it can 
     const tools = await createOrderAgent(config(), new DemoConnector(), storage).agent.listTools();
     const search = (query: string) => tools.searchProducts!.execute!({ query }, {} as never) as Promise<{ found: string; products: { name: string }[] }>;
     expect(await search('candle')).toMatchObject({ found: 'words', products: [{ name: 'Linen candle 200 g' }] });
+    expect(await search('DEMO-A | Qty: 2')).toMatchObject({ found: 'words', products: [{ id: '101' }] });
     const soaps = await search('saponi');
     expect(soaps.found).toBe('catalogue');
     expect(soaps.products.map(p => p.name)).toContain('Pebble hand wash 250 ml');
@@ -146,7 +153,11 @@ it('finds a client by hint words in notes and returns those notes so the agent c
       { id: '204', name: 'Fable Shop Srl', country: 'IT', street: 'Harbour 2', city: 'Genova', postalCode: '16100', vatNumber: 'DEMO-FABLE-SHOP', notes: 'Fable Harbor shop' },
     );
     const tools = await createOrderAgent(config(), connector, storage).agent.listTools();
-    const search = (query: string) => tools.searchClients!.execute!({ query }, {} as never) as Promise<{ id: string; notes?: string }[]>;
+    const search = async (query: string) => {
+      const result = await tools.searchClients!.execute!({ query }, {} as never) as { found: number; clients: { id: string; notes?: string }[] };
+      expect(result.found).toBe(result.clients.length);
+      return result.clients;
+    };
     expect(await search('Fable Harbor hotel')).toEqual([expect.objectContaining({ id: '203', notes: 'Fable Harbor hotel' })]);
     expect(await search('Fable Harbor shop')).toEqual([expect.objectContaining({ id: '204', notes: 'Fable Harbor shop' })]);
     expect((await search('Fable Harbor')).map(c => c.id).sort()).toEqual(['203', '204']);
@@ -160,7 +171,7 @@ it('finds a hotel from street plus a hint when notes only say hotel, and falls b
     const { shop, hotel, cafe } = harborSiblings();
     connector.clients.push(shop, hotel, cafe);
     const tools = await createOrderAgent(config(), connector, storage).agent.listTools();
-    const search = (query: string) => tools.searchClients!.execute!({ query }, {} as never) as Promise<{ id: string; notes?: string }[]>;
+    const search = async (query: string) => ((await tools.searchClients!.execute!({ query }, {} as never)) as { clients: { id: string; notes?: string }[] }).clients;
     expect(await search('Fable Harbor hotel')).toEqual([expect.objectContaining({ id: '211', notes: 'hotel' })]);
     expect(await search('Fable Harbor shop')).toEqual([expect.objectContaining({ id: '210' })]);
     expect((await search('Fable Harbor')).map(c => c.id).sort()).toEqual(['210', '211', '212']);
@@ -176,7 +187,7 @@ it('finds the hotel from notes that hold the everyday name, and a shop/store/neg
     const { shop, hotel } = monasterySiblings();
     connector.clients.push(shop, hotel);
     const tools = await createOrderAgent(config(), connector, storage).agent.listTools();
-    const search = (query: string) => tools.searchClients!.execute!({ query }, {} as never) as Promise<{ id: string; notes?: string; street?: string }[]>;
+    const search = async (query: string) => ((await tools.searchClients!.execute!({ query }, {} as never)) as { clients: { id: string; notes?: string; street?: string }[] }).clients;
     expect(await search('Harbour hotel')).toEqual([expect.objectContaining({ id: '221', notes: 'Harbour Hotel' })]);
     expect(await search('Harbour albergo')).toEqual([expect.objectContaining({ id: '221' })]);
     expect(await search('Harbour shop')).toEqual([expect.objectContaining({ id: '220' })]);
@@ -194,7 +205,7 @@ it('finds a pharmacy from a one-letter slip on the distinctive name, and does no
     const { willowmere, cinderford, pebblebrook } = pharmacyTypeAccounts();
     connector.clients.push(willowmere, cinderford, pebblebrook);
     const tools = await createOrderAgent(config(), connector, storage).agent.listTools();
-    const search = (query: string) => tools.searchClients!.execute!({ query }, {} as never) as Promise<{ id: string }[]>;
+    const search = async (query: string) => ((await tools.searchClients!.execute!({ query }, {} as never)) as { found: number; clients: { id: string }[] }).clients;
     expect(await search('Willomere Pharmacy')).toEqual([expect.objectContaining({ id: '310' })]);
     expect(await search('Pharmacy Zorblax')).toEqual([]);
   } finally { await storage.close(); }
@@ -207,7 +218,7 @@ it('suggests a distinctive account when extra query words are only a person name
     const { agriturismo, streetOnly, east } = willowmereStayAccounts();
     connector.clients.push(agriturismo, streetOnly);
     const tools = await createOrderAgent(config(), connector, storage).agent.listTools();
-    const search = (query: string) => tools.searchClients!.execute!({ query }, {} as never) as Promise<{ id: string; contactPerson?: string }[]>;
+    const search = async (query: string) => ((await tools.searchClients!.execute!({ query }, {} as never)) as { clients: { id: string; contactPerson?: string }[] }).clients;
     expect(await search('Giulia Willowmere')).toEqual([expect.objectContaining({ id: '410' })]);
     expect((await search('Giulia Willowmere')).map(c => c.id)).not.toContain('411');
     connector.clients.push(east);
@@ -215,7 +226,7 @@ it('suggests a distinctive account when extra query words are only a person name
     const withPerson = new DemoConnector();
     withPerson.clients.push({ ...agriturismo, contactPerson: 'Giulia Neri' }, streetOnly);
     const personTools = await createOrderAgent(config(), withPerson, storage).agent.listTools();
-    expect(await personTools.searchClients!.execute!({ query: 'Giulia Willowmere' }, {} as never)).toEqual([expect.objectContaining({ id: '410', contactPerson: 'Giulia Neri' })]);
+    expect(((await personTools.searchClients!.execute!({ query: 'Giulia Willowmere' }, {} as never)) as { clients: { id: string }[] }).clients).toEqual([expect.objectContaining({ id: '410', contactPerson: 'Giulia Neri' })]);
   } finally { await storage.close(); }
 });
 
@@ -226,7 +237,7 @@ it('suggests a customer from a small extra ending on a distinctive name, prefers
     const { sample, sampler, east } = sampleNameAccounts();
     connector.clients.push(sample);
     const tools = await createOrderAgent(config(), connector, storage).agent.listTools();
-    const search = (query: string) => tools.searchClients!.execute!({ query }, {} as never) as Promise<{ id: string }[]>;
+    const search = async (query: string) => ((await tools.searchClients!.execute!({ query }, {} as never)) as { clients: { id: string }[] }).clients;
     expect(await search('cliente sampler')).toEqual([expect.objectContaining({ id: '510' })]);
     expect(await search('cliente samp')).toEqual([expect.objectContaining({ id: '510' })]);
     connector.clients.push(sampler);
@@ -236,6 +247,6 @@ it('suggests a customer from a small extra ending on a distinctive name, prefers
     const two = new DemoConnector();
     two.clients.push(sample, east);
     const twoTools = await createOrderAgent(config(), two, storage).agent.listTools();
-    expect(((await twoTools.searchClients!.execute!({ query: 'cliente sampler' }, {} as never)) as { id: string }[]).map(c => c.id).sort()).toEqual(['510', '512']);
+    expect(((await twoTools.searchClients!.execute!({ query: 'cliente sampler' }, {} as never)) as { clients: { id: string }[] }).clients.map(c => c.id).sort()).toEqual(['510', '512']);
   } finally { await storage.close(); }
 });
