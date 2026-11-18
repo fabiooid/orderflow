@@ -34,7 +34,7 @@
     "eval:spreadsheet": "node --env-file-if-exists=.env --import tsx scripts/eval-spreadsheet.ts"
   },
   "dependencies": {
-    "@ai-sdk/openai": "2.0.136",
+    "@ai-sdk/openai": "4.0.121",
     "@fattureincloud/fattureincloud-ts-sdk": "2.1.3",
     "@libsql/client": "0.18.0",
     "@mastra/core": "1.78.0",
