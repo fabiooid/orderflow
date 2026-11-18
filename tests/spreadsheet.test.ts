@@ -1,6 +1,7 @@
 import ExcelJS from 'exceljs';
 import { describe, expect, it, vi } from 'vitest';
 import { createVisionDocumentProvider } from '../src/documents/reader.js';
+import { productLinesFromReading } from '../src/documents/product-lines.js';
 import { readSpreadsheet, spreadsheetHint } from '../src/documents/spreadsheet.js';
 import { fictionalOrderSpreadsheetText } from '../src/evals/spreadsheet-fixture.js';
 import { createMediaReader } from '../src/channel/media.js';
@@ -77,6 +78,40 @@ describe('spreadsheet hints and extraction', () => {
     expect(text).not.toContain('SKU-400');
   });
 
+  it('keeps a typed 1 tester mark in a sibling column whose header asks for X', async () => {
+    const workbook = new ExcelJS.Workbook();
+    const layout = workbook.addWorksheet('Price list');
+    layout.addRow(['Barcode', 'SKU', 'Product', 'List price', 'Public price', 'Order: enter number of pieces to order', 'Insert X if you also want a tester of the product (max 1 piece per scent, not for sale)']);
+    layout.addRow(['', 'SKU-T00', 'Shelf mist 100 ml', 9, 18, '', '']);
+    const sheet = workbook.addWorksheet('Order');
+    const headers = ['Barcode', 'SKU', 'Product', 'Wholesale list price (VAT to be added)', 'Recommended public price (VAT included)', 'Order:\nenter number of pieces\nto order', 'Insert X if you also want a tester of the product (max 1 piece per scent, not for sale to the public)'];
+    sheet.addRow(['Northwind Atelier Ltd', 'Harbour Lane 1', 'Example City']);
+    sheet.addRow([]);
+    sheet.addRow(headers);
+    sheet.addRow(['', '', 'HOME AND ROOM', '', '', '', 'Tester spray 250ml (full size with tester sticker) costs 7.00 each + VAT']);
+    sheet.addRow(['1000000000001', 'SKU-T01', 'Cedar room spray 250 ml', 17, 35, '', '1 tester']);
+    sheet.addRow(['1000000000002', 'SKU-T02', 'Fig leaf room spray 250 ml', 17, 35, 2, '']);
+    sheet.addRow(['1000000000003', 'SKU-T03', 'Travel trio kit', 14, 29, 3, 'No tester']);
+    sheet.addRow(headers);
+    sheet.addRow(['', '', 'CANDLES', '', '', '', 'Testers not provided / Tester non previsti']);
+    sheet.addRow(['1000000000004', 'SKU-T04', 'Geranium candle 200 g', 30, 60, 1, 'No tester']);
+    const text = await readSpreadsheet({ data: Buffer.from(await workbook.xlsx.writeBuffer()), mimeType: xlsxMime });
+    expect(text).toContain('SKU-T01');
+    expect(text).toMatch(/SKU-T01[^\n]*tester:\s*1/i);
+    expect(text).toContain('SKU-T02');
+    expect(text).toMatch(/SKU-T02[^\n]*Qty:\s*2/i);
+    expect(text).toContain('SKU-T03');
+    expect(text).toMatch(/SKU-T03[^\n]*Qty:\s*3/i);
+    expect(text).not.toMatch(/SKU-T03[^\n]*tester/i);
+    expect(text).toContain('SKU-T04');
+    expect(text).not.toMatch(/SKU-T00/);
+    expect(text).not.toMatch(/HOME AND ROOM/);
+    expect(text).not.toMatch(/No tester/i);
+    expect(text).not.toMatch(/not provided/i);
+    expect(text).not.toMatch(/non previsti/i);
+    expect(text).not.toMatch(/costs 7\.00/i);
+  });
+
   it('keeps tester-only rows and labelled tester marks, including a tester with no ordinary quantity', async () => {
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Order');
@@ -101,7 +136,7 @@ describe('spreadsheet hints and extraction', () => {
     layout.addRow(['SKU-100', 'Hand cream 100 ml', 12.5, '', '']);
     layout.addRow(['SKU-250', 'Room spray 250 ml', 18.75, '', '']);
     const order = workbook.addWorksheet('Order');
-    order.addRow(['Northwind Supplies Ltd', 'Harbour Lane 1', 'Example City', 'IT', 'P.IVA IT000111222', 'orders@northwind-supplies.invalid']);
+    order.addRow(['Northwind Supplies Ltd', 'Harbour Lane 1\nACME-1 | not a catalogue row', 'Example City', 'IT', 'P.IVA IT000111222', 'orders@northwind-supplies.invalid']);
     order.addRow(['Tel', '000-000-000', 'www.northwind-supplies.invalid', '', '', '']);
     order.addRow(['Customer', '']);
     order.addRow([]);
@@ -118,6 +153,8 @@ describe('spreadsheet hints and extraction', () => {
     expect(text).toContain('SKU-250');
     expect(text).toMatch(/tester:\s*1/i);
     expect(text).not.toMatch(/^Code \|/m);
+    const selected = text.split('\n').filter(line => line.includes('|') && !/^(Letterhead|Header)\b/i.test(line));
+    expect(selected.some(line => /not a catalogue row/i.test(line))).toBe(false);
   });
 
   it('reads the generated eval workbook without promoting letterhead or dropping testers', async () => {
@@ -129,6 +166,11 @@ describe('spreadsheet hints and extraction', () => {
     expect(text).toContain('SAMPLE-T');
     expect(text).toMatch(/tester:\s*1/i);
     expect(text).not.toMatch(/IT:\s*2/);
+    expect(text.split('\n').some(line => /not a catalogue row/i.test(line) && !/^Letterhead/i.test(line))).toBe(false);
+    const lines = productLinesFromReading(text);
+    expect(lines).toHaveLength(8);
+    expect(lines.filter(line => /tester/i.test(line.query))).toEqual([expect.objectContaining({ query: expect.stringMatching(/SAMPLE-T/i), quantity: 1 })]);
+    expect(lines.some(line => /CREAM100ML/i.test(line.query) && line.quantity === 2)).toBe(true);
   });
 });
 

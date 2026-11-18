@@ -11,7 +11,8 @@ import { createOrderAgent, groupMemory } from '../assistant/agent.js';
 import { issuesForAgent, type DraftResult } from '../assistant/drafts.js';
 import { startTurn } from '../assistant/turn-context.js';
 import { reasoning } from '../assistant/reasoning.js';
-import type { OrderDraft } from '../domain/types.js';
+import { draftSchema, type OrderDraft } from '../domain/types.js';
+import { productLinesFromReading } from '../documents/product-lines.js';
 import type { Choice, ConversationEngine, TurnInput } from './controller.js';
 import { appendSource, kindOf, type Conversation, type ReplyPlan } from './store.js';
 import { customerPreview, existingCustomer, lineIndex, orderDraft, orderPreview } from './preview.js';
@@ -23,6 +24,32 @@ import { documentTemplates } from './order-forms.js';
 import { createDocumentWorkflow, workflowTemplatePages } from '../documents/workflow.js';
 import { createVisionDocumentProvider } from '../documents/reader.js';
 import { omitMedia } from '../assistant/omit-media.js';
+
+/**
+ * Caption plus labelled product facts: persist those lines even when the agent skipped prepare-order.
+ * Uncaptioned files still go through consent first. An open customer request is left alone.
+ */
+async function seedAttachmentLines(
+  input: TurnInput,
+  current: DraftResult | undefined,
+  order: (draft: OrderDraft) => Promise<unknown>,
+) {
+  if (!input.operatorText?.trim() || input.text === input.operatorText) return;
+  if (current?.kind === 'customer') return;
+  if (current?.kind === 'order' && current.draft.lines.length) return;
+  const lines = productLinesFromReading(input.text);
+  if (!lines.length) return;
+  await order(draftSchema.parse({
+    ...(current?.kind === 'order' ? {
+      clientQuery: current.draft.clientQuery,
+      ...(current.draft.clientId ? { clientId: current.draft.clientId } : {}),
+      ...(current.draft.newClient ? { newClient: current.draft.newClient } : {}),
+      ...(current.draft.shippingPrice !== undefined ? { shippingPrice: current.draft.shippingPrice } : {}),
+      notes: current.draft.notes,
+    } : {}),
+    lines,
+  }));
+}
 
 /** What the model reads each turn, beside the shared group conversation. */
 export type TurnPrompt = {
@@ -130,6 +157,9 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
     const act: TurnActions = { order: draft => calls.order(draft, requestContext), customer: draft => calls.customer(draft, requestContext), cancel: () => calls.cancel(requestContext) };
     const { reply, locale } = await converse(prompt, act, requestContext);
     if (outcome.cancel) return { text: reply, reply, locale, cancel: true };
+    if (!outcome.refused) {
+      await seedAttachmentLines(input, outcome.result, draft => calls.order(draft, requestContext));
+    }
     const { result } = outcome;
     if (!result) return { text: reply, reply, locale, ...(outcome.refused ? { blocked: true } : {}) };
     // A request of the other kind replaces the open one, keeping its conversation so far.

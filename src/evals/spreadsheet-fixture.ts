@@ -30,19 +30,23 @@ export async function fictionalOrderWorkbook() {
     layout.addRow([product.code, product.name, product.netPrice + 0.5, '', '']);
   }
   const order = workbook.addWorksheet('Order');
-  order.addRow(['Northwind Supplies Ltd', 'Harbour Lane 1', 'Example City', 'IT', 'P.IVA IT000111222', 'orders@northwind-supplies.invalid']);
+  const headers = ['Barcode', 'SKU', 'Product', 'Wholesale list price (VAT to be added)', 'Recommended public price (VAT included)', 'Order:\nenter number of pieces\nto order', 'Insert X if you also want a tester of the product (max 1 piece per scent, not for sale to the public)'];
+  order.addRow(['Northwind Supplies Ltd', 'Harbour Lane 1\nACME-1 | not a catalogue row', 'Example City', 'IT', 'P.IVA IT000111222', 'orders@northwind-supplies.invalid']);
   order.addRow(['Tel', '000-000-000', 'www.northwind-supplies.invalid', '', '', '']);
   order.addRow(['Customer', '']);
   order.addRow([]);
-  order.addRow(['Code', 'Product', 'List price', 'Qty', 'Tester']);
-  order.addRow(['CREAM100ML', 'Grove hand cream 100 ml', 12.5, 2, '']);
-  order.addRow(['SPRAY250ML', 'Harbor room spray 250 ml', 18.75, 1, '']);
-  order.addRow(['CANDLE200G', 'Linen candle 200 g', 20, 3, '']);
-  order.addRow(['SOAP250ML', 'Pebble hand wash 250 ml', 12, 2, '']);
-  order.addRow(['MIST100ML', 'Cedar mist 100 ml', 9, 1, '']);
-  order.addRow(['OIL30ML', 'Birch oil 30 ml', 14, 4, '']);
-  order.addRow(['BALM50ML', 'Moss balm 50 ml', 11, 1, '']);
-  order.addRow(['SAMPLE-T', 'TESTER Pebble wash', 4, '', 'x']);
+  order.addRow(headers);
+  order.addRow(['', '', 'HOME AND ROOM', '', '', '', 'Tester spray 250ml (full size with tester sticker) costs 7.00 each + VAT']);
+  order.addRow(['1001', 'CREAM100ML', 'Grove hand cream 100 ml', 12.5, 25, 2, '']);
+  order.addRow(['1002', 'SPRAY250ML', 'Harbor room spray 250 ml', 18.75, 37, 1, '']);
+  order.addRow(['1003', 'CANDLE200G', 'Linen candle 200 g', 20, 40, 3, 'No tester']);
+  order.addRow(headers);
+  order.addRow(['', '', 'WASHES', '', '', '', 'Testers not provided / Tester non previsti']);
+  order.addRow(['1004', 'SOAP250ML', 'Pebble hand wash 250 ml', 12, 24, 2, '']);
+  order.addRow(['1005', 'MIST100ML', 'Cedar mist 100 ml', 9, 18, 1, '']);
+  order.addRow(['1006', 'OIL30ML', 'Birch oil 30 ml', 14, 28, 4, '']);
+  order.addRow(['1007', 'BALM50ML', 'Moss balm 50 ml', 11, 22, 1, 'No tester']);
+  order.addRow(['1008', 'SAMPLE-T', 'TESTER Pebble wash', 4, 8, '', '1 tester']);
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }
 

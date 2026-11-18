@@ -110,6 +110,13 @@ describe('client search', () => {
     expect(searchClients('Fable Harbor Cafe', clients).map(c => c.id)).toEqual(['212']);
     expect(searchClients('Example Studio', [{ id: '201', name: 'Example Studio', notes: '', street: 'Example Street 1', city: 'Example City' }]).map(c => c.id)).toEqual(['201']);
   });
+  it('finds a customer when a naming utterance adds a role word that is not on the record', () => {
+    const studio = { id: '201', name: 'Example Studio', notes: '', street: 'Example Street 1', city: 'Example City' };
+    const atelier = { id: '601', name: 'Cedar Grove Atelier', notes: '', city: 'Example City' };
+    expect(searchClients('Cliente Example Studio', [studio, atelier]).map(c => c.id)).toEqual(['201']);
+    expect(searchClients('Customer Cedar Grove Atelier', [studio, atelier]).map(c => c.id)).toEqual(['601']);
+    expect(matchClients('Cliente Example Studio', [studio])).toEqual([]);
+  });
   it('finds a customer when a distinctive name word is one letter off, and ignores unrelated accounts that only share the trade word', () => {
     const { willowmere, cinderford, pebblebrook } = pharmacyTypeAccounts();
     const pharmacies = [willowmere, cinderford, pebblebrook];
