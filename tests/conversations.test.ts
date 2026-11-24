@@ -27,6 +27,7 @@ const scriptedIds = [
   'new-file-unmatched-product-does-not-ask-blank-customer',
   'new-order-does-not-guess-customer-or-shipping',
   'new-order-unnamed-italian',
+  'code-with-own-wording-shows-catalogue-name',
 ];
 
 function asOrderDraft(act: ScriptedAct | undefined): OrderDraft {

@@ -57,6 +57,8 @@ const namedFor = (id: string, name: RegExp): Check => o => [
   ...expect(o.open?.draft.clientId === id || name.test(o.open?.draft.clientQuery ?? ''), `client is ${o.open?.draft.clientId ?? `"${o.open?.draft.clientQuery ?? 'none'}"`}, expected ${id}`),
   ...expect(!o.open?.draft.newClient, `proposes creating new customer "${o.open?.draft.newClient?.name}"`),
 ];
+/** Attachment lines kept and matched to the catalogue, not left as unresolved wording. */
+const keptMatchedAttachmentLines: Check = o => expect(!!o.open?.draft.lines.some(l => l.productId === '101'), `the attachment lines were lost or left unmatched: ${o.open?.draft.lines.map(l => l.query).join(', ') || 'none'}`);
 /** A question, or a request phrased as an instruction ("dimmi il cliente"): a keyword heuristic, not a judge. */
 const lastAsks: Check = o => expect(/\?|\b(?:dimmi|indica|indicami|specifica|quale|tell me|which|specify)\b/i.test(last(o)), 'the last reply asks nothing');
 const nothingOpen: Check = o => expect(!o.open, `request ${o.open?.orderId} is still open (${o.open?.status})`);
@@ -90,11 +92,17 @@ const readyCustomerCorrection = all(neverGaveUp, keptReadyLines, switchedCustome
 // Customer identity from an attachment is checked; leftover recap notes are not, except in the dedicated FAB-56 cases below.
 const attachmentOrderFor = (id: string) => all(neverGaveUp, keptAttachmentLines, orderFor(id));
 const recapNote = /Prepared from attached conversation/i;
-const previewHeading = /📦 Anteprima ordine|📝 Bozza ordine|📦 Order preview|📝 Draft order|Anteprima ordine|Bozza ordine/;
+/** Only the application's own headings: agent prose such as "Bozza ordine creata" is a lead, not a preview. */
+const previewHeading = /📦 Anteprima ordine|📝 Bozza ordine|📦 Order preview|📝 Draft order/;
 /** Agent words above the application preview, or the whole reply when no preview was shown. */
 const agentLead = (text: string) => {
   const at = text.search(previewHeading);
   return at >= 0 ? text.slice(0, at) : text;
+};
+/** The application preview only, without the agent's words above it; empty when no preview was shown. */
+const previewPart = (text: string) => {
+  const at = text.search(previewHeading);
+  return at >= 0 ? text.slice(at) : '';
 };
 /** The live bug: asking to apply a clear instruction, keep unchanged shipping, or make other edits before save. */
 const askedToConfirmGivenInstruction = (text: string) =>
@@ -179,8 +187,25 @@ export const conversationCases: ConversationCase[] = [
   {
     id: 'change-client-unnamed',
     turns: [{ text: 'ordine', attachment: email }, { text: 'prepara questo ordine ma cambia il cliente' }],
-    // Nothing names the new customer: the agent asks which one, keeping the lines.
-    check: all(neverGaveUp, keptAttachmentLines, lastAsks),
+    // The email names its sender's business, so turn 1 shows a draft for Example Studio with no note nobody asked for.
+    // Turn 2 names no new customer: the agent asks which one, keeping the matched lines.
+    check: all(neverGaveUp, keptMatchedAttachmentLines, notesStayEmpty, lastAsks, o => [
+      ...expect(previewHeading.test(o.replies[0] ?? ''), 'turn 1 showed no draft'),
+      ...expect(/example studio/i.test(o.replies[0] ?? ''), `turn 1 draft is not for the customer the email names: ${(o.replies[0] ?? '').split('\n')[0]}`),
+      ...expect(!agentLead(o.replies[0] ?? '').trim(), `turn 1 had unnecessary text above the preview: ${agentLead(o.replies[0] ?? '').trim().split('\n')[0]}`),
+      ...expect(/client|customer|cliente/i.test(agentLead(last(o))), `the last reply does not ask about the customer: ${agentLead(last(o)).split('\n')[0]}`),
+    ]),
+  },
+  {
+    id: 'code-with-own-wording-shows-catalogue-name',
+    // The operator writes a code with their own description: the preview prints the catalogue name, not their wording.
+    turns: [{ text: 'ordine per Example Studio: 2 x DEMO-A sapone mani, spedizione 8 euro' }],
+    scripted: [draftSchema.parse({ clientQuery: 'Example Studio', lines: [{ query: 'DEMO-A sapone mani', quantity: 2 }], shippingPrice: 8 })],
+    check: all(neverGaveUp, namedFor('201', /example studio/i), notesStayEmpty, o => [
+      ...expect(!!o.open?.draft.lines.some(l => l.productId === '101'), 'the coded line was not matched'),
+      ...expect(/Pebble hand wash 250 ml/.test(previewPart(last(o))), 'the preview does not show the catalogue name'),
+      ...expect(!/sapone mani/i.test(previewPart(last(o))), 'the preview shows the operator wording instead of the catalogue name'),
+    ]),
   },
   { id: 'cancel-in-words', turns: [{ text: 'ordine', attachment: email }, { text: 'lascia stare, non serve più' }], check: all(neverGaveUp, nothingOpen) },
   {

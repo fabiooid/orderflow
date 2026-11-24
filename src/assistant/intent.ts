@@ -1,3 +1,4 @@
+import { customerEvidence, normalize } from '../domain/matching.js';
 import type { PendingQuestion } from '../matching/resolver.js';
 export type { PendingQuestion };
 
@@ -59,12 +60,53 @@ export function statedShipping(operatorWords: string, turnWords?: string): numbe
   return lastShippingStatement(operatorWords);
 }
 
-/** True when this request's words or a non-empty customer header actually named a customer. */
-export function customerNamedInRequest(query: string, operatorWords: string, attachmentText = '') {
+/** True when this request names the customer: the operator's words or attached content other than supplier letterhead. */
+const IDENTITY_LABEL = /^(?:p\.?\s*iva|partita\s+iva|vat(?:\s+(?:no\.?|number))?|c\.?\s*f\.?|codice\s+fiscale)\s*[:#.]?\s*/i;
+
+/**
+ * The customer search this request supports, or '' when the request never states it. A query copied whole is kept.
+ * A query the model assembled from several stated parts ("Name, P.IVA 123") becomes its VAT part, or its name when
+ * there is no labelled VAT, because a combined string matches no customer record.
+ */
+export function statedCustomer(query: string, operatorWords: string, attachmentText = '') {
   const q = query.trim();
-  if (!q) return false;
-  const header = /^\s*(?:header:\s*)?customer\s*[:|-]\s*(.+)$/im.exec(attachmentText)?.[1]?.trim() ?? '';
-  return operatorWords.toLowerCase().includes(q.toLowerCase()) || (header.length > 0 && header.toLowerCase().includes(q.toLowerCase()));
+  if (!q) return '';
+  const evidence = customerEvidence(operatorWords, attachmentText).toLowerCase();
+  if (evidence.includes(q.toLowerCase())) return q;
+  const parts = q.split(/\s*[,;]\s*|\s+[-–—|]\s+|\s+(?=(?:p\.?\s*iva|partita\s+iva|vat|c\.?\s*f\.?|codice\s+fiscale)\b)/i).map(part => part.trim()).filter(Boolean)
+    .map(part => ({ labelled: IDENTITY_LABEL.test(part), value: part.replace(IDENTITY_LABEL, '').trim() }));
+  if (parts.length < 2 || parts.some(part => !part.value || !evidence.includes(part.value.toLowerCase()))) return '';
+  return (parts.find(part => part.labelled) ?? parts[0]!).value;
+}
+
+export function customerNamedInRequest(query: string, operatorWords: string, attachmentText = '') {
+  return !!statedCustomer(query, operatorWords, attachmentText);
+}
+
+const NOTE_WORDS = /\b(?:nota|note|notes|annotazion[ei]|scrivi|write|aggiungi che|add that)\b/i;
+const DELIVERY_WORDS = /\b(?:indirizzo|destinazione|consegna(?:re)?\s+(?:a|in|presso|all[aoe']?)|spedi(?:re|sci|sca)\s+(?:a|in|presso)|address|deliver(?:y)?\s+to|ship\s+to)\b/i;
+const contentWords = (text: string) => normalize(text).split(/[^\p{L}\p{N}]+/u).filter(word => word.length >= 3);
+/** Whether most of this text's words were spoken by the operator, rather than read from an attachment. */
+function spokenByOperator(text: string, operatorWords: string, share = 0.5) {
+  const words = contentWords(text);
+  const spoken = new Set(contentWords(operatorWords));
+  return words.length > 0 && words.filter(word => spoken.has(word)).length >= words.length * share;
+}
+/** True when the operator asked for a note this request, or the note is in their own words. */
+export function operatorStatedNote(note: string, operatorWords: string) {
+  return NOTE_WORDS.test(operatorWords) || spokenByOperator(note, operatorWords);
+}
+/**
+ * True when this request carries the delivery address: the operator pointed to one, or nearly all of its words are in the
+ * operator's words or attached content (supplier letterhead excluded). Whether attached text is a delivery instruction
+ * or a signature is the model's judgement; this only stops an address the request never contained.
+ */
+export function deliveryInRequest(address: string, operatorWords: string, attachmentText = '') {
+  return DELIVERY_WORDS.test(operatorWords) || spokenByOperator(address, customerEvidence(operatorWords, attachmentText), 0.8);
+}
+/** True when most words of a customer request the model reported are in this request. */
+export function requestInEvidence(text: string, operatorWords: string, attachmentText = '') {
+  return spokenByOperator(text, customerEvidence(operatorWords, attachmentText));
 }
 
 /** True when the operator asked to create a customer, not merely to prepare an order. */

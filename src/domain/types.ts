@@ -66,6 +66,8 @@ export const draftSchema = z.object({
     address: z.string().min(1),
   }).strict().optional(),
   notes: z.string().max(4000).default(''),
+  /** What the customer asked for in this request that no other field holds ("express, as soon as possible"). Shown to the operator, never saved on the order. */
+  customerRequests: z.string().max(1000).default(''),
   /** Legacy selection: only 'standard' is supported; other values require clarification. */
   priceTier: z.string().regex(/^[a-z0-9-]+$/).optional(),
 }).strict().refine(d => !(d.clientId && d.newClient), { message: 'Choose an existing or a new client, not both' });

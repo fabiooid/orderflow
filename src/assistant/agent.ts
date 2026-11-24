@@ -30,7 +30,7 @@ export function groupMemory(config: AppConfig) {
 /** Products the agent may read at once to judge by meaning; a larger catalogue needs words that appear in it. */
 const CATALOGUE_LIST_LIMIT = 300;
 
-export function createOrderAgent(config: AppConfig, connector: OrderConnector, storage: LibSQLStore, live: LiveEvalSettings = { enabled: false, rate: 0 }, matchingOptions: Parameters<typeof createIdentityResolver>[2] = {}) {
+export function createOrderAgent(config: AppConfig, connector: OrderConnector, storage: LibSQLStore, live: LiveEvalSettings = { enabled: false, rate: 0 }, matchingOptions: Parameters<typeof createIdentityResolver>[2] = {}, onToolCall?: (tool: string, input: unknown, result: unknown) => void) {
   const memory = new Memory({ storage, options: {
     lastMessages: config.memory.lastMessages,
     semanticRecall: false,
@@ -73,7 +73,7 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
   });
   const searchClients = createTool({
     id: 'search-clients',
-    description: 'Find existing businesses by legal name, VAT, city, street, everyday name in notes, or contact person. Read `clients`, not `found` alone. One close account is still a question unless the operator typed that exact name or VAT. Results feed prepare-order as candidates, not as a lock. Search does not change the draft: still call prepare-order with that wording as clientQuery. Search only a name or VAT given in this request. If this request did not name a customer, do not call this tool. Do not search a customer from earlier messages when this request did not name one. Letterhead is not a customer.',
+    description: 'Find existing businesses by legal name, VAT, city, street, everyday name in notes, or contact person. Read `clients`, not `found` alone. One close account is still a question unless this request states that exact name or VAT. Results feed prepare-order as candidates, not as a lock. Search does not change the draft: still call prepare-order with that wording as clientQuery. Search only a name or VAT given in this request, typed or in attached content that says who is buying. If this request did not name a customer, do not call this tool. Do not search a customer from earlier messages when this request did not name one. Supplier letterhead is not a customer.',
     inputSchema: z.object({ query: z.string().min(1).describe('The name or VAT number the operator gave, including hint words such as hotel, shop, or a city. Call again with a refined query when they clarify.') }),
     outputSchema: z.object({
       found: z.number().int().nonnegative().describe('How many client records are in `clients`. This count is not a client id and not a substitute for the list.'),
@@ -144,12 +144,14 @@ export function createOrderAgent(config: AppConfig, connector: OrderConnector, s
       try { draft = parse(input); } catch (error) {
         return { status: 'invalid' as const, note: `The draft does not fit the schema: ${error instanceof z.ZodError ? error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ') : 'unreadable'}. Fix it and call again.` };
       }
-      return api(draft, context?.requestContext, withPatches ? parseLinePatches(input) : undefined);
+      const result = await api(draft, context?.requestContext, withPatches ? parseLinePatches(input) : undefined);
+      onToolCall?.(id, input, result); // Eval traces: what the model sent and what the API told it.
+      return result;
     },
   });
   const orderApi = prepare('order', drafts.order), customerApi = prepare('customer', drafts.customer);
   const books = config.invoicing.label;
-  const prepareOrder = draftTool('prepare-order', `The order API: merge this turn's changes into the open draft. The operator already sees that draft; your reply may be empty. Search does not open or change a draft: call this the same turn they ask to create or add to an order, including after a catalogue answer. Call this the same turn they give a clear draft edit (a note, a quantity, shipping). Empty lines keep rows already on this request (including attachment facts). Empty clientQuery when this request did not name a customer; a customer already on this open request is kept. Do not search first for a previous-chat name. Tester marks are their own line (tester true, printed sale code kept). productId and clientId are proposals; the application accepts supported unique SKUs/testers and exact catalogue or customer names typed this request, and otherwise keeps candidates. Do not invent catalogue codes. Do not resend a cancelled order. Do not claim ready while the result status is needs. Never saves.`,
+  const prepareOrder = draftTool('prepare-order', `The order API: merge this turn's changes into the open draft. The operator already sees that draft; your reply may be empty. Search does not open or change a draft: call this the same turn they ask to create or add to an order, including after a catalogue answer. Call this the same turn they give a clear draft edit (a note, a quantity, shipping). Empty lines keep rows already on this request (including attachment facts). Empty clientQuery when this request did not name a customer; a customer already on this open request is kept. Do not search first for a previous-chat name. Tester marks are their own line (tester true, printed sale code kept). productId and clientId are proposals; the application accepts supported unique SKUs/testers and exact catalogue or customer names stated this request, and otherwise keeps candidates. Do not invent catalogue codes. Do not resend a cancelled order. Never saves.`,
     orderDraftInput, parseDraft, orderApi, true);
   const prepareCustomer = draftTool('prepare-customer', `The customer API: create a new customer in ${books}, or correct the one being drafted. The application never saves. For an order's customer use prepare-order instead. Missing email or VAT does not block starting an order: when they ask to create an order, call prepare-order carrying newClient.`,
     customerDraftInput, parseCustomer, customerApi);

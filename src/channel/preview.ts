@@ -83,6 +83,7 @@ export function orderDraft(draft: OrderDraft, issues: Issue[], it: boolean, clie
   if (draft.delivery) lines.push(`📦 ${say(it, 'draftShipTo')}: ${draft.delivery.address}${draft.delivery.country ? `, ${draft.delivery.country}` : ' ❓'}`);
   if (draft.discountPercent > 0) lines.push(`💸 ${say(it, 'draftDiscount')} ${draft.discountPercent}%`);
   if (draft.notes.trim()) lines.push('', say(it, 'draftNotes'), draft.notes.trim());
+  if (draft.customerRequests.trim()) lines.push('', say(it, 'draftRequests'), draft.customerRequests.trim());
   const points = [...new Set(issues.map(issue => openPoint(issue, draft, it, catalogue)))];
   if (points.length) lines.push('', `❓ ${say(it, 'draftToComplete')}: ${points.join(' · ')}`);
   return lines.join('\n');
@@ -153,6 +154,8 @@ export function orderPreview(
   discrepancies: Discrepancy[] = [],
   currency = 'EUR',
   catalogueIncrease?: CatalogueIncrease & { context?: string },
+  /** The customer's requests read from this request: shown to the operator, not part of the saved order. */
+  customerRequests = '',
 ) {
   const goods = order.lines.filter(line => !line.shipping);
   const shipping = order.lines.filter(line => line.shipping);
@@ -168,6 +171,7 @@ export function orderPreview(
   }
   lines.push('', say(it, 'totalsTitle'), `${say(it, 'totalNet')} ${money(totals.net, it, currency)}`, `${say(it, 'totalVat')} ${rates.join(', ')} ${money(totals.vat, it, currency)}`, `${say(it, 'totalGross')} ${money(totals.gross, it, currency)}`);
   if (order.notes.trim()) lines.push('', say(it, 'draftNotes'), order.notes.trim());
+  if (customerRequests.trim()) lines.push('', say(it, 'draftRequests'), customerRequests.trim());
   if (catalogueIncrease && catalogueIncrease.count > 0) {
     lines.push('', say(it, 'catalogueIncrease', { count: catalogueIncrease.count, orders: increaseOrders(catalogueIncrease.orders) }));
     const context = catalogueIncrease.context?.trim();

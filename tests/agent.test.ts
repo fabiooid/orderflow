@@ -37,7 +37,8 @@ it('gives the agent the order and customer APIs and lookups, and no way to save'
     expect(tools.prepareOrder?.description).toContain('your reply may be empty');
     expect(tools.prepareCustomer?.description).toContain('Missing email or VAT');
     expect(tools.prepareOrder?.description).toContain('unique SKUs/testers');
-    expect(tools.prepareOrder?.description).toContain('Do not claim ready while the result status is needs');
+    // The ready rule lives once, in the prepare-order result note.
+    expect(tools.prepareOrder?.description).not.toContain('Do not claim ready');
     expect(tools.prepareOrder?.description).not.toContain('always call search-clients first');
     expect(Object.values(tools).every(tool => !/creates?|saves?|writes?/i.test(tool.id))).toBe(true);
     expect(await agent.listSkills()).toEqual([]);
@@ -75,12 +76,13 @@ it('keeps business rules in the prompt and field rules in the API schema, with n
   expect(prompt).toContain('Supplier letterhead is not the customer');
   expect(prompt).toContain('customer.status');
   expect(prompt).toContain('shipping.status');
-  expect(prompt).toContain('Never say the draft is ready while status is needs');
+  expect(prompt).not.toContain('Never say the draft is ready');
+  expect(prompt).toContain('attached content that says who is buying, whatever its format');
   expect(prompt).toContain('Never say shipping is 0 unless');
   expect(prompt).toContain('short customer name');
   expect(prompt).toContain('not a request to save');
   expect(prompt).toContain('Search does not open or change a draft');
-  expect(prompt).toContain('Missing customer email or VAT does not block starting an order');
+  expect(prompt).toContain('A missing customer, email, VAT or shipping never blocks opening a draft');
   expect(prompt).toContain('An explicit shipping 0 already on this request stays');
   expect(prompt).toContain('apply a clear instruction');
   expect(prompt).not.toContain('propose changes');
@@ -92,9 +94,9 @@ it('keeps business rules in the prompt and field rules in the API schema, with n
   expect(fields.notes.description).toContain('without a leading role word');
   expect(fields.delivery.description).toContain("other than the customer's own address");
   expect(fields.clientQuery.description).toContain('Empty when this request did not name a customer');
-  expect(fields.clientQuery.description).toContain('Do not copy earlier messages, a previous or cancelled request, or letterhead');
+  expect(fields.clientQuery.description).toContain('Do not copy earlier messages or a previous or cancelled request');
   expect(fields.shippingPrice.description).toContain('Do not send a list price, last paid, or an earlier-chat amount');
-  expect(fields.clientQuery.description).toContain('Letterhead is not a customer');
+  expect(fields.clientQuery.description).toContain('Supplier letterhead is not a customer');
   expect(fields.lines.element.shape.documentPrice.description).toContain('Null when none is pending');
   expect(fields.clientId.description).toContain('yes-prepare-this-file is not an id');
   expect(fields.lines.description).toContain('Empty keeps the open draft');

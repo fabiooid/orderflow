@@ -52,7 +52,9 @@ export async function runConversation(config: AppConfig, connector: OrderConnect
   const directory = await mkdtemp(join(tmpdir(), 'orderflow-conversation-'));
   const storage = new LibSQLStore({ id: 'conversation-eval', url: `file:${join(directory, 'memory.db')}` });
   const store = new TelegramStore(':memory:', 'eval');
-  const engine = createConversationEngine(config, connector, storage, { converse: options.converse, matching: options.matching ?? wireMatching() });
+  const toolCalls: string[] = [];
+  const onToolCall = (tool: string, input: unknown, result: unknown) => toolCalls.push(`[${tool}] in ${JSON.stringify(input)}\n  [${tool}] out ${JSON.stringify(result)}`);
+  const engine = createConversationEngine(config, connector, storage, { converse: options.converse, matching: options.matching ?? wireMatching(), onToolCall });
   const replies: string[] = [];
   const readings = new Map<string, string>();
   let messageId = 1000;
@@ -87,9 +89,10 @@ export async function runConversation(config: AppConfig, connector: OrderConnect
             : { text: turn.text }) } } as { update_id: number };
       }
       const before = replies.length;
+      toolCalls.length = 0;
       const started = performance.now();
       await engine.traceTurn(id, () => controller.handle(update));
-      options.log?.(`> ${'press' in turn ? `[${turn.press}]` : turn.text}\n  ${replies.slice(before).join('\n').replace(/\n/g, '\n  ')}\n  (${Math.round(performance.now() - started)} ms)`);
+      options.log?.(`> ${'press' in turn ? `[${turn.press}]` : turn.text}\n  ${[...toolCalls, ...replies.slice(before)].join('\n').replace(/\n/g, '\n  ')}\n  (${Math.round(performance.now() - started)} ms)`);
       const outcome = { replies: replies.slice(), open: await store.activeRequest() };
       options.onTurn?.(index, outcome);
       const extra = options.extraTurns?.(index, outcome);

@@ -25,7 +25,7 @@ const nullableClient = z.object(Object.fromEntries(Object.entries(clientSchema.o
 export const identityStatusSchema = z.enum(['accepted', 'unconfirmed', 'ambiguous', 'unsupported', 'missing']);
 
 export const orderDraftInput = z.object({
-  clientQuery: z.string().describe('The customer name or VAT as the operator wrote it this request. Empty when this request did not name a customer. Do not copy earlier messages, a previous or cancelled request, or letterhead. Letterhead is not a customer. A unique search hit is not a lock.'),
+  clientQuery: z.string().describe('The customer name or VAT as this request states it: the operator\'s words, or attached content that says who is buying. Empty when this request did not name a customer. Do not copy earlier messages or a previous or cancelled request. Supplier letterhead is not a customer. A unique search hit is not a lock.'),
   clientId: z.string().min(1).nullable().describe('Always null for a new lock. Keep only an id already on the open draft after a pick or exact typed name. A search result, alias, or yes-prepare-this-file is not an id.'),
   newClient: nullableClient.nullable().describe('Only when the operator says the customer is new or types billing details themselves. Attached names go in clientQuery.'),
   manualVatCheck: z.object({ country: z.string().regex(/^[A-Z]{2}$/), vatNumber: z.string().min(1), status: z.enum(['valid', 'invalid']) }).strict().nullable()
@@ -45,8 +45,9 @@ export const orderDraftInput = z.object({
   discountPercent: z.number().min(0).max(100).describe('Order discount the operator states, otherwise 0.'),
   discountShipping: z.boolean().nullable().describe('Whether the discount also applies to delivery, only when the operator says so.'),
   delivery: z.object({ country: z.string().nullable(), address: z.string().min(1) }).strict().nullable()
-    .describe("Only when the operator asks to ship somewhere other than the customer's own address."),
+    .describe("Only when this request (the operator's words, or attached content) asks to deliver somewhere other than the customer's own address. A signature, letterhead or billing address is not a delivery instruction."),
   notes: z.string().describe("Printed on the order: only the wording the operator asked to write, without a leading role word such as note or nota. Empty when they did not. When they ask to write one on an open draft, send it this turn. Do not summarise an attached message. Same language as the operator; do not translate catalogue names."),
+  customerRequests: z.string().default('').describe('What the customer asked for in this request that no other field holds, such as a delivery speed or a date ("express, as soon as possible"). The preview shows it to the operator; it is never saved on the order. Short, in the operator\'s language. Empty when there is none. Not products, prices, the customer, an address or a note the operator asked for.'),
   priceTier: z.string().regex(/^[a-z0-9-]+$/).nullable().describe('Always null: named price lists are not connected.'),
 }).strict();
 

@@ -10,6 +10,15 @@ export function normalize(value: string): string {
   return value.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 }
 
+/**
+ * Text that may name this request's customer: the operator's words and the attachment, whatever its format.
+ * Lines a document reader labelled as the supplier's own letterhead are left out; the supplier is never the customer.
+ */
+export function customerEvidence(operatorWords: string, attachmentText = ''): string {
+  const attached = attachmentText.split('\n').filter(line => !/^\s*letterhead\b/i.test(line)).join('\n');
+  return [operatorWords, attached].filter(text => text.trim()).join('\n');
+}
+
 /** Same business name, or the same country and VAT number. */
 export function sameClient(existing: { name: string; country: string; vatNumber?: string }, incoming: { name?: string; country?: string; vatNumber?: string }) {
   if (normalize(existing.name) === normalize(incoming.name ?? '')) return true;
