@@ -1,7 +1,7 @@
 import { draftSchema, type OrderDraft } from '../domain/types.js';
 import { lineWantsTester, normalize, testerRestatementOf } from '../domain/matching.js';
 import type { ReadingLine } from '../documents/product-lines.js';
-import { customerNamedInRequest, operatorAskedToCreateCustomer, statedNote, statedShipping } from './intent.js';
+import { customerNamedInRequest, operatorAskedToCreateCustomer, deliveryInRequest, operatorStatedNote, requestInEvidence, statedCustomer, statedNote, statedShipping } from './intent.js';
 
 export type LinePatch = OrderDraft['lines'][number] & { op?: 'add' | 'edit' | 'replace' | 'delete' };
 
@@ -184,9 +184,13 @@ export function mergeOrderDraft(input: MergeInput): OrderDraft {
   const keepIncomingCustomer = !input.isNewRequest
     || customerNamedInRequest(named, input.operatorWords, input.attachmentText)
     || (askedCreate && !!incoming.newClient);
-  const clientQuery = keepIncomingCustomer && incoming.clientQuery.trim()
-    ? incoming.clientQuery
-    : (start.clientQuery.trim() ? start.clientQuery : (headerCustomer || (!askedCreate ? incoming.newClient?.name?.trim() ?? '' : '')));
+  // A newClient the operator did not ask to create is a search for that name, but only when this request names it.
+  const proposedName = keepIncomingCustomer && !askedCreate ? incoming.newClient?.name?.trim() ?? '' : '';
+  // A query assembled from stated parts ("Name, P.IVA 123") is searched by the part a customer record can match.
+  const incomingQuery = statedCustomer(incoming.clientQuery, input.operatorWords, input.attachmentText) || incoming.clientQuery;
+  const clientQuery = keepIncomingCustomer && incomingQuery.trim()
+    ? incomingQuery
+    : (start.clientQuery.trim() ? start.clientQuery : (headerCustomer || proposedName));
   const newClient = keepIncomingCustomer && incoming.newClient && (askedCreate || !input.isNewRequest)
     ? incoming.newClient
     : (!input.isNewRequest ? start.newClient : undefined);
@@ -199,7 +203,18 @@ export function mergeOrderDraft(input: MergeInput): OrderDraft {
     : input.isNewRequest ? undefined : start.shippingPrice;
 
   const labelled = statedNote(input.turnWords ?? '') ?? statedNote(input.operatorWords);
-  const fromModel = incoming.notes.trim() ? (statedNote(incoming.notes) ?? incoming.notes.trim()) : '';
+  const proposedNote = incoming.notes.trim() ? (statedNote(incoming.notes) ?? incoming.notes.trim()) : '';
+  // Notes are printed on the order, so they hold only what the operator asked to write (#74).
+  const fromModel = proposedNote && operatorStatedNote(proposedNote, input.operatorWords) ? proposedNote : '';
+  // A delivery address may come from the operator or from attached content; it must be in this request.
+  const delivery = incoming.delivery && deliveryInRequest(incoming.delivery.address, input.operatorWords, input.attachmentText)
+    ? incoming.delivery
+    : input.isNewRequest ? undefined : start.delivery;
+  // The customer's own requests are shown to the operator, not saved: kept when this request contains them.
+  const proposedRequests = incoming.customerRequests.trim();
+  const customerRequests = proposedRequests && requestInEvidence(proposedRequests, input.operatorWords, input.attachmentText)
+    ? proposedRequests
+    : input.isNewRequest ? '' : start.customerRequests;
   const notes = labelled ?? (fromModel || start.notes);
   const draft = draftSchema.parse({
     ...start,
@@ -210,12 +225,14 @@ export function mergeOrderDraft(input: MergeInput): OrderDraft {
     lines,
     ...(shippingPrice !== undefined ? { shippingPrice } : { shippingPrice: undefined }),
     notes,
+    customerRequests,
+    ...(delivery ? { delivery } : { delivery: undefined }),
   });
   if (input.isNewRequest) delete draft.clientId;
   if (!keepIncomingCustomer) {
     delete draft.clientId;
     if (!start.clientQuery.trim()) {
-      draft.clientQuery = headerCustomer || (!askedCreate ? incoming.newClient?.name?.trim() ?? '' : '');
+      draft.clientQuery = headerCustomer;
     }
     if (!start.newClient) delete draft.newClient;
   }

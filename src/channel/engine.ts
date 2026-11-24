@@ -9,7 +9,8 @@ import type { AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
 import { createOrderAgent, groupMemory } from '../assistant/agent.js';
 import { issuesForAgent, type DraftResult } from '../assistant/drafts.js';
-import { startTurn, turnOf } from '../assistant/turn-context.js';
+import { outcomeOf, startTurn, turnOf } from '../assistant/turn-context.js';
+import { copy } from './locales/index.js';
 import { reasoning } from '../assistant/reasoning.js';
 import { draftSchema, type Issue, type OrderDraft } from '../domain/types.js';
 import { productLinesFromReading } from '../documents/product-lines.js';
@@ -47,6 +48,8 @@ export type TurnPrompt = {
   messageWithAttachments?: string;
   openRequest: { kind: 'order' | 'customer'; status: Conversation['status']; draft: OrderDraft; openIssues: ReturnType<typeof issuesForAgent> } | null;
   otherOpenRequest?: string;
+  /** Set only when the model's first answer this turn was empty and called no tool. */
+  previousAttempt?: string;
 };
 /** The draft tools, as a scripted stand-in for the model calls them. */
 export type TurnActions = { order: (draft: OrderDraft) => Promise<unknown>; customer: (draft: OrderDraft) => Promise<unknown>; cancel: () => unknown };
@@ -68,7 +71,9 @@ export function remembered(plan: Pick<ReplyPlan, 'texts' | 'agentText'>) {
 export const replySchema = (fallback: AppConfig['locale'], currency: AppConfig['currency']) => z.object({
   // Chosen before the reply is written, so the reply follows it.
   locale: z.enum(['it', 'en']).describe(`The language operatorWords are written in, unless the operator asked for another. Only words with no language of their own ("ok", a product name) keep the conversation's language; with no cue at all, ${fallback === 'it' ? 'Italian' : 'English'}.`),
-  reply: z.string().describe(`Your own words in that language, shown above any draft. Be concise by default. When a draft preview is shown, let it speak for itself: empty is allowed. Do not repeat its contents or ask about missing fields it already displays. Add text only to answer a direct question, explain a problem, or resolve an ambiguity that the preview and available buttons cannot handle. Never say the draft is ready while prepare-order status is needs. Answer product questions by listing matches, one per line, "name — code — ${currency} net". If no product has every requested detail, say that combination is not in the catalogue, then list related products; never present a related product as the requested item. Never write a draft or summary yourself.`),
+  reply: z.string().describe(`Your own words in that language, shown above any draft. Be concise by default. When a draft preview is shown, let it speak for itself: empty is allowed. Do not repeat its contents or ask about missing fields it already displays. Add text only to answer a direct question, explain a problem, or resolve an ambiguity that the preview and available buttons cannot handle. Answer product questions by listing matches, one per line, "name — code — ${currency} net". If no product has every requested detail, say that combination is not in the catalogue, then list related products; never present a related product as the requested item. Never write a draft or summary yourself.`),
+  // Written after the reply, so it reports what the reply says rather than steering it.
+  changedDraft: z.boolean().describe('True when the reply above says a draft was opened or changed this turn; false for an answer, a question or a cancel. The application checks it against the tools you called.'),
 });
 
 /**
@@ -76,9 +81,9 @@ export const replySchema = (fallback: AppConfig['locale'], currency: AppConfig['
  * fit, and replies. The application renders whatever the APIs last reported as the draft or summary under that reply.
  * `converse` replaces the model with a script, for tests and offline evaluation.
  */
-export function createConversationEngine(config: AppConfig, connector: OrderConnector, storage: LibSQLStore, options: { converse?: Converse; threadTitle?: string; matching?: Parameters<typeof createOrderAgent>[4] } = {}): ConversationEngine & { traceTurn: <T>(id: number, action: () => Promise<T>) => Promise<T>; shutdown: () => Promise<void>; media: (download: Download) => MediaReader } {
+export function createConversationEngine(config: AppConfig, connector: OrderConnector, storage: LibSQLStore, options: { converse?: Converse; threadTitle?: string; matching?: Parameters<typeof createOrderAgent>[4]; onToolCall?: Parameters<typeof createOrderAgent>[5] } = {}): ConversationEngine & { traceTurn: <T>(id: number, action: () => Promise<T>) => Promise<T>; shutdown: () => Promise<void>; media: (download: Download) => MediaReader } {
   const live = options.converse ? { enabled: false, rate: 0 } : liveEvalSettings();
-  const { agent, memory, scorers, matching, drafts, calls } = createOrderAgent(config, connector, storage, live, options.matching);
+  const { agent, memory, scorers, matching, drafts, calls } = createOrderAgent(config, connector, storage, live, options.matching, options.onToolCall);
   const observability = new Observability({ configs: { default: { serviceName: `orderflow-${config.channel.provider}`, exporters: [new MastraStorageExporter()], spanOutputProcessors: [omitMedia] } } });
   const deliveredReply = createDeliveredReplyWorkflow(scorers, live);
   const { mediaReader, formReader } = createMediaAgents(config);
@@ -97,14 +102,40 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
   })().catch(error => { sharedThread = undefined; throw error; });
 
   const lastProductSearchBySender = new Map<string, SearchEvidence>();
+  /** An attachment whose turn opened no request: the operator's next message usually acts on it. Kept for one turn, briefly. */
+  const unopenedAttachmentBySender = new Map<string, { text: string; at: number }>();
+  const UNOPENED_ATTACHMENT_MS = 15 * 60_000;
   const reply = replySchema(config.locale, config.currency);
   const converse: Converse = options.converse ?? (async (prompt, _act, requestContext) => {
     await ensureSharedThread();
-    const response = await agent.generate(JSON.stringify(prompt), {
+    const ask = (input: TurnPrompt) => agent.generate(JSON.stringify(input), {
       tracingContext: tracingContext(), requestContext, maxSteps: 8, providerOptions: reasoning('medium'), structuredOutput: { schema: reply },
       // Recent context only: the configured window (two stored messages per turn), with the open request supplied separately.
       memory: { ...shared, options: { readOnly: true, lastMessages: config.memory.lastMessages } },
     });
+    const silent = (answer: { reply?: string } | undefined) => {
+      const done = outcomeOf(requestContext);
+      return !answer?.reply?.trim() && !done.result && !done.cancel && !done.refused;
+    };
+    // The reply says a draft was opened or changed, but no draft tool ran: the model answered without acting.
+    const unbacked = (answer: { changedDraft?: boolean } | undefined) => {
+      const done = outcomeOf(requestContext);
+      return !!answer?.changedDraft && !done.result && !done.cancel && !done.refused && !operatorAskedToCancel(prompt.operatorWords);
+    };
+    let response = await ask(prompt);
+    const empty = silent(response.object);
+    if (empty || unbacked(response.object)) {
+      // A turn that changed nothing leaves the operator with no answer or no draft: ask once more.
+      console.warn(`${empty ? 'Empty agent turn' : 'Reply claims a draft no tool opened'} (finishReason=${response.finishReason ?? 'unknown'}, steps=${response.steps?.length ?? 0}, text=${JSON.stringify((response.text ?? '').slice(0, 200))}); retrying once.`);
+      response = await ask({ ...prompt, previousAttempt: empty
+        ? 'Your previous answer was empty and called no tool. Act on operatorWords now: call the tool this request needs, or reply in words.'
+        : 'Your previous answer said a draft was opened or changed, but you called no draft tool, so nothing changed. Call prepare-order with what this request gives (missing customer or shipping stay blank), or say in words what stops you.' });
+    }
+    if (silent(response.object) || unbacked(response.object)) {
+      // Still nothing, or still a draft that does not exist: say so rather than stay silent or claim a draft.
+      const locale = response.object?.locale ?? config.locale;
+      return { reply: copy(locale, 'processFailed'), locale };
+    }
     return response.object;
   });
 
@@ -126,7 +157,7 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
       text: orderPreview(result.order, result.totals, it, result.discrepancies, config.currency, {
         ...result.catalogueIncreases,
         context: config.pricing?.catalogueIncreaseContext,
-      }) };
+      }, result.draft.customerRequests) };
     // Matched lines print the catalogue name; unresolved lines keep the original wording.
     const catalogue = result.draft.lines.some(line => line.productId) ? await connector.listProducts().catch(() => []) : [];
     return { order: { ...next, status: 'suspended', issues: result.issues }, text: orderDraft(result.draft, result.issues, it, result.client, config.currency, catalogue) };
@@ -135,10 +166,13 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
   const turn = async (input: TurnInput) => {
     const { request } = input;
     // Evidence for identity matching: this request's conversation so far and this message, kept as its source text.
-    const evidence = appendSource(request?.sourceText, input.text);
+    const unopened = unopenedAttachmentBySender.get(input.senderId);
+    unopenedAttachmentBySender.delete(input.senderId);
+    const carried = !request && unopened && Date.now() - unopened.at < UNOPENED_ATTACHMENT_MS ? unopened.text : undefined;
+    const evidence = appendSource(appendSource(request?.sourceText, carried ?? ''), input.text);
     const operatorWords = appendSource(request?.operatorWords, input.operatorText);
     const attached = attachmentPart(input.text, input.operatorText);
-    const attachmentText = appendSource(request?.attachmentText, attached);
+    const attachmentText = appendSource(appendSource(request?.attachmentText, carried ?? ''), attached);
     const attachmentLines = attached ? productLinesFromReading(input.text) : [];
     const requestContext = evalContext();
     const outcome = startTurn(requestContext, {
@@ -196,6 +230,7 @@ export function createConversationEngine(config: AppConfig, connector: OrderConn
       }), requestContext);
     }
     const { result } = outcome;
+    if (!result && !request && attached && !outcome.refused) unopenedAttachmentBySender.set(input.senderId, { text: attached, at: Date.now() });
     if (!result) return { text: reply, reply, locale, ...(outcome.refused ? { blocked: true } : {}) };
     const replaced = request && result.kind !== kindOf(request) ? request : undefined;
     const rendered = await render(result, {

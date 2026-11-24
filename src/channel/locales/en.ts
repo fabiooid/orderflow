@@ -80,6 +80,7 @@ export const en = {
   draftShipTo: 'Ship to',
   draftDiscount: 'Discount',
   draftNotes: '📝 Notes',
+  draftRequests: '💬 Requests in the message',
   draftToComplete: 'To complete',
   draftQuantityFor: 'quantity for {query}',
   draftPriceOf: 'price of {query}',

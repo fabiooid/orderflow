@@ -145,15 +145,21 @@ export function forAgent(result: DraftResult, revision?: number) {
   const shipping = result.kind === 'order' && result.draft.shippingPrice !== undefined
     ? { status: 'set' as const, amount: result.draft.shippingPrice }
     : undefined;
+  const agentIssues = result.status === 'needs' ? issuesForAgent(result.issues, result.draft) : [];
+  // Blank customer or shipping is visible in the preview for the operator to fill; it is not a question.
+  const blank = result.kind === 'order' && result.status === 'needs'
+    ? [...(!customer && !result.draft.clientId ? ['customer'] : []), ...(!shipping ? ['shipping'] : [])]
+    : [];
+  const blankNote = blank.length ? ` The preview shows ${blank.join(' and ')} blank for the operator to fill: nothing to ask or explain about ${blank.length > 1 ? 'them' : 'it'}.` : '';
   return {
     status: result.status,
     ...(revision !== undefined ? { revision } : {}),
     ...(customer ? { customer } : {}),
     ...(lines ? { lines } : {}),
     ...(shipping ? { shipping } : {}),
-    ...(result.status === 'needs' ? { issues: issuesForAgent(result.issues, result.draft) } : {}),
+    ...(result.status === 'needs' ? { issues: agentIssues } : {}),
     note: result.status === 'needs'
-      ? 'Issues listed here still need a pick or exact name. Never say the draft is ready while status is needs.'
+      ? `${agentIssues.length ? 'Issues listed here still need a pick or exact name.' : 'The draft is shown.'}${blankNote} Never say the draft is ready while status is needs.`
       : result.status === 'existing' ? 'This customer already exists; nothing will be created.'
       : 'Complete.',
   };

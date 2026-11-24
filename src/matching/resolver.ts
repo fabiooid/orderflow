@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { AppConfig } from '../config/schema.js';
 import type { OrderConnector } from '../connector/contract.js';
 import {
-  clientPickLabel, correspondingTesters, explicitLineSizes, isTester, lineWantsTester, matchClients,
+  clientPickLabel, correspondingTesters, customerEvidence, explicitLineSizes, isTester, lineWantsTester, matchClients,
   matchProducts, namedAlternatives, nameInText, normalize, productCodesIn, productIdentitySizes,
   relatedProducts, sameClientIds, searchClients, testerQuery,
 } from '../domain/matching.js';
@@ -66,7 +66,8 @@ const snapshotHash = (candidates: Candidate[]) => hash([...candidates].sort((a, 
 const identityHash = (candidate: Candidate) => { const { aliases: _aliases, ...identity } = candidate; return hash(identity); };
 const has = (text: string, value: string) => !!normalize(value) && ` ${normalize(text)} `.includes(` ${normalize(value)} `);
 const spoken = (context: ResolutionContext) => context.operatorWords?.trim() || context.operatorText;
-const requestEvidence = (context: ResolutionContext) => [context.operatorWords, context.attachmentText].filter(text => text?.trim()).join('\n') || context.operatorText;
+/** Customer evidence for this request: operator words and attachment, without the supplier's own letterhead. */
+const requestEvidence = (context: ResolutionContext) => customerEvidence(context.operatorWords ?? '', context.attachmentText) || context.operatorText;
 const AFFIRM = /^(sì|si|yes|ok|okay|va bene|confermo|quello|quella)\b/i;
 const FILE_CONSENT = /\b(prepara|prepare|crea(?:re)?(?:\s+un)?\s+ordine|create(?:\s+an?)?\s+order|importa|allegat|file|excel|xlsx|this file)\b/i;
 
