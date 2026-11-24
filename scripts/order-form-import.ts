@@ -26,7 +26,7 @@ async function main() {
   const config = await loadAppConfig();
   const connector = connectorMode() === 'demo' ? new DemoConnector() : FattureInCloudConnector.fromToken(config.invoicing.companyId, process.env.FIC_ACCESS_TOKEN ?? '');
   const catalogue = await connector.listProducts();
-  const agent = new Agent({ id: 'order-form-import', name: 'Order form import', model: config.model, instructions: 'You transcribe printed price lists exactly and map them to a product catalogue. Never invent rows or products.' });
+  const agent = new Agent({ id: 'order-form-import', name: 'Order form import', model: config.readerModel ?? config.model, instructions: 'You transcribe printed price lists exactly and map them to a product catalogue. Never invent rows or products.' });
   
   const sheet = (await agent.generate([{ role: 'user', content: [
     { type: 'text', text: `Transcribe this printed price list / order form. List every product row on every page, in printed order. Section titles are not rows.

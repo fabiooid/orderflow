@@ -151,7 +151,7 @@ Notes:
 - Product, VAT and payment IDs are **API IDs**, not product codes or printed document numbers.
 - Country conditions are explicit ISO lists. EU membership is never inferred.
 - Product matching uses names, attributes and optional codes. An exact normalized match wins; otherwise every query term must match, and several matches produce a choice.
-- `transcription.model` (optional, e.g. `openai/gpt-4o-mini-transcribe`) enables voice notes and uses `OPENAI_API_KEY`. Without it, voice notes get a "not enabled" reply. Images and PDFs are read with `model`, which must accept images.
+- `transcription.model` (optional, e.g. `openai/gpt-4o-mini-transcribe`) enables voice notes and uses `OPENAI_API_KEY`. Without it, voice notes get a "not enabled" reply. Images, PDFs and order forms are read with `readerModel` when set, otherwise with `model`; that model must accept images. Set `readerModel` when the chat model's provider rejects your page images (Anthropic, for example, refuses images over 10 MB).
 - `orderSavingEnabled` (default `false`) must be set explicitly before a deployment can save orders.
 - `*.local.json`, `.env`, `.data/` and database files are git-ignored. Keep them that way.
 
