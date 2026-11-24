@@ -60,6 +60,9 @@
   "overrides": {
     "@mastra/evals": {
       "vitest": "$vitest"
+    },
+    "@ai-sdk/provider-utils": {
+      "undici": "^6.29.1"
     }
   }
 }
