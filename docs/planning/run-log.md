@@ -43,3 +43,33 @@ Live conversations, five trials each (55 total), empty-lead checks on routine pr
 | catalogue question mid-order (must answer) | 5/5 |
 
 Overall 35/55. Failures were almost all “draft prepared / review the preview” recaps, plus Italian unnamed last-turn questions about blank client/shipping. Note `nota:` prefix did not reappear in stored notes. This is a small nondeterministic sample, not a reliability percentage. Do not treat as ready for empty-lead production behaviour.
+
+## 24 November 2026 — Haiku vs GPT-5-mini after the customer-source fixes (matcher-off)
+
+Code: main after #84 (customer from the request, `customerRequests`, empty and false-claim retry) and #85 (`readerModel`). Node 22, `MATCHER_MODE=off`, `EVALS_ENABLED=false`. Acceptance and conversations ran against the fictional DemoConnector. Nothing was saved or sent.
+
+| Suite | `anthropic/claude-haiku-5-5` | `openai/gpt-5-mini` |
+| --- | --- | --- |
+| `eval:acceptance` | 7/7 | 7/7 |
+| `eval:conversations` (47 cases, one trial) | 41/47 | 39/47 |
+| `eval:orderforms` (one private scanned form, 3 runs) | 0 products read: every page image refused (`image exceeds 10 MB maximum`, about 16 MB sent) | coverage 1.00, 0.92 and 1.00; one wrong certain line in run 3 |
+
+Haiku's conversation misses:
+
+- An unmatched translated product name ("candela" for Linen candle, 2 cases).
+- A close customer presented as selected after a failed retry.
+- 3 cases of text above the preview.
+
+GPT's misses:
+
+- "saponi" not leading to the hand wash.
+- 7 cases of text above the preview.
+
+A focused 4-case × 5-trial comparison on the same code (customer from an attachment, an unnamed new order, a code written with the operator's own wording) gave:
+
+- **Haiku 16/20:** every draft opened, correct customer 10/10, no false draft claims shown.
+- **GPT 12/20:** all fields right.
+
+All remaining failures in that comparison were text above the preview.
+
+The deployment uses Haiku for chat with `readerModel: openai/gpt-5-mini`, because Anthropic refuses page images over 10 MB. This is a small nondeterministic sample, not a reliability percentage.
