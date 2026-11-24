@@ -172,8 +172,8 @@ npm run eval:orderforms -- private/evals/order-forms.json --runs 3
 ```
 
 A dataset lists real filled-in forms (file, page, expected product ID → quantity), so
-keep it out of git. Each run makes model calls. Run it after changing the reading
-prompt, the model or a template.
+keep it out of git. Each run makes model calls and reads with `readerModel` (or `model`
+when it is not set). Run it after changing the reading prompt, the reader model or a template.
 
 ## Before production: fictional acceptance conversations
 
