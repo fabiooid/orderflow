@@ -99,25 +99,29 @@ function fieldStatus(issues: Issue[] | undefined, field: string, accepted: boole
   return issue.matchingStatus === 'no-match' ? 'unsupported' : 'unconfirmed';
 }
 
-export const issuesForAgent = (issues: Issue[]) => issues.map(i => ({
-  field: i.field, problem: i.message,
-  ...(i.candidates?.length ? { candidates: i.candidates.map(c => c.label) } : {}),
-}));
+/** Issues the agent still needs: picks, exact names, unsupported products. Preview-visible blank customer or shipping stay on status, not as questions. */
+export const issuesForAgent = (issues: Issue[], draft?: Pick<OrderDraft, 'clientQuery' | 'newClient' | 'shippingPrice'>) => issues.flatMap(i => {
+  const previewBlankClient = i.field === 'client' && !i.candidates?.length && !(draft?.clientQuery?.trim() || draft?.newClient);
+  const previewBlankShipping = i.field === 'shippingPrice' && draft?.shippingPrice === undefined;
+  if (previewBlankClient || previewBlankShipping) return [];
+  return [{ field: i.field, problem: i.message, ...(i.candidates?.length ? { candidates: i.candidates.map(c => c.label) } : {}) }];
+});
 
 /** The part of a result the agent reads back. Record IDs stay with the application. */
 export function forAgent(result: DraftResult, revision?: number) {
   const issues = result.status === 'needs' ? result.issues : undefined;
   const customerStatus = fieldStatus(issues, 'client', result.kind === 'order' && !!result.client);
+  const customerCandidates = issues?.find(i => i.field === 'client')?.candidates?.map(c => c.label);
   const customer = result.kind === 'order' && result.client
     ? { status: 'accepted' as const, name: result.client.name, ...(result.client.city ? { city: result.client.city } : {}), ...(result.client.vatNumber ? { vatNumber: result.client.vatNumber } : {}) }
-    : result.draft.clientQuery.trim()
+    : result.kind === 'order' && result.draft.clientQuery.trim()
       ? {
         status: customerStatus,
         query: result.draft.clientQuery,
-        ...(issues?.find(i => i.field === 'client')?.candidates?.length ? { candidates: issues.find(i => i.field === 'client')!.candidates!.map(c => c.label) } : {}),
-        action: customerStatus === 'accepted' ? undefined : 'Ask the operator to pick or type the legal name or VAT.',
+        ...(customerCandidates?.length ? { candidates: customerCandidates } : {}),
+        ...(customerStatus === 'accepted' || customerCandidates?.length ? {} : { action: 'Needs the legal name or VAT.' }),
       }
-      : { status: 'missing' as const, action: 'The draft already shows a blank customer. Do not ask who it is. Do not offer, search for, or confirm a name from earlier messages, a previous request, or letterhead.' };
+      : undefined;
   const lines = result.kind === 'order'
     ? result.draft.lines.map((line, index) => {
       const field = `lines.${index}`;
@@ -131,26 +135,26 @@ export function forAgent(result: DraftResult, revision?: number) {
         status,
         ...(status === 'accepted' ? {} : {
           ...(issue?.candidates?.length ? { candidates: issue.candidates.map(c => c.label) } : {}),
-          action: status === 'unsupported' ? 'Look the catalogue up; do not send a different product as the requested item.' : 'Ask the operator to pick, or send a more specific code.',
+          ...(status === 'unsupported' ? { action: 'Not in the catalogue as requested. Do not send a different product as the requested item.' }
+            : issue?.candidates?.length ? {}
+            : { action: 'Needs a more specific code or name.' }),
         }),
       };
     })
     : undefined;
-  const shipping = result.kind === 'order'
-    ? result.draft.shippingPrice === undefined
-      ? { status: 'unknown' as const, action: 'The draft already shows blank delivery. Do not ask the operator to confirm a charge. Do not propose 0, a list price, last paid, or an amount from earlier messages unless they stated a charge this request.' }
-      : { status: 'set' as const, amount: result.draft.shippingPrice }
+  const shipping = result.kind === 'order' && result.draft.shippingPrice !== undefined
+    ? { status: 'set' as const, amount: result.draft.shippingPrice }
     : undefined;
   return {
     status: result.status,
     ...(revision !== undefined ? { revision } : {}),
-    customer,
+    ...(customer ? { customer } : {}),
     ...(lines ? { lines } : {}),
     ...(shipping ? { shipping } : {}),
-    ...(result.status === 'needs' ? { issues: issuesForAgent(result.issues) } : {}),
+    ...(result.status === 'needs' ? { issues: issuesForAgent(result.issues, result.draft) } : {}),
     note: result.status === 'needs'
-      ? 'Shown to the operator with these points. Use customer.status, lines[].status and shipping.status: accepted is already selected; unconfirmed and ambiguous still need a pick or exact name; unsupported is not in the catalogue as requested. shipping.status unknown is not 0; amount 0 means no charge. Missing customer and unknown shipping are already visible on the draft: do not ask the operator to confirm those blanks or propose a guessed customer, 0, a list price, last paid, or an earlier-chat amount. Ask about issues that still need a pick or exact name. Never say the draft is ready while status is needs.'
+      ? 'Issues listed here still need a pick or exact name. Never say the draft is ready while status is needs.'
       : result.status === 'existing' ? 'This customer already exists; nothing will be created.'
-      : 'Complete, and shown to the operator for review. Do not ask them to confirm a change they already instructed.',
+      : 'Complete.',
   };
 }

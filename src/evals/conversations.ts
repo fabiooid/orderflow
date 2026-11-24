@@ -90,7 +90,7 @@ const readyCustomerCorrection = all(neverGaveUp, keptReadyLines, switchedCustome
 // Customer identity from an attachment is checked; leftover recap notes are not, except in the dedicated FAB-56 cases below.
 const attachmentOrderFor = (id: string) => all(neverGaveUp, keptAttachmentLines, orderFor(id));
 const recapNote = /Prepared from attached conversation/i;
-const previewHeading = /Anteprima ordine|Bozza ordine|📦 Order preview|📝 Draft order|📝 Bozza ordine/;
+const previewHeading = /📦 Anteprima ordine|📝 Bozza ordine|📦 Order preview|📝 Draft order|Anteprima ordine|Bozza ordine/;
 /** Agent words above the application preview, or the whole reply when no preview was shown. */
 const agentLead = (text: string) => {
   const at = text.search(previewHeading);
@@ -101,7 +101,9 @@ const askedToConfirmGivenInstruction = (text: string) =>
   /vuoi aggiungere|want (?:me )?to add|should I add|vuoi (?:applicare|cambiare)|want (?:me )?to (?:apply|change)|keep (?:the )?(?:existing )?(?:shipping|delivery)|mantenere (?:le )?spese|altre modifiche prima di salvare|other changes before (?:you )?save/i.test(agentLead(text));
 /** The live bug: asking to confirm a blank client or a guessed shipping amount the draft already shows as empty. */
 const askedToConfirmBlankCustomerOrShipping = (text: string) =>
-  /chi è il cliente|who is the (?:customer|client)|use this (?:client|customer)|confermi (?:le )?spese|confirm (?:the )?(?:delivery|shipping)|listino|list price|catalogue default|spese di consegna|delivery (?:charge|at|of)|keep (?:the )?(?:existing )?(?:shipping|delivery)/i.test(agentLead(text));
+  /chi è il cliente|who is the (?:customer|client)|nome legale|legal name or vat|use this (?:client|customer)|has no customer|no customer was named|customer is missing|add (?:a |the )?customer|provide (?:a |the )?customer(?: name| or vat)?|fornisci.{0,40}cliente|cliente (?:è )?mancante|manca il cliente|confermi (?:le )?spese|confirm (?:the )?(?:delivery|shipping)|listino|list price|catalogue default|spese di consegna|importo.{0,40}(?:consegna|spedizion)|what (?:is |are )?(?:the )?(?:delivery|shipping) (?:charge|amount|cost)|delivery (?:charge|at|of)|keep (?:the )?(?:existing )?(?:shipping|delivery)/i.test(agentLead(text));
+/** Asking above a preview about gaps or values it already shows, including a question mark in the lead. */
+const askedAboutPreviewGaps = (text: string) => /\?/.test(agentLead(text)) || askedToConfirmBlankCustomerOrShipping(text) || askedToConfirmGivenInstruction(text);
 /** A later unnamed file or order after an earlier chat had a different customer and a shipping amount. */
 const unnamedAfterEarlierChat: Check = o => {
   const text = last(o);
@@ -114,8 +116,35 @@ const unnamedAfterEarlierChat: Check = o => {
     ...expect(!o.open?.issues?.some(i => i.field === 'client' && i.candidates?.length),
       `offered a guessed customer as a choice: ${offered}`),
     ...expect(!/example studio/i.test(text), `asked to confirm or use a previous-chat customer: ${text.split('\n')[0]}`),
-    ...expect(!askedToConfirmBlankCustomerOrShipping(text), `asked to confirm a blank client or guessed shipping: ${agentLead(text).split('\n')[0]}`),
+    ...expect(!askedToConfirmBlankCustomerOrShipping(text), `asked about fields the preview already shows: ${agentLead(text).split('\n')[0]}`),
     ...expect(previewHeading.test(text), 'the updated preview was not shown'),
+  ];
+};
+/** Routine preview: no agent prose above it. */
+const previewSpeaksForItself: Check = o => {
+  const text = last(o);
+  const lead = agentLead(text).trim();
+  return [
+    ...expect(previewHeading.test(text), 'the updated preview was not shown'),
+    ...expect(!lead, `unnecessary text above the preview: ${lead.split('\n')[0]}`),
+  ];
+};
+const silentPreviews: Check = o => o.replies.flatMap((text, index) => {
+  if (!previewHeading.test(text)) return [];
+  const lead = agentLead(text).trim();
+  return expect(!lead, `turn ${index + 1} had unnecessary text above the preview: ${lead.split('\n')[0]}`);
+});
+/** Unmatched product: explain that line, do not also talk about preview-visible blanks. */
+const explainedUnmatchedProductOnly: Check = o => {
+  const text = last(o);
+  const lead = agentLead(text);
+  const line = o.open?.issues?.find(i => i.field.startsWith('lines'));
+  return [
+    ...expect(!!line, 'did not keep the unmatched product as an issue'),
+    ...expect(/not in the catalogue|non .{0,40}catalogo|can(?:not|'t) match|non (?:riesco|trovo)|related products|prodotti correlati|which (?:exact )?catalogue|quale .{0,20}catalogo/i.test(lead)
+      || /not in the catalogue/i.test(line?.message ?? ''),
+      `did not explain the unmatched product: ${lead.split('\n')[0]}`),
+    ...expect(!askedToConfirmBlankCustomerOrShipping(text), `mentioned blank customer or shipping while explaining the product: ${lead.split('\n')[0]}`),
   ];
 };
 /** The printed note is only the instruction the operator asked for, in their language, with no recap of the draft. */
@@ -415,6 +444,34 @@ export const conversationCases: ConversationCase[] = [
         text: 'Yes, prepare an order from this.',
         attachment: [
           'Letterhead (supplier, not the customer): Northwind Supplies Ltd, Harbour Lane 1, Example City, IT, P.IVA IT000111222, orders@northwind-supplies.invalid',
+          '2 x Pebble hand wash 250 ml',
+        ].join('\n'),
+      },
+    ],
+    scripted: [
+      draftSchema.parse({
+        clientQuery: 'Example Studio',
+        lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }],
+        shippingPrice: 8,
+      }),
+      'cancel',
+      draftSchema.parse({ lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }] }),
+    ],
+    check: all(neverGaveUp, unnamedAfterEarlierChat, silentPreviews, o => [
+      ...expect(!/northwind supplies/i.test(o.open?.draft.clientQuery ?? ''), `used letterhead as customer: ${o.open?.draft.clientQuery}`),
+      ...expect(!!o.open?.draft.lines.some(l => /pebble/i.test(l.query) && l.quantity === 2), 'the attached hand wash was lost'),
+    ]),
+  },
+  {
+    id: 'new-file-unmatched-product-does-not-ask-blank-customer',
+    // Same unnamed file after an earlier customer, but the attached line is not in the catalogue.
+    turns: [
+      { text: 'ordine per Example Studio: 2 Pebble hand wash 250 ml, spedizione 8 euro' },
+      { text: 'lascia stare, non serve più' },
+      {
+        text: 'Yes, prepare an order from this.',
+        attachment: [
+          'Letterhead (supplier, not the customer): Northwind Supplies Ltd, Harbour Lane 1, Example City, IT, P.IVA IT000111222, orders@northwind-supplies.invalid',
           'SKU-100 | Hand cream 100 ml | Qty: 2',
         ].join('\n'),
       },
@@ -428,7 +485,8 @@ export const conversationCases: ConversationCase[] = [
       'cancel',
       draftSchema.parse({ lines: [{ query: 'Hand cream 100 ml SKU-100', quantity: 2 }] }),
     ],
-    check: all(neverGaveUp, unnamedAfterEarlierChat, o => [
+    check: all(neverGaveUp, unnamedAfterEarlierChat, explainedUnmatchedProductOnly, o => [
+      ...expect(!agentLead(o.replies[0] ?? '').trim(), `unnecessary text above the complete draft: ${agentLead(o.replies[0] ?? '').split('\n')[0]}`),
       ...expect(!/northwind supplies/i.test(o.open?.draft.clientQuery ?? ''), `used letterhead as customer: ${o.open?.draft.clientQuery}`),
       ...expect(!!o.open?.draft.lines.some(l => /SKU-100|hand cream/i.test(l.query) && l.quantity === 2), 'the filled cream line was lost'),
     ]),
@@ -450,13 +508,32 @@ export const conversationCases: ConversationCase[] = [
       'cancel',
       draftSchema.parse({ lines: [{ query: 'Pebble hand wash 250 ml', quantity: 3 }] }),
     ],
-    check: all(neverGaveUp, unnamedAfterEarlierChat, o =>
+    check: all(neverGaveUp, unnamedAfterEarlierChat, silentPreviews, o =>
+      expect(!!o.open?.draft.lines.some(l => /pebble/i.test(l.query) && l.quantity === 3), 'the new order lines were lost')),
+  },
+  {
+    id: 'new-order-unnamed-italian',
+    turns: [
+      { text: 'ordine per Example Studio: 2 Pebble hand wash 250 ml, spedizione 8 euro' },
+      { text: 'lascia stare, non serve più' },
+      { text: 'Prepara un ordine da questo elenco: 3 Pebble hand wash 250 ml' },
+    ],
+    scripted: [
+      draftSchema.parse({
+        clientQuery: 'Example Studio',
+        lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }],
+        shippingPrice: 8,
+      }),
+      'cancel',
+      draftSchema.parse({ lines: [{ query: 'Pebble hand wash 250 ml', quantity: 3 }] }),
+    ],
+    check: all(neverGaveUp, unnamedAfterEarlierChat, silentPreviews, o =>
       expect(!!o.open?.draft.lines.some(l => /pebble/i.test(l.query) && l.quantity === 3), 'the new order lines were lost')),
   },
   {
     id: 'english-request',
     turns: [{ text: 'Prepare an order for Northwind Bistro: 3 Linen candle 200 g, delivery 8 euros' }],
-    check: all(neverGaveUp, orderFor(northwind.id), o => expect(last(o).includes('📦 Order preview'), 'no English order preview')),
+    check: all(neverGaveUp, orderFor(northwind.id), previewSpeaksForItself, o => expect(last(o).includes('📦 Order preview'), 'no English order preview')),
   },
   {
     id: 'missing-combination-offers-alternatives',
@@ -596,13 +673,11 @@ export const conversationCases: ConversationCase[] = [
         notes: 'lasciare al banco',
       }),
     ],
-    check: all(neverGaveUp, namedFor('201', /example studio/i), onlyRequestedNote('lasciare al banco'), o => {
+    check: all(neverGaveUp, namedFor('201', /example studio/i), onlyRequestedNote('lasciare al banco'), silentPreviews, previewSpeaksForItself, o => {
       const text = last(o);
       return [
         ...expect(o.open?.draft.shippingPrice === 0, `shipping changed to ${o.open?.draft.shippingPrice}`),
         ...expect(o.open?.status !== 'saved' && o.open?.status !== 'saving', `saved without confirm (${o.open?.status ?? 'none'})`),
-        ...expect(!askedToConfirmGivenInstruction(text), `asked to confirm an instruction already given: ${agentLead(text).split('\n')[0]}`),
-        ...expect(previewHeading.test(text), 'the updated preview was not shown'),
         ...expect(/lasciare al banco/i.test(text), 'the updated preview did not show the note'),
       ];
     }),
@@ -626,16 +701,36 @@ export const conversationCases: ConversationCase[] = [
         shippingPrice: 0,
       }),
     ],
-    check: all(neverGaveUp, namedFor('201', /example studio/i), notesStayEmpty, o => {
-      const text = last(o);
+    check: all(neverGaveUp, namedFor('201', /example studio/i), notesStayEmpty, silentPreviews, previewSpeaksForItself, o => {
       const line = o.open?.draft.lines.find(l => l.productId === '101' || /pebble/i.test(l.query));
       return [
         ...expect(line?.quantity === 5, `quantity is ${line?.quantity ?? 'missing'}, expected 5`),
         ...expect(o.open?.draft.shippingPrice === 0, `shipping changed to ${o.open?.draft.shippingPrice}`),
         ...expect(o.open?.status !== 'saved' && o.open?.status !== 'saving', `saved without confirm (${o.open?.status ?? 'none'})`),
-        ...expect(!askedToConfirmGivenInstruction(text), `asked to confirm an instruction already given: ${agentLead(text).split('\n')[0]}`),
-        ...expect(previewHeading.test(text), 'the updated preview was not shown'),
       ];
     }),
+  },
+  {
+    id: 'apply-clear-shipping-on-open-draft',
+    // Named customer, unnamed delivery, then a clear shipping amount: apply it and let the preview speak.
+    turns: [
+      { text: 'Prepare an order for Example Studio: 2 Pebble hand wash 250 ml' },
+      { text: 'delivery 8 euros' },
+    ],
+    scripted: [
+      draftSchema.parse({
+        clientQuery: 'Example Studio',
+        lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }],
+      }),
+      draftSchema.parse({
+        clientQuery: 'Example Studio',
+        lines: [{ query: 'Pebble hand wash 250 ml', quantity: 2 }],
+        shippingPrice: 8,
+      }),
+    ],
+    check: all(neverGaveUp, namedFor('201', /example studio/i), notesStayEmpty, silentPreviews, previewSpeaksForItself, o => [
+      ...expect(o.open?.draft.shippingPrice === 8, `shipping is ${o.open?.draft.shippingPrice}, expected 8`),
+      ...expect(o.open?.status !== 'saved' && o.open?.status !== 'saving', `saved without confirm (${o.open?.status ?? 'none'})`),
+    ]),
   },
 ];

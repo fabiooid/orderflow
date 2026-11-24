@@ -440,6 +440,10 @@ it('keeps explicit-only notes and does not invent them from an attachment', asyn
     base: merged, incoming: draftSchema.parse({ notes: 'hold at desk' }), operatorWords: 'nota: hold at desk', isNewRequest: false,
   });
   expect(noted.notes).toBe('hold at desk');
+  const labelled = mergeOrderDraft({
+    base: merged, incoming: draftSchema.parse({ notes: 'nota: hold at desk' }), operatorWords: 'nota: hold at desk', isNewRequest: false,
+  });
+  expect(labelled.notes).toBe('hold at desk');
 });
 
 it('matches the preview: needs never looks ready, and a needs draft cannot be saved', async () => {

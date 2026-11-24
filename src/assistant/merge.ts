@@ -1,7 +1,7 @@
 import { draftSchema, type OrderDraft } from '../domain/types.js';
 import { lineWantsTester, normalize, testerRestatementOf } from '../domain/matching.js';
 import type { ReadingLine } from '../documents/product-lines.js';
-import { customerNamedInRequest, operatorAskedToCreateCustomer, statedShipping } from './intent.js';
+import { customerNamedInRequest, operatorAskedToCreateCustomer, statedNote, statedShipping } from './intent.js';
 
 export type LinePatch = OrderDraft['lines'][number] & { op?: 'add' | 'edit' | 'replace' | 'delete' };
 
@@ -198,7 +198,9 @@ export function mergeOrderDraft(input: MergeInput): OrderDraft {
     : !input.isNewRequest && incoming.shippingPrice !== undefined ? incoming.shippingPrice
     : input.isNewRequest ? undefined : start.shippingPrice;
 
-  const notes = incoming.notes.trim() ? incoming.notes : start.notes;
+  const labelled = statedNote(input.turnWords ?? '') ?? statedNote(input.operatorWords);
+  const fromModel = incoming.notes.trim() ? (statedNote(incoming.notes) ?? incoming.notes.trim()) : '';
+  const notes = labelled ?? (fromModel || start.notes);
   const draft = draftSchema.parse({
     ...start,
     ...incoming,

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { clientSearchNamedThisTurn, statedShipping } from '../src/assistant/intent.js';
+import { clientSearchNamedThisTurn, statedNote, statedShipping } from '../src/assistant/intent.js';
 import { testerRestatementOf } from '../src/domain/matching.js';
 
 it('reads no-charge and amount statements from Italian or English wording, and the last statement wins', () => {
@@ -16,6 +16,14 @@ it('reads no-charge and amount statements from Italian or English wording, and t
   expect(statedShipping('niente consegna', 'spedizione 8')).toBe(8);
   expect(statedShipping('spedizione 8 euro', 'niente consegna')).toBe(0);
   expect(statedShipping('')).toBeUndefined();
+});
+
+it('reads a labelled note without the role word', () => {
+  expect(statedNote('nota: lasciare al banco')).toBe('lasciare al banco');
+  expect(statedNote('note: ship in January')).toBe('ship in January');
+  expect(statedNote('ordine per Example Studio, spedizione 8 euro, nota: Spedire a gennaio')).toBe('Spedire a gennaio');
+  expect(statedNote('change the quantity to 5')).toBeUndefined();
+  expect(statedNote('')).toBeUndefined();
 });
 
 it('grounds a client search in this message and ignores a previous-chat name', () => {
